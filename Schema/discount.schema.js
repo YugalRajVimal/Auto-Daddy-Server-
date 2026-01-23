@@ -15,18 +15,10 @@ const discountSchema = new mongoose.Schema({
     required: true,
     unique: true
   },
-  validityDays: {
-    type: Number,
-    min: 1,
-    default: 1
-  },
   createdAt: {
     type: Date,
     default: Date.now
   },
-  // Optionally, associate coupon with patient, booking, or package, etc.
-  // patientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Patient' },
-  // bookingId: { type: mongoose.Schema.Types.ObjectId, ref: 'Booking' }
 });
 
 const DiscountModel = mongoose.model("Discount", discountSchema);
