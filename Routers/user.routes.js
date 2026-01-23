@@ -33,4 +33,5 @@ userRouter.get("/vehicles", jwtAuth, (req, res) => { userController.fetchAllVehi
 
 
 
+
 export default userRouter;
