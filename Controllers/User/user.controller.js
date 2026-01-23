@@ -1,0 +1,346 @@
+import { User } from "../../Schema/user.schema.js";
+import { VehicleModel } from "../../Schema/vehicles.schema.js";
+
+
+class UserController {
+
+    completeProfile = async (req, res) => {
+        try {
+            // Ensure that the controller is behind jwtAuth middleware so req.user exists
+            const { id } = req.user || {};
+
+            // Get fields directly from req.body (name, email, pincode, role, address)
+            const { name, email, pincode, role, address } = req.body;
+
+            // All fields are mandatory (including address now)
+            if (!name || !email || !pincode || !role || !address) {
+                return res.status(400).json({ message: "All fields (name, email, pincode, role, address) are required." });
+            }
+
+            // Only valid role is 'carowner'
+            const validRoles = ["carowner"];
+            if (!validRoles.includes(role)) {
+                return res.status(400).json({ message: "Invalid role provided. Allowed roles: carowner." });
+            }
+
+            if (!id) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            // Find user by id
+            const user = await User.findById(id);
+            if (!user) {
+                return res.status(404).json({ message: "User not found." });
+            }
+
+            // Check if profile is already complete
+            if (user.isProfileComplete) {
+                return res.status(400).json({ message: "Profile already completed." });
+            }
+
+            // All fields are mandatory, so no need to check for undefined, update directly
+            const profileUpdates = {
+                name,
+                email,
+                pincode,
+                role,
+                address,
+                isProfileComplete: true
+            };
+
+            // Update and return user
+            const updatedUser = await User.findByIdAndUpdate(
+                id,
+                { $set: profileUpdates },
+                { new: true }
+            ).lean();
+
+            if (!updatedUser) {
+                return res.status(500).json({ message: "Failed to update profile." });
+            }
+
+            return res.status(200).json({
+                message: "Profile completed successfully.",
+                user: {
+                    _id: updatedUser._id,
+                    name: updatedUser.name,
+                    email: updatedUser.email,
+                    pincode: updatedUser.pincode,
+                    role: updatedUser.role,
+                    address: updatedUser.address,
+                    isProfileComplete: updatedUser.isProfileComplete,
+                }
+            });
+
+        } catch (error) {
+            console.error("[completeProfile] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    };
+
+    getProfileDetails = async (req, res) => {
+        try {
+            const id = req.user?.id;
+            if (!id) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            const user = await User.findById(id).lean();
+
+            if (!user) {
+                return res.status(404).json({ message: "User not found." });
+            }
+
+            const {
+                name,
+                email,
+                phone,
+                countryCode,
+                pincode,
+                address,
+                favoriteAutoShops
+            } = user;
+
+            return res.status(200).json({
+                name,
+                email,
+                phone,
+                countryCode,
+                pincode,
+                address,
+                favoriteAutoShopsIds:favoriteAutoShops
+            });
+
+        } catch (error) {
+            console.error("[getProfileDetails] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    }
+
+    toggleAutoShopFav = async (req, res) => {
+        try {
+            const userId = req.user?.id;
+            const { autoShopId } = req.body;
+
+            if (!userId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            if (!autoShopId) {
+                return res.status(400).json({ message: "Missing autoShopId" });
+            }
+
+            // Assuming the user schema has a 'favoriteAutoShops' array field
+            const user = await User.findById(userId);
+
+            if (!user) {
+                return res.status(404).json({ message: "User not found." });
+            }
+
+            user.favoriteAutoShops = user.favoriteAutoShops || [];
+            const favIndex = user.favoriteAutoShops.indexOf(autoShopId);
+
+            let message;
+            let action;
+            if (favIndex !== -1) {
+                // Remove from favorites
+                user.favoriteAutoShops.splice(favIndex, 1);
+                message = "Auto shop removed from favorites.";
+                action = "removed";
+            } else {
+                // Add to favorites
+                user.favoriteAutoShops.push(autoShopId);
+                message = "Auto shop added to favorites.";
+                action = "added";
+            }
+            await user.save();
+
+            return res.status(200).json({ 
+                success: true, 
+                message,
+                action,
+                favoriteAutoShops: user.favoriteAutoShops 
+            });
+
+        } catch (error) {
+            console.error("[toggleAutoShopFav] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    }
+
+    getFavAutoShops = async (req, res) => {
+        try {
+            const id = req.user?.id;
+            if (!id) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            // Populate favoriteAutoShops when fetching user
+            const user = await User.findById(id)
+                .populate('favoriteAutoShops')
+                .lean();
+
+            if (!user) {
+                return res.status(404).json({ message: "User not found." });
+            }
+
+            const {
+             
+                favoriteAutoShops
+            } = user;
+
+            return res.status(200).json({
+                favoriteAutoShops: favoriteAutoShops || []
+            });
+
+        } catch (error) {
+            console.error("[getProfileDetails] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    }
+
+    // --------- VEHICLE CRUD Operations ----------
+
+    // Add a new vehicle for the authenticated user (car owner)
+
+    addVehicle = async (req, res) => {
+        const session = await VehicleModel.startSession();
+        session.startTransaction();
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            const { licensePlateNo, licensePlateImagePath, vinNo, make, year, odometerReading, carImage } = req.body;
+
+            if (!licensePlateNo || !vinNo || !make?.name || !make?.model || !year) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({ message: "Required vehicle fields missing." });
+            }
+
+            // Create the new vehicle inside the transaction
+            const newVehicle = await VehicleModel.create([{
+                licensePlateNo,
+                licensePlateImagePath: licensePlateImagePath || null,
+                vinNo,
+                make,
+                year,
+                odometerReading: odometerReading || 0,
+                carImage: carImage || null,
+                owner: userId // if schema extended for ownership
+            }], { session });
+
+            // Add the new vehicle's _id to the user's myVehicles array
+            await User.findByIdAndUpdate(
+                userId,
+                { $push: { myVehicles: newVehicle[0]._id } },
+                { session }
+            );
+
+            await session.commitTransaction();
+            session.endSession();
+
+            // Now fetch the updated user with the vehicles populated via myVehicles
+            const updatedUser = await User.findById(userId)
+                .populate('myVehicles')
+                .lean();
+
+            return res.status(201).json({
+                success: true,
+                message: "Vehicle added successfully.",
+                vehicle: newVehicle[0],
+                myVehicles: updatedUser?.myVehicles || []
+            });
+        } catch (error) {
+            await session.abortTransaction();
+            session.endSession();
+            console.error("[addVehicle] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    };
+    // Edit/update an existing vehicle
+    editVehicle = async (req, res) => {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+            const { vehicleId } = req.params;
+            if (!vehicleId) {
+                return res.status(400).json({ message: "Vehicle ID is required." });
+            }
+
+            // Only allow update if user owns the vehicle (if ownership modeled)
+            // For now, assuming only "by ID" and not multi-tenant check
+            
+            const updateFields = {};
+            [
+                "licensePlateNo",
+                "licensePlateImagePath",
+                "vinNo",
+                "make",
+                "year",
+                "odometerReading",
+                "carImage"
+            ].forEach(field => {
+                if (req.body[field] !== undefined) updateFields[field] = req.body[field];
+            });
+
+            const updatedVehicle = await VehicleModel.findByIdAndUpdate(
+                vehicleId,
+                { $set: updateFields },
+                { new: true }
+            );
+
+            if (!updatedVehicle) {
+                return res.status(404).json({ message: "Vehicle not found." });
+            }
+            return res.status(200).json({
+                success: true,
+                message: "Vehicle updated successfully.",
+                vehicle: updatedVehicle
+            });
+        } catch (error) {
+            console.error("[editVehicle] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    };
+
+    // Fetch all vehicles (optionally belonging to the current user)
+    fetchAllVehicles = async (req, res) => {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            // Fetch user's vehicles via their myVehicles array
+            const user = await User.findById(userId).lean();
+            if (!user) {
+                return res.status(404).json({ message: "User not found." });
+            }
+
+            // If there are no vehicles, return an empty array
+            if (!user.myVehicles || !Array.isArray(user.myVehicles) || user.myVehicles.length === 0) {
+                return res.status(200).json({ vehicles: [] });
+            }
+
+            // Find all vehicles whose IDs are in user.myVehicles
+            const vehicles = await VehicleModel.find({ _id: { $in: user.myVehicles } }).lean();
+
+            return res.status(200).json({
+                vehicles
+            });
+        } catch (error) {
+            console.error("[fetchAllVehicles] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    };
+
+}
+
+export default UserController;
