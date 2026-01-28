@@ -152,7 +152,9 @@ class AuthController {
 
         return res.status(200).json({
           message: "Account verified successfully",
-          token
+          token,
+          isProfileComplete: user.isProfileComplete,
+          role: user.role
         });
 
       } catch (error) {
