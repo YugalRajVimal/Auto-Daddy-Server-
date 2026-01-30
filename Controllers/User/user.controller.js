@@ -1,3 +1,4 @@
+import { deleteUploadedFiles } from "../../middlewares/fileDelete.middleware.js";
 import { User } from "../../Schema/user.schema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
 
@@ -203,6 +204,8 @@ class UserController {
 
     // Add a new vehicle for the authenticated user (car owner)
 
+
+
     addVehicle = async (req, res) => {
         const session = await VehicleModel.startSession();
         session.startTransaction();
@@ -211,57 +214,100 @@ class UserController {
             if (!userId) {
                 await session.abortTransaction();
                 session.endSession();
+                // Clean up uploaded files if user not authorized
+                deleteUploadedFiles(req.files);
                 return res.status(401).json({ message: "Unauthorized" });
             }
 
-            const { licensePlateNo, licensePlateImagePath, vinNo, make, year, odometerReading, carImage } = req.body;
+            // Fetch vehicle fields directly (not wrapped in make)
+            const { licensePlateNo, vinNo, name, model, year, odometerReading } = req.body;
 
-            if (!licensePlateNo || !vinNo || !make?.name || !make?.model || !year) {
+            // Get uploaded image paths from req.files (multer's upload.fields)
+            const licensePlateFrontImagePath =
+                req.files?.licensePlateFrontImage?.[0]?.path || null;
+            const licensePlateBackImagePath =
+                req.files?.licensePlateBackImage?.[0]?.path || null;
+            const carImages =
+                req.files?.carImages?.map(file => file.path) || [];
+
+            // Validate required fields directly
+            if (
+                !licensePlateNo ||
+                !vinNo ||
+                !name ||
+                !model ||
+                !year
+            ) {
                 await session.abortTransaction();
                 session.endSession();
+                // Delete all uploaded files for this request if validation fails
+                deleteUploadedFiles(req.files);
                 return res.status(400).json({ message: "Required vehicle fields missing." });
             }
 
-            // Create the new vehicle inside the transaction
-            const newVehicle = await VehicleModel.create([{
+            // Build new vehicle payload with name/model structured in make
+            const vehicleData = {
                 licensePlateNo,
-                licensePlateImagePath: licensePlateImagePath || null,
+                licensePlateFrontImagePath,
+                licensePlateBackImagePath,
                 vinNo,
-                make,
+                make: { name, model },
                 year,
                 odometerReading: odometerReading || 0,
-                carImage: carImage || null,
-                owner: userId // if schema extended for ownership
-            }], { session });
+                carImages
+            };
 
-            // Add the new vehicle's _id to the user's myVehicles array
-            await User.findByIdAndUpdate(
-                userId,
-                { $push: { myVehicles: newVehicle[0]._id } },
-                { session }
-            );
+            let newVehicle;
+            try {
+                // Create the new vehicle inside the transaction
+                const created = await VehicleModel.create([vehicleData], { session });
+                newVehicle = created[0];
+            } catch (creationError) {
+                await session.abortTransaction();
+                session.endSession();
+                // Clean up uploaded files on error
+                deleteUploadedFiles(req.files);
+                throw creationError;
+            }
 
-            await session.commitTransaction();
-            session.endSession();
+            try {
+                // Add the new vehicle's _id to the user's myVehicles array
+                await User.findByIdAndUpdate(
+                    userId,
+                    { $push: { myVehicles: newVehicle._id } },
+                    { session }
+                );
+                await session.commitTransaction();
+                session.endSession();
+            } catch (linkError) {
+                await session.abortTransaction();
+                session.endSession();
+                // If DB error, delete newly uploaded images we just created
+                deleteUploadedFiles(req.files);
+                throw linkError;
+            }
 
-            // Now fetch the updated user with the vehicles populated via myVehicles
+            // Now fetch the updated user with vehicles populated via myVehicles
             const updatedUser = await User.findById(userId)
-                .populate('myVehicles')
+                .populate("myVehicles")
                 .lean();
 
             return res.status(201).json({
                 success: true,
                 message: "Vehicle added successfully.",
-                vehicle: newVehicle[0],
-                myVehicles: updatedUser?.myVehicles || []
+                vehicle: newVehicle,
+                myVehicles: updatedUser?.myVehicles || [],
             });
         } catch (error) {
             await session.abortTransaction();
             session.endSession();
+            // Clean up uploaded files if there was an unhandled error
+            deleteUploadedFiles(req.files);
             console.error("[addVehicle] Error:", error);
             return res.status(500).json({ message: "Internal Server Error" });
         }
     };
+
     // Edit/update an existing vehicle
     editVehicle = async (req, res) => {
         try {
