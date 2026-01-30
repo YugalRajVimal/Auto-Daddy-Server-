@@ -40,6 +40,9 @@ userRouter.get("/vehicles", jwtAuth, (req, res) => { userController.fetchAllVehi
 
 
 
+// Route to get all deals (public endpoint)
+userRouter.get("/deals", (req, res) => { userController.getAllDeals(req, res) });
+
 
 
 

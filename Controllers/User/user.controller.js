@@ -1,4 +1,5 @@
 import { deleteUploadedFiles } from "../../middlewares/fileDelete.middleware.js";
+import DealModel from "../../Schema/deals.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
 
@@ -383,6 +384,21 @@ class UserController {
             });
         } catch (error) {
             console.error("[fetchAllVehicles] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    };
+
+    // Fetch all deals (only enabled ones)
+    getAllDeals = async (req, res) => {
+        try {
+            // Only fetch deals where dealEnabled is true
+            const deals = await DealModel.find({ dealEnabled: true }).lean();
+            return res.status(200).json({
+                success: true,
+                deals
+            });
+        } catch (error) {
+            console.error("[getAllDeals] Error:", error);
             return res.status(500).json({ message: "Internal Server Error" });
         }
     };
