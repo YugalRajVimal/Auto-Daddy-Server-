@@ -6,162 +6,178 @@ import {
 import ExpiredTokenModel from "../../Schema/expired-token.schema.js";
 
 // Allowed roles from user.schema.js (see enum in file_context_2 line 8)
-const ALLOWED_ROLES = ["patient", "therapist", "admin", "carowner"];
+const ALLOWED_ROLES = ["patient", "therapist", "admin", "carowner", "autoshopowner"];
 
 class AuthController {
 
+  // Uses standard OTP fields per user.schema.js (lines 43-48)
   signupAndLogin = async (req, res) => {
     try {
-      let { countryCode, phone } = req.body;
+      let { countryCode, phone, email } = req.body;
 
-      // Validate presence
+      // Validate required
       if (!countryCode || !phone) {
         return res.status(400).json({ message: "Phone code and phone are required" });
       }
 
-      // Clean up values
-      countryCode = countryCode.trim().replace(/^\+/, ""); // remove '+' if provided
+      // Clean formatting (do not remove +)
+      countryCode = countryCode.trim(); // Preserve leading '+'
       phone = phone.trim();
+      if (email) email = email.trim().toLowerCase();
 
-      // Basic validation for phone code and phone number
-      if (!/^\d{1,4}$/.test(countryCode)) {
+      // Validate
+      if (!/^\+?\d{1,4}$/.test(countryCode)) {
+        // Allow optional leading +
         return res.status(400).json({ message: "Invalid country code." });
       }
       if (!/^\d{5,15}$/.test(phone)) {
         return res.status(400).json({ message: "Invalid phone number." });
       }
 
-      // Generate a 6-digit OTP for verification
+      // Use standard OTP field: otp, otpExpiresAt, otpGeneratedAt, otpAttempts
       // const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const otp = "000000";
       const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min expiry
+      const otpGeneratedAt = new Date();
 
-      // Check if user exists
+      // Try to find user by countryCode/phone
       let user = await User.findOne({ countryCode, phone });
 
       if (user) {
-        // User exists: update OTP info and resend (for login)
-        user.signUpOTP = otp;
-        user.signUpOTPExpiresAt = otpExpiresAt;
-        user.signUpOTPSentAt = new Date();
-        user.signUpOTPAttempts = 0;
+        user.otp = otp;
+        user.otpExpiresAt = otpExpiresAt;
+        user.otpGeneratedAt = otpGeneratedAt;
+        user.otpAttempts = 0;
         await user.save();
-
-        // Optionally, send the OTP via SMS here using full international format
 
         return res.status(200).json({
           message: "OTP sent successfully for login",
-          userId: user._id
+          userId: user._id,
         });
       }
 
-      // User does not exist: create new user with OTP info (sign up flow)
+      // BEFORE creating new, check if email or phone already exists on another user
+      // (shouldn't happen if proper check on user collection, but for safety)
+      if (email) {
+        const existingEmailUser = await User.findOne({ email: email });
+        if (existingEmailUser) {
+          return res.status(409).json({
+            message: "User with this email already exists.",
+            userId: existingEmailUser._id
+          });
+        }
+      }
+      const existingPhoneUser = await User.findOne({ countryCode, phone });
+      if (existingPhoneUser) {
+        // Unlikely to occur (we checked above), but extra safety
+        return res.status(409).json({
+          message: "User with this phone already exists.",
+          userId: existingPhoneUser._id
+        });
+      }
+
+      // Create new user using standard schema fields (no custom signUpOTP* fields)
       user = await User.create({
         countryCode,
-        phone: phone,
-        authProvider: "otp",
-        signUpOTP: otp,
-        signUpOTPExpiresAt: otpExpiresAt,
-        signUpOTPSentAt: new Date(),
-        signUpOTPAttempts: 0,
+        phone,
+        email: email || undefined,
+        otp,
+        otpExpiresAt,
+        otpGeneratedAt,
+        otpAttempts: 0,
         phoneVerified: false,
         emailVerified: false
       });
 
-      // Optionally, send the OTP via SMS here using full international format
-
       return res.status(201).json({
         message: "Sign-up OTP sent successfully",
-        userId: user._id // client uses this + OTP to verify
+        userId: user._id
       });
+
     } catch (error) {
       console.error("Signup/Login Error:", error);
       return res.status(500).json({ message: "Internal Server Error" });
     }
   };
 
-    // Verify Account with OTP (parent/therapist/admin/superadmin) using user.schema.js
-    verifyAccount = async (req, res) => {
-      try {
-        let { countryCode, phone, otp } = req.body;
+  // Verify Account with OTP per user.schema.js fields
+  verifyAccount = async (req, res) => {
+    try {
+      let { countryCode, phone, otp } = req.body;
+      console.log("[verifyAccount] Incoming params:", { countryCode, phone, otp });
 
-        console.log("[verifyAccount] Incoming params:", { countryCode, phone, otp });
-
-        if (!countryCode || !phone || !otp) {
-          console.log("[verifyAccount] Missing params:", { countryCode, phone, otp });
-          return res.status(400).json({ message: "Country code, phone number, and OTP are required" });
-        }
-
-        countryCode = countryCode.trim().replace(/^\+/, "");
-        phone = phone.trim();
-
-        // Basic validation for countryCode and phone (reuse signup validation)
-        if (!/^\d{1,4}$/.test(countryCode)) {
-          console.log("[verifyAccount] Invalid country code.");
-          return res.status(400).json({ message: "Invalid country code." });
-        }
-        if (!/^\d{5,15}$/.test(phone)) {
-          console.log("[verifyAccount] Invalid phone number.");
-          return res.status(400).json({ message: "Invalid phone number." });
-
-        }
-
-        const newCountryCode = countryCode.replace(/^\+/, "")
-
-        // Try to find and update (atomic verify) by countryCode, phone, otp, and an active OTP period
-        const user = await User.findOneAndUpdate(
-          {
-            countryCode: newCountryCode,
-            phone,
-            signUpOTP: otp,
-          },
-          {
-            $unset: { signUpOTP: 1, signUpOTPExpiresAt: 1, signUpOTPSentAt: 1 },
-            phoneVerified: true,
-            lastLogin: new Date()
-          },
-          { new: true }
-        ).lean();
-
-        if (!user) {
-          console.log("[verifyAccount] User NOT found or OTP expired/invalid for", {
-            countryCode,
-            phone,
-            otp
-          });
-          return res.status(401).json({ message: "Invalid phone, country code, or OTP" });
-        } else {
-          console.log("[verifyAccount] Account verified: userId =", user._id);
-        }
-
-        // Generate JWT (payload may later use more fields as needed)
-        const tokenPayload = {
-          id: user._id,
-          // Could include countryCode, phone, or other minimal info as needed
-        };
-
-        // Set token to expire in 1 day
-        const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "1d" });
-
-        await ExpiredTokenModel.create({
-          token,
-          tokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000), // 1 day expiry
-        });
-
-        console.log("[verifyAccount] Stored issued token in expired-tokens collection:", token);
-
-        return res.status(200).json({
-          message: "Account verified successfully",
-          token,
-          isProfileComplete: user.isProfileComplete,
-          role: user.role
-        });
-
-      } catch (error) {
-        console.error("[verifyAccount] Error:", error);
-        return res.status(500).json({ message: "Internal Server Error" });
+      if (!countryCode || !phone || !otp) {
+        console.log("[verifyAccount] Missing params:", { countryCode, phone, otp });
+        return res.status(400).json({ message: "Country code, phone number, and OTP are required" });
       }
-    };
+
+      countryCode = countryCode.trim();
+      phone = phone.trim();
+
+      // Validate that the country code is in the correct format, e.g., "+91" for India or "+1" for US.
+      // This check ensures that the input must start with a "+" followed by 1 to 4 digits.
+      // For example, "+91" is a valid country code.
+      if (!/^\+\d{1,4}$/.test(countryCode)) {
+        console.log("[verifyAccount] Invalid country code.");
+        return res.status(400).json({ message: "Invalid country code." });
+      }
+      if (!/^\d{5,15}$/.test(phone)) {
+        console.log("[verifyAccount] Invalid phone number.");
+        return res.status(400).json({ message: "Invalid phone number." });
+      }
+
+      // Find user with matching phone and code
+      const user = await User.findOne({ countryCode, phone });
+
+      if (!user) {
+        console.log("[verifyAccount] User NOT found for", { countryCode, phone });
+        return res.status(401).json({ message: "Invalid phone or country code" });
+      }
+
+      // Check OTP and expiry with schema fields
+      if (!user.otp || !user.otpExpiresAt) {
+        console.log("[verifyAccount] OTP not present or expired fields missing.");
+        return res.status(401).json({ message: "OTP not sent, please request again." });
+      }
+      if (user.otp !== otp) {
+        return res.status(401).json({ message: "Invalid OTP" });
+      }
+      if (user.otpExpiresAt < new Date()) {
+        return res.status(401).json({ message: "OTP has expired. Please request a new OTP." });
+      }
+
+      // Update fields for verified user; clear OTP and set phoneVerified
+      user.otp = null;
+      user.otpExpiresAt = null;
+      user.otpGeneratedAt = null;
+      user.otpAttempts = 0;
+      user.phoneVerified = true;
+      user.lastLogin = new Date();
+      await user.save();
+
+      // Generate JWT
+      const tokenPayload = { id: user._id };
+      const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "1d" });
+
+      await ExpiredTokenModel.create({
+        token,
+        tokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000), // 1 day
+      });
+
+      console.log("[verifyAccount] Account verified: userId =", user._id);
+
+      return res.status(200).json({
+        message: "Account verified successfully",
+        token,
+        isProfileComplete: user.isProfileComplete,
+        role: user.role
+      });
+
+    } catch (error) {
+      console.error("[verifyAccount] Error:", error);
+      return res.status(500).json({ message: "Internal Server Error" });
+    }
+  };
 
   // Check Authorization with user.schema.js roles & maintenance
   checkAuth = async (req, res) => {
@@ -192,11 +208,112 @@ class AuthController {
         });
       }
 
+      // Check if user is an autoshopowner and, if so, require their auto shop business profile to be completed
+      if (dbUser.role === "autoshopowner" && !dbUser.isAutoShopBusinessProfileComplete) {
+        // 428 Precondition Required
+        return res.status(428).json({
+          message: "Your auto shop business profile is incomplete. Please complete your business profile to continue.",
+          phone: dbUser.phone
+        });
+      }
+
       return res.status(200).json({ message: "Verified" });
     } catch (error) {
       return res.status(401).json({ message: "Unauthorized" });
     }
   };
+
+  completeProfile = async (req, res) => {
+    try {
+      // Ensure that the controller is behind jwtAuth middleware so req.user exists
+      const { id } = req.user || {};
+
+      // Get fields directly from req.body (name, email, pincode, role, address)
+      const { name, email, pincode, role, address } = req.body;
+
+      // All fields are mandatory (including address now)
+      if (!name || !email || !pincode || !role || !address) {
+        return res.status(400).json({
+          message: "All fields (name, email, pincode, role, address) are required."
+        });
+      }
+
+      // Only valid roles are 'carowner' and 'autoshopowner'
+      const validRoles = ["carowner", "autoshopowner"];
+      if (!validRoles.includes(role)) {
+        return res.status(400).json({
+          message: "Invalid role provided. Allowed roles: carowner/autoshopowner"
+        });
+      }
+
+      if (!id) {
+        return res.status(401).json({ message: "Unauthorized" });
+      }
+
+      // Find user by id
+      const user = await User.findById(id);
+      if (!user) {
+        return res.status(404).json({ message: "User not found." });
+      }
+
+      // Check if profile is already complete
+      if (user.isProfileComplete) {
+        return res.status(400).json({ message: "Profile already completed." });
+      }
+
+      // Check if email is already in use by another user
+      const emailExists = await User.findOne({
+        email: email,
+        _id: { $ne: id }
+      });
+      if (emailExists) {
+        return res.status(409).json({
+          message: "Email is already in use by another account.",
+          existingUserId: emailExists._id
+        });
+      }
+
+      // All fields are mandatory, so no need to check for undefined, update directly
+      const profileUpdates = {
+        name,
+        email,
+        pincode,
+        role,
+        address,
+        isProfileComplete: true
+      };
+
+      // Update and return user
+      const updatedUser = await User.findByIdAndUpdate(
+        id,
+        { $set: profileUpdates },
+        { new: true }
+      ).lean();
+
+      if (!updatedUser) {
+        return res.status(500).json({ message: "Failed to update profile." });
+      }
+
+      return res.status(200).json({
+        message: "Profile completed successfully.",
+        user: {
+          _id: updatedUser._id,
+          name: updatedUser.name,
+          email: updatedUser.email,
+          pincode: updatedUser.pincode,
+          role: updatedUser.role,
+          address: updatedUser.address,
+          isProfileComplete: updatedUser.isProfileComplete,
+        }
+      });
+    } catch (error) {
+      console.error("[completeProfile] Error:", error);
+      return res.status(500).json({ message: "Internal Server Error" });
+    }
+  };
+
+
+
 
 
 
