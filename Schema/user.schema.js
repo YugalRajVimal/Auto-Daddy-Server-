@@ -9,34 +9,37 @@ const NullableFile = { type: mongoose.Schema.Types.Mixed, default: null };
 
 const UserSchema = new mongoose.Schema(
   {
+    //Role
     role: {
       type: String,
-      enum: ["patient", "therapist", "admin", "superadmin","carowner"],
+      enum: ["carowner","autoshopowner"],
     },
+
+    //Profile
     name: { type: String},
     email: { type: String, sparse: true },
     countryCode:{type: String,},
     phone:{type: String, default: ""},
     pincode:{type: String, default: null},
     address:{type: String, default: null},
+
+
+    isDisabled: { type: Boolean, default: false },
     isProfileComplete :{type: Boolean, default: false},
 
+
+    //Car Owner
     favoriteAutoShops: [{ type: mongoose.Schema.Types.ObjectId, ref: "AutoShop", default: [] }],
     myVehicles: [{ type: mongoose.Schema.Types.ObjectId, ref: "Vehicle", default: [] }],
+    onboardedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+
+    //Auto Shop Owner
+    isAutoShopBusinessProfileComplete: { type: Boolean, default: false },
+    businessProfile: { type: mongoose.Schema.Types.ObjectId, ref: "BusinessProfile", default: null },
+    myCustomers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User", default: [] }],
+    
 
 
-
-    authProvider: {
-      type: String,
-      enum: ["otp", "password"],
-    default: "otp",
-    },
-    // For superadmin ONLY: passwordHash is required.
-    // For others, passwordHash remains undefined/not used.
-    passwordHash: { 
-      type: String,
-      required: function () { return this.role === "superadmin"; }
-    },
     // OTP fields are available for all users.
     otp: { type: String }, // Last sent OTP
     otpExpiresAt: { type: Date }, // Expiry time for current OTP
@@ -50,20 +53,6 @@ const UserSchema = new mongoose.Schema(
       enum: ["active", "suspended", "deleted"],
       default: "active",
     },
-    isDisabled: { type: Boolean, default: false },
-
-
-
-    // Fields for managing OTP during signup flow (separate from login OTP fields)
-    signUpOTP: { type: String, default: null },
-    signUpOTPExpiresAt: { type: Date, default: null },
-    signUpOTPSentAt: { type: Date, default: null },
-    signUpOTPAttempts: { type: Number, default: 0 },
-    signUpOTPLastUsedAt: { type: Date, default: null },
-    incompleteTherapistProfile:{ type: Boolean, default: true },
-    incompleteParentProfile:{ type: Boolean, default: true },
-    manualSignUp:{ type: Boolean, default: false },
-    
 
 
   },
@@ -71,126 +60,7 @@ const UserSchema = new mongoose.Schema(
 );
 
 
-/* ================================
-   2. ROLE-SPECIFIC PROFILE TABLES
-   ================================ */
-
-// Patient Profile (extended with child/patient details)
-const PatientProfileSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-  name: { type: String, required: true },
-  patientId:{type: String, required: true, },
-  gender: { type: String, default: "" },
-  childDOB: { type: String, default: "" },
-  fatherFullName: { type: String, default: "" },
-  plannedSessionsPerMonth: { type: String, default: "" },
-  package: { type: String, default: "" },
-  motherFullName: { type: String, default: "" },
-  parentEmail: { type: String, default: "" },
-  mobile1: { type: String, default: "" },
-  mobile1Verified: { type: Boolean, default: false },
-  mobile2: { type: String, default: "" },
-  address: { type: String, default: "" },
-  pincode: { type: String, default: "" },
-  areaName: { type: String, default: "" },
-  diagnosisInfo: { type: String, default: "" },
-  childReference: { type: String, default: "" },
-  parentOccupation: { type: String, default: "" },
-  remarks: { type: String, default: "" },
-  otherDocument: { type: mongoose.Schema.Types.Mixed, default: undefined },
-});
 
 
-
-// Therapist Profile
-const TherapistProfileSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-  therapistId:{type: String,  required: true },
-
-
-  // ADDED FIELDS AS REQUESTED
-  fathersName:     { type: String, default: "" },
-  mobile1:         { type: String, default: "" },
-  mobile2:         { type: String, default: "" },
-  address:         { type: String, default: "" },
-  reference:       { type: String, default: "" },
-
-  aadhaarFront:    NullableFile,
-  aadhaarBack:     NullableFile,
-  photo:           NullableFile,
-  resume:          NullableFile,
-  certificate:     NullableFile,
-
-  accountHolder:   { type: String, default: "" },
-  bankName:        { type: String, default: "" },
-  ifsc:            { type: String, default: "" },
-  accountNumber:   { type: String, default: "" },
-  upi:             { type: String, default: "" },
-
-  linkedin:        { type: String, default: "" },
-  twitter:         { type: String, default: "" },
-  facebook:        { type: String, default: "" },
-  instagram:       { type: String, default: "" },
-  youtube:         { type: String, default: "" },
-  website:         { type: String, default: "" },
-  portfolio:       { type: String, default: "" },
-  blog:            { type: String, default: "" },
-
-  remarks:         { type: String, default: "" },
-
-  earnings: [
-    {
-      amount: { type: Number, required: true },
-      type: { type: String, enum: ["salary", "contract"], required: true },
-      fromDate: { type: Date, required: true },
-      toDate: { type: Date, required: true },
-      remark: { type: String, default: "" },
-      paidOn: { type: Date }
-    }
-  ],
-
-  // original fields from previous TherapistProfileSchema:
-  specializations: { type: String, default: "" },
-  experienceYears: Number,
-  // Indicates if therapist panel is accessible for this therapist
-  isPanelAccessible: { type: Boolean, default: true }, 
-
-  // Therapist holidays: Array of objects { date: Date, reason: String }
-  holidays: [
-    {
-      date: { type: String, required: true },
-      reason: { type: String, default: "" },
-      // Optional: restrict to certain slots or mark full-day
-      slots: [
-        {
-          slotId:  { type: String }, // E.g. "0830-0915"
-          label:   { type: String }, // E.g. "08:30 to 09:15"
-        }
-      ],
-      isFullDay: { type: Boolean, default: true } // true if the whole day is holiday, false if only slots[]
-    }
-  ],
-  
-});
-
-// Admin Profile
-const AdminProfileSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-  phoneNo: { type: String, default: "" },
-
-  department: String,
-});
-
-// Super Admin Profile
-const SuperAdminProfileSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-  phoneNo: { type: String, default: "" },
-  securityLevel: { type: Number, default: 10 },
-  lastLoginIp: String,
-});
 
 export const User = mongoose.model("User", UserSchema);
-export const PatientProfile = mongoose.model("PatientProfile", PatientProfileSchema);
-export const TherapistProfile = mongoose.model("TherapistProfile", TherapistProfileSchema);
-export const AdminProfile = mongoose.model("AdminProfile", AdminProfileSchema);
-export const SuperAdminProfile = mongoose.model("SuperAdminProfile", SuperAdminProfileSchema);

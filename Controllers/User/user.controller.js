@@ -1,4 +1,5 @@
 import { deleteUploadedFiles } from "../../middlewares/fileDelete.middleware.js";
+import AutoShopModel from "../../Schema/auto-shops.schema.js";
 import DealModel from "../../Schema/deals.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
@@ -8,18 +9,18 @@ class UserController {
 
     completeProfile = async (req, res) => {
         try {
-            // Ensure that the controller is behind jwtAuth middleware so req.user exists
+            // Ensure jwtAuth middleware so req.user exists
             const { id } = req.user || {};
 
-            // Get fields directly from req.body (name, email, pincode, role, address)
+            // Get fields directly from req.body
             const { name, email, pincode, role, address } = req.body;
 
-            // All fields are mandatory (including address now)
+            // All fields required
             if (!name || !email || !pincode || !role || !address) {
                 return res.status(400).json({ message: "All fields (name, email, pincode, role, address) are required." });
             }
 
-            // Only valid role is 'carowner'
+            // Only valid role allowed
             const validRoles = ["carowner"];
             if (!validRoles.includes(role)) {
                 return res.status(400).json({ message: "Invalid role provided. Allowed roles: carowner." });
@@ -40,7 +41,20 @@ class UserController {
                 return res.status(400).json({ message: "Profile already completed." });
             }
 
-            // All fields are mandatory, so no need to check for undefined, update directly
+            // Check if email is already in use by another user
+            const emailExists = await User.findOne({
+                email: email,
+                _id: { $ne: id }
+            });
+
+            if (emailExists) {
+                return res.status(409).json({
+                    message: "Email is already in use by another account.",
+                    existingUserId: emailExists._id
+                });
+            }
+
+            // Prepare updates
             const profileUpdates = {
                 name,
                 email,
@@ -50,7 +64,7 @@ class UserController {
                 isProfileComplete: true
             };
 
-            // Update and return user
+            // Update user
             const updatedUser = await User.findByIdAndUpdate(
                 id,
                 { $set: profileUpdates },
@@ -115,6 +129,87 @@ class UserController {
 
         } catch (error) {
             console.error("[getProfileDetails] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    }
+
+    editProfile = async (req, res) => {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({ message: "Unauthorized" });
+            }
+
+            // Fetch the user and check role
+            const user = await User.findById(userId).lean();
+            if (!user) {
+                return res.status(404).json({ message: "User not found." });
+            }
+
+            // Only allow carowner users to edit their profile here
+            if (user.role !== "carowner") {
+                return res.status(403).json({ message: "Forbidden. Only car owners can edit their profile using this route." });
+            }
+
+            const updateFields = {};
+            // Omit the "phone" from editable fields
+            const allowedFields = [
+                "name", "email", "countryCode", "pincode", "address"
+            ];
+
+            for (const key of allowedFields) {
+                if (req.body[key] !== undefined) {
+                    updateFields[key] = req.body[key];
+                }
+            }
+
+            if (Object.keys(updateFields).length === 0) {
+                return res.status(400).json({ message: "No profile fields provided to update." });
+            }
+
+            // If email is being updated, check that it's not used by another user
+            if (
+                updateFields.email !== undefined &&
+                updateFields.email !== null &&
+                updateFields.email.trim() !== ""
+            ) {
+                const emailToCheck = updateFields.email.trim().toLowerCase();
+                // The current user can keep their email, but not set it to an existing user's email
+                const existingUser = await User.findOne({ 
+                    email: emailToCheck, 
+                    _id: { $ne: userId } 
+                }).lean();
+                if (existingUser) {
+                    return res.status(409).json({
+                        message: "This email is already taken by another user."
+                    });
+                }
+                updateFields.email = emailToCheck;
+            }
+
+            const updatedUser = await User.findByIdAndUpdate(
+                userId,
+                { $set: updateFields },
+                { new: true, runValidators: true }
+            ).lean();
+
+            if (!updatedUser) {
+                return res.status(404).json({ message: "User not found." });
+            }
+
+            // Only return relevant info, still include phone in response (not updated)
+            const {
+                name, email, phone, countryCode, pincode, address
+            } = updatedUser;
+
+            return res.status(200).json({
+                success: true,
+                message: "Profile updated successfully.",
+                data: { name, email, phone, countryCode, pincode, address }
+            });
+
+        } catch (error) {
+            console.error("[editProfile] Error:", error);
             return res.status(500).json({ message: "Internal Server Error" });
         }
     }
@@ -403,6 +498,18 @@ class UserController {
         }
     };
 
+    // Fetch all auto shops (reuse logic from AutoShopController)
+    getAllAutoShops = async (req, res) => {
+        try {
+            // Dynamically import the AutoShopModel to avoid circular dependencies
+
+            const autoShops = await AutoShopModel.find({});
+            return res.status(200).json({ success: true, data: autoShops });
+        } catch (error) {
+            console.error("[getAllAutoShops] Error:", error);
+            return res.status(500).json({ success: false, message: 'Failed to fetch auto shops', error: error.message });
+        }
+    };
 }
 
 export default UserController;
