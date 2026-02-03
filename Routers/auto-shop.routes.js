@@ -14,6 +14,7 @@ autoShopRouter.get("/", (req, res) => autoShopController.getAllAutoShops(req, re
 // Route to complete (create/update) business profile for autoshopowner (with multer support for uploads)
 import jwtAuth from "../middlewares/Auth/auth.middleware.js";
 import { upload } from "../middlewares/fileUpload.middleware.js";
+import { businessUploadMiddleware } from "../middlewares/bussinessUpload.middleware.js";
 
 //Profiles APIS
 // Route to get the current autoshopowner's business profile (protected, requires JWT)
@@ -35,9 +36,7 @@ autoShopRouter.put(
 autoShopRouter.put(
   "/complete-business-profile",
   jwtAuth,
-  upload.fields([
-    { name: "businessLogo", maxCount: 1 },
-  ]),
+  businessUploadMiddleware,
   (req, res) => autoShopController.completeBusinessProfile(req, res)
 );
 
@@ -46,9 +45,7 @@ autoShopRouter.put(
 autoShopRouter.put(
   "/edit-business-profile",
   jwtAuth,
-  upload.fields([
-    { name: "businessLogo", maxCount: 1 },
-  ]),
+  businessUploadMiddleware,
   (req, res) => autoShopController.editBusinessProfile(req, res)
 );
 
