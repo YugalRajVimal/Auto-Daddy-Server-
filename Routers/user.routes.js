@@ -1,8 +1,8 @@
 import express from "express";
 import UserController from "../Controllers/User/user.controller.js";
 import jwtAuth from "../middlewares/Auth/auth.middleware.js";
-import { upload } from "../middlewares/fileUpload.middleware.js";
-import { vehicleUploadMiddleware } from "../middlewares/vehicleUpload.middleware.js";
+import { vehicleUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/vehicleUpload.middleware.js";
+
 
 
 const userRouter = express.Router();
