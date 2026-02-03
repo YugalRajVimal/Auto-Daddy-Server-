@@ -11,15 +11,15 @@ const dealSchema = new mongoose.Schema({
   },
   value: {
     type: String,
-    enum: ["categories", "subcategories", "all"],
+    enum: ["services", "subservices", "all"],
     required: true,
-    // Defines the deal's scope: applies to categories, subcategories, or all
+    // Defines the deal's scope: applies to services, subservices, or all
   },
-  // If value is 'categories' or 'subcategories', optionally store their respective id (ObjectId or String)
+  // If value is 'services' or 'subservices', optionally store their respective id (ObjectId or String)
   valueId: {
     type: mongoose.Schema.Types.ObjectId,
     required: function() {
-      return this.value === "categories" || this.value === "subcategories";
+      return this.value === "services" || this.value === "subservices";
     },
     refPath: 'value', // Will reference either categories or subcategories model if needed for population
   },
@@ -49,6 +49,16 @@ const dealSchema = new mongoose.Schema({
     type: Date,
     default: Date.now
   },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "BusinessProfile",
+    required: false
+  },
+  couponCode: {
+    type: String,
+    required: false,
+    default: ""
+  }
 }, { timestamps: true });
 
 const DealModel = mongoose.model("Deal", dealSchema);
