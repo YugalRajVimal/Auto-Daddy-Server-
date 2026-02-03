@@ -1,4 +1,4 @@
-import { deleteUploadedFiles } from "../../middlewares/fileDelete.middleware.js";
+import { deleteUploadedFiles } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
 import AutoShopModel from "../../Schema/auto-shops.schema.js";
 import DealModel from "../../Schema/deals.schema.js";
 import { User } from "../../Schema/user.schema.js";

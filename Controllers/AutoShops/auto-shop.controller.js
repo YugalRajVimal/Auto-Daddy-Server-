@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { deleteUploadedFile, deleteUploadedFiles } from "../../middlewares/fileDelete.middleware.js";
+import { deleteUploadedFile, deleteUploadedFiles } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
 import AutoShopModel from "../../Schema/auto-shops.schema.js";
 import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 import { User } from "../../Schema/user.schema.js";
