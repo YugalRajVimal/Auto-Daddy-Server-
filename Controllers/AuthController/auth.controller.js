@@ -313,12 +313,6 @@ class AuthController {
   };
 
 
-
-
-
-
-
-
   // Sign In → Send OTP, only for known roles
   // signin = async (req, res) => {
   //   try {

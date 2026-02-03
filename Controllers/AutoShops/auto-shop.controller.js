@@ -172,24 +172,42 @@ async completeBusinessProfile(req, res) {
             return res.status(400).json({ message: "Business profile already completed." });
         }
 
-        // Extract business profile details
+        // Extract business profile details (ignore businessMapLocation, parse lat/lng directly)
         let {
             businessName,
             businessAddress,
             pincode,
-            businessMapLocation,
             businessPhone,
             businessEmail,
             businessHSTNumber,
             openHours,
             openDays,
+            lat,
+            lng,
         } = req.body;
+
+        // Fallback for lat/lng as stringified JSON
+        if (typeof lat === "string") {
+            try {
+                lat = parseFloat(lat);
+            } catch {
+                lat = undefined;
+            }
+        }
+        if (typeof lng === "string") {
+            try {
+                lng = parseFloat(lng);
+            } catch {
+                lng = undefined;
+            }
+        }
 
         console.log("[completeBusinessProfile] Received business profile details: ", {
             businessName,
             businessAddress,
             pincode,
-            businessMapLocation,
+            lat,
+            lng,
             businessPhone,
             businessEmail,
             businessHSTNumber,
@@ -221,21 +239,14 @@ async completeBusinessProfile(req, res) {
             console.log("[completeBusinessProfile] No businessLogo uploaded via multer, using value from req.body");
         }
 
-        // Prepare map location (ensure correct type structure if sent as possible string)
-        if (typeof businessMapLocation === "string") {
-            try {
-                const parsedLocation = JSON.parse(businessMapLocation);
-                if (typeof parsedLocation === "object" && parsedLocation !== null) {
-                    businessMapLocation = parsedLocation;
-                    console.log("[completeBusinessProfile] Parsed businessMapLocation:", businessMapLocation);
-                } else {
-                    businessMapLocation = undefined;
-                    console.log("[completeBusinessProfile] businessMapLocation string could not be parsed to object");
-                }
-            } catch {
-                businessMapLocation = undefined;
-                console.log("[completeBusinessProfile] businessMapLocation invalid JSON string");
-            }
+        // Prepare map location object using lat/lng
+        let businessMapLocation = undefined;
+        if ((lat !== undefined && lat !== null && lat !== "") || (lng !== undefined && lng !== null && lng !== "")) {
+            businessMapLocation = {};
+            if (lat !== undefined && lat !== null && lat !== "") businessMapLocation.lat = lat;
+            if (lng !== undefined && lng !== null && lng !== "") businessMapLocation.lng = lng;
+            // Remove if empty object
+            if (Object.keys(businessMapLocation).length === 0) businessMapLocation = undefined;
         }
 
         // Prepare business profile data shaped according to businessProfileSchema
@@ -350,7 +361,8 @@ async editBusinessProfile(req, res) {
         let {
             businessAddress,
             pincode,
-            businessMapLocation,
+            longitude,
+            latitude,
             businessPhone,
             businessEmail,
             openHours,
@@ -370,18 +382,14 @@ async editBusinessProfile(req, res) {
             filesToDelete.push(req.files.businessLogo[0]);
         }
 
-        // If businessMapLocation sent as stringified JSON, parse it
-        if (typeof businessMapLocation === "string") {
-            try {
-                const parsedLocation = JSON.parse(businessMapLocation);
-                if (typeof parsedLocation === "object" && parsedLocation !== null) {
-                    businessMapLocation = parsedLocation;
-                } else {
-                    businessMapLocation = undefined;
-                }
-            } catch {
-                businessMapLocation = undefined;
-            }
+        // Parse longitude/latitude if sent as strings (ensure they're numbers or undefined)
+        if (typeof longitude === "string") {
+            longitude = parseFloat(longitude);
+            if (isNaN(longitude)) longitude = undefined;
+        }
+        if (typeof latitude === "string") {
+            latitude = parseFloat(latitude);
+            if (isNaN(latitude)) latitude = undefined;
         }
 
         // Prepare update fields (only allowed fields)
@@ -389,7 +397,11 @@ async editBusinessProfile(req, res) {
 
         if (businessAddress !== undefined) updateData.businessAddress = businessAddress;
         if (pincode !== undefined) updateData.pincode = pincode;
-        if (businessMapLocation !== undefined) updateData.businessMapLocation = businessMapLocation;
+        // Only include longitude/latitude if BOTH are defined (not businessMapLocation)
+        if (longitude !== undefined && latitude !== undefined) {
+            updateData.longitude = longitude;
+            updateData.latitude = latitude;
+        }
         if (businessPhone !== undefined) updateData.businessPhone = businessPhone;
         if (businessEmail !== undefined) updateData.businessEmail = businessEmail;
         if (openHours !== undefined) updateData.openHours = openHours;
