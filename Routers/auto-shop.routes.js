@@ -126,6 +126,61 @@ autoShopRouter.post(
 );
 
 
+// Route to get all services and subservices in the current auto shop's business profile
+autoShopRouter.get(
+  "/my-services",
+  jwtAuth,
+  (req, res) => autoShopController.getAllMyServices(req, res)
+);
+
+
+// Route to add services (and subservices) to current auto shop's business profile
+autoShopRouter.post(
+  "/my-services",
+  jwtAuth,
+  (req, res) => autoShopController.addToMyServices(req, res)
+);
+
+// Route to remove services (and/or subservices) from current auto shop's business profile
+autoShopRouter.delete(
+  "/my-services",
+  jwtAuth,
+  (req, res) => autoShopController.removeFromMyServices(req, res)
+);
+
+// Deal routes for auto-shop business profile
+
+// Create a new deal and link it to the business profile
+autoShopRouter.post(
+  "/my-deals",
+  jwtAuth,
+  (req, res) => autoShopController.createDeal(req, res)
+);
+
+// Edit an existing deal (only if created by the current business profile)
+autoShopRouter.put(
+  "/my-deals/:id",
+  jwtAuth,
+  (req, res) => autoShopController.editDeal(req, res)
+);
+
+// Delete a deal by ID (only if created by the current business profile)
+autoShopRouter.delete(
+  "/my-deals/:id",
+  jwtAuth,
+  (req, res) => autoShopController.deleteDeal(req, res)
+);
+
+// Fetch all deals for the current business profile
+autoShopRouter.get(
+  "/my-deals",
+  jwtAuth,
+  (req, res) => autoShopController.fetchMyDeals(req, res)
+);
+
+
+
+
 
 
 

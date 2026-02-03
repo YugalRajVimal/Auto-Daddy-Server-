@@ -1,5 +1,6 @@
 import { deleteUploadedFiles } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
-import AutoShopModel from "../../Schema/auto-shops.schema.js";
+
+import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 import DealModel from "../../Schema/deals.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
@@ -501,9 +502,15 @@ class UserController {
     // Fetch all auto shops (reuse logic from AutoShopController)
     getAllAutoShops = async (req, res) => {
         try {
-            // Dynamically import the AutoShopModel to avoid circular dependencies
+            // Populate myServices.service (reference to Services), and for each, populate subServices.subService (objectId)
+            const autoShops = await BusinessProfileModel.find({})
+                .populate({
+                    path: 'myServices.service', // First: main service info for each myService
+                })
+                .populate({
+                    path: 'myServices.subServices.subService', // Then: for each myService, the selected subService ObjectId
+                });
 
-            const autoShops = await AutoShopModel.find({});
             return res.status(200).json({ success: true, data: autoShops });
         } catch (error) {
             console.error("[getAllAutoShops] Error:", error);

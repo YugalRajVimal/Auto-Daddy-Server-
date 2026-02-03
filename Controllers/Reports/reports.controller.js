@@ -17,7 +17,7 @@ class ReportsController {
       // Fetch reports for these vehicles, populate vehicle and autoShop
       const reports = await ReportsModel.find({ vehicleId: { $in: vehicleIds } })
         .populate({ path: "vehicleId", select: "licensePlateNo make model year vinNo" })
-        .populate({ path: "autoShopId", select: "name phone address" })
+        .populate({ path: "autoShopId", model: "BusinessProfile", select: "businessName businessPhone businessAddress" })
         .sort({ date: -1 });
 
       res.json({ reports });

@@ -1,9 +1,11 @@
 import mongoose from "mongoose";
 import { deleteUploadedFile, deleteUploadedFiles } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
-import AutoShopModel from "../../Schema/auto-shops.schema.js";
+
 import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 import { User } from "../../Schema/user.schema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
+import servicesSchema from "../../Schema/services.schema.js";
+import DealModel from "../../Schema/deals.schema.js";
 
 class AutoShopController {
 
@@ -734,11 +736,18 @@ fetchMyCustomers = async (req, res) => {
             return res.status(401).json({ message: "Unauthorized." });
         }
 
-        // Find the autoshopowner and populate myCustomers field
+        // Find the autoshopowner and populate myCustomers with their vehicles
         const autoshopOwner = await User.findOne({ _id: autoshopOwnerId, role: "autoshopowner" })
             .populate({
                 path: "myCustomers",
-                select: "name email phone countryCode status isDisabled", // select some carowner fields to return
+                select: "name email phone countryCode status isDisabled",
+                populate: [
+                    {
+                        path: "myVehicles",
+                        model: "Vehicle",
+                        select: "-carImages -licensePlateFrontImagePath -licensePlateBackImagePath"
+                    }
+                ]
             })
             .lean();
 
@@ -1066,6 +1075,603 @@ verifyOnboardedCarowner = async (req, res) => {
 
 
 
+
+
+/**
+ * Add services (and subservices) to current auto shop's business profile.
+ * Expects req.user to be authenticated autoshopowner and req.body.services as described.
+ */
+
+/**
+ * Fetch all services (and selected subservices) for the current auto shop's business profile.
+ * Lists the "myServices" array with full service and subservice details.
+ * Requires req.user to be authenticated autoshopowner.
+ */
+async getAllMyServices(req, res) {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ message: "Unauthorized. User ID missing." });
+        }
+
+        // Find the autoshopowner with their businessProfile populated
+        const user = await User.findById(userId).select("businessProfile role").lean();
+        if (!user || user.role !== "autoshopowner") {
+            return res.status(404).json({ message: "AutoShop owner not found." });
+        }
+        if (!user.businessProfile) {
+            return res.status(404).json({ message: "Business profile not found." });
+        }
+
+        // Get the business profile with myServices array
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
+        if (!businessProfile) {
+            return res.status(404).json({ message: "Business profile not found." });
+        }
+
+        const myServices = businessProfile.myServices || [];
+
+        // Prepare a list of unique service IDs to fetch
+        const serviceIds = myServices.map(ms => ms.service);
+
+        // Fetch all services from the master service schema
+        const servicesData = await servicesSchema.find({ _id: { $in: serviceIds } }).lean();
+
+        // Create a map: serviceId -> serviceDoc for easy lookup
+        const servicesMap = {};
+        for (const service of servicesData) {
+            servicesMap[service._id.toString()] = service;
+        }
+
+        // For each myService, fetch service name/details and subservice details
+        const result = myServices.map(ms => {
+            const serviceDoc = servicesMap[ms.service?.toString()];
+            // Map selected subservices (from myService) to full subservice details
+            let selectedSubServices = [];
+            if (serviceDoc && Array.isArray(ms.subServices)) {
+                const allSubservices = serviceDoc.services || [];
+                selectedSubServices = ms.subServices
+                    .map(selSub => {
+                        // selSub may have subService field as ObjectId or string
+                        const subId = selSub.subService?.toString ? selSub.subService.toString() : selSub.subService;
+                        return allSubservices.find(sub => sub._id.toString() === subId);
+                    })
+                    .filter(Boolean);
+            }
+            return {
+                service: {
+                    id: serviceDoc?._id,
+                    name: serviceDoc?.name,
+                    desc: serviceDoc?.desc
+                },
+                selectedSubServices: selectedSubServices.map(sub => ({
+                    id: sub._id,
+                    name: sub.name,
+                    desc: sub.desc,
+                    price: sub.price
+                }))
+            };
+        });
+
+        return res.status(200).json({
+            success: true,
+            services: result
+        });
+    } catch (error) {
+        console.error("[getAllMyServices] Error:", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+
+async addToMyServices(req, res) {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ message: "Unauthorized. User ID missing." });
+        }
+
+        // Find the autoshopowner with their businessProfile populated
+        const user = await User.findById(userId).select("businessProfile role").lean();
+        if (!user || user.role !== "autoshopowner") {
+            return res.status(404).json({ message: "AutoShop owner not found." });
+        }
+        if (!user.businessProfile) {
+            return res.status(404).json({ message: "Business profile not found." });
+        }
+
+        // Validate and parse input
+        const { services } = req.body;
+        if (!Array.isArray(services) || services.length === 0) {
+            return res.status(400).json({ message: "services (array) is required in request body." });
+        }
+
+        // Validate all subServices exist in their respective Service (from services schema)
+        for (const serviceBlock of services) {
+            if (!serviceBlock.id) {
+                return res.status(400).json({ message: "All entries in services must have an id (service Id)." });
+            }
+
+            const serviceDoc = await servicesSchema.findById(serviceBlock.id).lean();
+            if (!serviceDoc) {
+                return res.status(400).json({ message: `Service with id "${serviceBlock.id}" does not exist.` });
+            }
+
+            if (Array.isArray(serviceBlock.services) && serviceBlock.services.length > 0) {
+                // Make a set of valid subservice _ids as strings
+                const validSubIds = new Set((serviceDoc.services || []).map(sub => sub._id.toString()));
+                for (const subId of serviceBlock.services) {
+                    if (!validSubIds.has(subId.toString())) {
+                        return res.status(400).json({
+                            message: `SubService with id "${subId}" does not exist inside Service "${serviceBlock.id}".`
+                        });
+                    }
+                }
+            }
+        }
+
+        // Get the latest business profile (not lean so we can update)
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
+        if (!businessProfile) {
+            return res.status(404).json({ message: "Business profile not found." });
+        }
+
+        // Build a map of present services and subservices
+        // present: { [serviceId]: Set of subServiceIds }
+        const present = {};
+        for (const entry of businessProfile.myServices) {
+            if (!entry.service) continue;
+            const sId = entry.service.toString();
+            if (!present[sId]) present[sId] = new Set();
+            for (const subObj of (entry.subServices||[])) {
+                if (subObj && subObj.subService) present[sId].add(subObj.subService.toString());
+            }
+        }
+
+        // Only add services and subservices that are NOT already present
+        for (const serviceBlock of services) {
+            const serviceId = serviceBlock.id?.toString();
+            if (!serviceId) continue;
+            const inputSubIds = Array.isArray(serviceBlock.services) 
+                ? serviceBlock.services.map(id => id.toString())
+                : [];
+
+            let myServiceObj = businessProfile.myServices.find(ms => ms.service.toString() === serviceId);
+
+            // If service doesn't exist at all and no subservices are present, add entire service with all its subservices from request
+            if (!myServiceObj) {
+                businessProfile.myServices.push({
+                    service: serviceBlock.id,
+                    subServices: inputSubIds.map(subId => ({ subService: subId }))
+                });
+                // Mark them as present now for deduplication if duplicates in array
+                present[serviceId] = new Set(inputSubIds);
+                continue;
+            }
+
+            // Service already exists. Only add subservices that are not present
+            const alreadyPresentSubs = present[serviceId] || new Set();
+            let added = false;
+            for (const subId of inputSubIds) {
+                if (!alreadyPresentSubs.has(subId)) {
+                    myServiceObj.subServices.push({ subService: subId });
+                    alreadyPresentSubs.add(subId);
+                    added = true;
+                }
+            }
+            // If all subservices were already present, nothing will be added
+        }
+
+        await businessProfile.save();
+
+        return res.status(200).json({ success: true, message: "Services added successfully.", myServices: businessProfile.myServices });
+    } catch (error) {
+        console.error("[addToMyServices] Error:", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+/**
+ * Remove services (and/or subservices) from current auto shop's business profile.
+ * Expects req.user to be authenticated autoshopowner and req.body.services as described.
+ */
+async removeFromMyServices(req, res) {
+    try {
+        const userId = req.user?.id;
+        if (!userId) {
+            return res.status(401).json({ message: "Unauthorized. User ID missing." });
+        }
+
+        // Find the autoshopowner with their businessProfile populated
+        const user = await User.findById(userId).select("businessProfile role").lean();
+        if (!user || user.role !== "autoshopowner") {
+            return res.status(404).json({ message: "AutoShop owner not found." });
+        }
+        if (!user.businessProfile) {
+            return res.status(404).json({ message: "Business profile not found." });
+        }
+
+        const { services } = req.body;
+        if (!Array.isArray(services) || services.length === 0) {
+            return res.status(400).json({ message: "services (array) is required in request body." });
+        }
+
+        // Build removal map: serviceId -> Set of subServiceIds (if array empty, remove whole service)
+        const toRemove = {};
+        for (const s of services) {
+            const serviceId = s.id;
+            if (!serviceId) continue;
+            toRemove[serviceId] = Array.isArray(s.services) ? new Set(s.services) : new Set();
+        }
+
+        // Edit business profile
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
+        if (!businessProfile) {
+            return res.status(404).json({ message: "Business profile not found." });
+        }
+
+        // Filter myServices according to removal plan
+        businessProfile.myServices = businessProfile.myServices.filter(ms => {
+            const svcId = ms.service.toString();
+            if (!toRemove[svcId]) return true; // Not targeted for removal
+
+            const subServicesToRemove = toRemove[svcId];
+            if (!subServicesToRemove.size) {
+                // No subServices array—instructed to remove whole service
+                return false;
+            }
+
+            // Remove specific subServices
+            ms.subServices = (ms.subServices||[]).filter(ss => !subServicesToRemove.has(ss.subService.toString()));
+
+            // If after removal this service has no subServices left, remove service entirely
+            return ms.subServices.length > 0;
+        });
+
+        await businessProfile.save();
+
+        return res.status(200).json({ success: true, message: "Services removed successfully.", myServices: businessProfile.myServices });
+    } catch (error) {
+        console.error("[removeFromMyServices] Error:", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+// DEALS HANDLING SECTION
+
+/**
+ * Create a new deal and link it to the creator's business profile.
+ * - Adds the deal's _id to BusinessProfile.myDeals.
+ * - Sets Deal.createdBy to businessProfile._id.
+ */
+async createDeal(req, res) {
+    try {
+        const id = req.user.id;
+
+        // Fetch the user to get their businessProfile
+        const user = await User.findById(id).lean();
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        // Fetch the business profile for this user (requirement: user.businessProfile must exist)
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
+        if (!businessProfile) {
+            return res.status(404).json({ success: false, message: "Business profile not found" });
+        }
+
+        const {
+            name,
+            description,
+            value,
+            valueId,
+            percentageDiscount,
+            dealEnabled,
+            startDate,
+            endDate,
+            additionalDetails,
+            couponCode, // <-- Coupon code is mandatory now
+        } = req.body;
+
+        // Validate mandatory fields
+        if (
+            typeof name !== "string" ||
+            !name.trim() ||
+            typeof value !== "string" ||
+            !value.trim() ||
+            typeof percentageDiscount !== "number" ||
+            typeof couponCode !== "string" ||
+            !couponCode.trim()
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "name (string), value (string), percentageDiscount (number), and couponCode (string) are required.",
+            });
+        }
+
+        // Validate value (must be one of the allowed enum values)
+        const allowedValues = ["services", "subservices", "all"];
+        if (!allowedValues.includes(value)) {
+            return res.status(400).json({
+                success: false,
+                message: `value must be one of: ${allowedValues.join(", ")}`,
+            });
+        }
+
+        // Check couponCode uniqueness in this business profile
+        const existingDealWithCoupon = await DealModel.findOne({
+            couponCode: couponCode.trim(),
+            createdBy: businessProfile._id,
+        }).lean();
+
+        if (existingDealWithCoupon) {
+            return res.status(400).json({
+                success: false,
+                message: "A deal with the same coupon code already exists in your business profile."
+            });
+        }
+
+        // Service or subservice existence validation imports
+        let servicesSchema;
+        try {
+            servicesSchema = (await import("../../Schema/services.schema.js")).default;
+        } catch (err) {
+            console.error("Failed to import services schema:", err);
+            return res.status(500).json({ success: false, message: "Internal Server Error (import failure)" });
+        }
+
+        // If value is 'services' or 'subservices', valueId must be a valid ObjectId and checked in services schema
+        let processedValueId = undefined;
+
+        if (value === "services" || value === "subservices") {
+            if (!valueId || typeof valueId !== "string") {
+                return res.status(400).json({
+                    success: false,
+                    message: `valueId (string/ObjectId) is required when value is "${value}".`,
+                });
+            }
+            const mongoose = (await import('mongoose')).default;
+            if (!mongoose.Types.ObjectId.isValid(valueId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `valueId "${valueId}" is not a valid ObjectId.`,
+                });
+            }
+            processedValueId = valueId;
+
+            if (value === "services") {
+                // Check if this service exists in the master services collection
+                const service = await servicesSchema.findById(valueId).lean();
+                if (!service) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Service with id "${valueId}" does not exist.`,
+                    });
+                }
+
+                // ===== BusinessProfile MyServices Presence Check =====
+                // Check if the service is present in the business profile's myServices
+                const existsInMyServices = (businessProfile.myServices || []).some(
+                    (myService) => myService.service && myService.service.toString() === valueId
+                );
+                if (!existsInMyServices) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Service with id "${valueId}" is not present in your BusinessProfile myServices, so you cannot create a deal for it.`,
+                    });
+                }
+                // ===================================================
+            } else if (value === "subservices") {
+                // For subservices, find a service that has a subservice with this _id in its 'services' array
+                const parent = await servicesSchema.findOne({
+                    "services._id": valueId
+                }).lean();
+                if (!parent) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `SubService with id "${valueId}" does not exist in any service.`,
+                    });
+                }
+
+                // ===== BusinessProfile MyServices and SubService Presence Check =====
+                // Check if the parent service present in business profile's myServices
+                const myServiceObj = (businessProfile.myServices || []).find(
+                    (myService) => myService.service && myService.service.toString() === parent._id.toString()
+                );
+                if (!myServiceObj) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Cannot create a deal: The parent Service containing your SubService is not present in your BusinessProfile myServices.`,
+                    });
+                }
+                // Check if the subService id is in the myServiceObj.subServices
+                const foundSubService = (myServiceObj.subServices || []).some(
+                    (sub) => sub.subService && sub.subService.toString() === valueId
+                );
+                if (!foundSubService) {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Cannot create a deal: The requested SubService with id "${valueId}" is not present in your BusinessProfile myServices for Service "${parent._id}".`,
+                    });
+                }
+                // ===================================================
+            }
+        }
+        // If value is 'all', valueId must be undefined or ignored
+        if (value === "all" && valueId) {
+            return res.status(400).json({
+                success: false,
+                message: "valueId should not be provided when value is 'all'."
+            });
+        }
+
+        // Prepare deal object for mongoose
+        const dealData = {
+            name,
+            description,
+            value,
+            percentageDiscount,
+            dealEnabled: dealEnabled !== undefined ? dealEnabled : false,
+            startDate,
+            endDate,
+            additionalDetails,
+            createdBy: businessProfile._id,
+            couponCode, // Coupon code is mandatory, so always include
+        };
+        if (processedValueId) dealData.valueId = processedValueId;
+
+        const deal = new DealModel(dealData);
+        await deal.save();
+
+        // Add newly created deal to the business's myDeals
+        businessProfile.myDeals = businessProfile.myDeals || [];
+        businessProfile.myDeals.push(deal._id);
+        await businessProfile.save();
+
+        return res.status(201).json({
+            success: true,
+            message: "Deal created successfully",
+            data: deal
+        });
+    } catch (error) {
+        console.error("[createDeal] Error:", error);
+        // For Mongoose validation errors provide more details
+        if (error.name === "ValidationError") {
+            return res.status(400).json({
+                success: false,
+                message: "Validation error creating deal",
+                error: error.message
+            });
+        }
+        return res.status(500).json({
+            success: false,
+            message: "Error creating deal",
+            error: error.message
+        });
+    }
+}
+
+/**
+ * Edit an existing deal (only if the current business profile created it).
+ * - Only allows update if the deal's createdBy matches the user's businessProfile.
+ * - Does not update createdBy.
+ */
+async editDeal(req, res) {
+    try {
+        const userId = req.user.id;
+
+        const user = await User.findById(userId).lean();
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        // Fetch the business profile for this user (requirement: user.businessProfile must exist)
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
+        if (!businessProfile) {
+            return res.status(404).json({ success: false, message: "Business profile not found" });
+        }
+        
+        const businessProfileId = businessProfile._id;
+
+        const { id } = req.params;
+        const updateData = { ...req.body };
+        // Prevent changing createdBy
+        delete updateData.createdBy;
+
+        // Ensure deal belongs to this business profile
+        const deal = await DealModel.findOneAndUpdate(
+            { _id: id, createdBy: businessProfileId },
+            updateData,
+            { new: true }
+        );
+        if (!deal) {
+            return res.status(404).json({ success: false, message: "Deal not found or not permitted" });
+        }
+        return res.status(200).json({ success: true, message: "Deal updated", data: deal });
+    } catch (error) {
+        console.error("[editDeal] Error:", error);
+        return res.status(500).json({ success: false, message: "Error updating deal", error: error.message });
+    }
+}
+
+/**
+ * Delete a deal by ID (only if created by the current business profile).
+ * - Also removes the deal's _id from BusinessProfile.myDeals.
+ */
+async deleteDeal(req, res) {
+    try {
+       const userId = req.user.id;
+
+        const user = await User.findById(userId).lean();
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        // Fetch the business profile for this user (requirement: user.businessProfile must exist)
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
+        if (!businessProfile) {
+            return res.status(404).json({ success: false, message: "Business profile not found" });
+        }
+        
+        const businessProfileId = businessProfile._id;
+        
+        const { id } = req.params;
+
+        // Only delete if created by this business profile
+        const deal = await DealModel.findOneAndDelete({ _id: id, createdBy: businessProfileId });
+        if (!deal) {
+            return res.status(404).json({ success: false, message: "Deal not found or not permitted" });
+        }
+
+        // Remove deal from myDeals array of the business profile
+        await BusinessProfileModel.findByIdAndUpdate(
+            businessProfileId,
+            { $pull: { myDeals: deal._id } }
+        );
+
+        return res.status(200).json({ success: true, message: "Deal deleted" });
+    } catch (error) {
+        console.error("[deleteDeal] Error:", error);
+        return res.status(500).json({ success: false, message: "Error deleting deal", error: error.message });
+    }
+}
+
+/**
+ * Fetch all deals for the current business profile (BusinessProfile.myDeals).
+ * - Populates the actual Deal documents.
+ */
+async fetchMyDeals(req, res) {
+    try {
+
+
+        const id = req.user.id;
+
+        // Fetch the user to get their businessProfile
+        const user = await User.findById(id).lean();
+        if (!user) {
+            return res.status(404).json({ success: false, message: "User not found" });
+        }
+
+        // Fetch the business profile for this user (requirement: user.businessProfile must exist)
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile)
+        .populate("myDeals");
+        if (!businessProfile) {
+            return res.status(404).json({ success: false, message: "Business profile not found" });
+        }
+       
+
+    
+        // Return all deals in myDeals
+        return res.status(200).json({
+            success: true,
+            data: businessProfile.myDeals || []
+        });
+
+    } catch (error) {
+        console.error("[fetchMyDeals] Error:", error);
+        return res.status(500).json({ success: false, message: "Error fetching deals", error: error.message });
+    }
+}
 
 
 
