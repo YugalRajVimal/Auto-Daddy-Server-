@@ -49,6 +49,10 @@ userRouter.get("/deals", (req, res) => { userController.getAllDeals(req, res) })
 // Route to get all auto shops (public endpoint)
 userRouter.get("/auto-shops", (req, res) => { userController.getAllAutoShops(req, res) });
 
+// Fetch all job cards for the authenticated user (car owner)
+userRouter.get("/job-cards", jwtAuth, (req, res) => { userController.getAllJobCards(req, res) });
+
+
 
 
 

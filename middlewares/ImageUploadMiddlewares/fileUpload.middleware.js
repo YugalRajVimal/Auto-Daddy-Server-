@@ -31,7 +31,8 @@ const storage = multer.diskStorage({
     else if (
       file.fieldname === "licensePlateFrontImage" ||
       file.fieldname === "licensePlateBackImage" ||
-      file.fieldname === "carImages"
+      file.fieldname === "carImages" ||
+      file.fieldname === "vehiclePhotos"
     ) {
       uploadPath = "./Uploads/Vehicles";
     }
@@ -69,6 +70,7 @@ const fileFilter = (req, file, cb) => {
     "licensePlateFrontImage",
     "licensePlateBackImage",
     "carImages",
+    "vehiclePhotos",
     "businessLogo",
     "teamMemberPhoto",
   ];

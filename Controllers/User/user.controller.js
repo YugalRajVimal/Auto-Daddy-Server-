@@ -2,6 +2,7 @@ import { deleteUploadedFiles } from "../../middlewares/ImageUploadMiddlewares/fi
 
 import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 import DealModel from "../../Schema/deals.schema.js";
+import JobCard from "../../Schema/jobCard.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
 
@@ -515,6 +516,40 @@ class UserController {
         } catch (error) {
             console.error("[getAllAutoShops] Error:", error);
             return res.status(500).json({ success: false, message: 'Failed to fetch auto shops', error: error.message });
+        }
+    };
+
+    // Fetch all job cards for this car owner (customer)
+    getAllJobCards = async (req, res) => {
+        try {
+            // Get the requesting user
+            const userId = req.user && req.user.id;
+            if (!userId) {
+                return res.status(401).json({ success: false, message: "Unauthorized" });
+            }
+
+            // Get the user profile and check if user exists
+            const user = await User.findById(userId).lean();
+            if (!user) {
+                return res.status(404).json({ success: false, message: "User not found" });
+            }
+
+            // Find all JobCards where this user is the customer
+            const jobCards = await JobCard.find({ customerId: userId })
+                .populate([
+                    { path: 'business', model: 'BusinessProfile', select: 'businessName businessType address contactNumber' },
+                    { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' },
+                ])
+                .sort({ createdAt: -1 })
+                .lean();
+
+            return res.status(200).json({
+                success: true,
+                data: jobCards
+            });
+        } catch (error) {
+            console.error("[getAllJobCards - CarOwner] Error:", error);
+            return res.status(500).json({ success: false, message: "Failed to fetch JobCards", error: error.message });
         }
     };
 }
