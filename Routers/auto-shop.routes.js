@@ -178,6 +178,40 @@ autoShopRouter.get(
   (req, res) => autoShopController.fetchMyDeals(req, res)
 );
 
+// Route to fetch Job Card Page for the current business
+autoShopRouter.get(
+  "/job-card-page",
+  jwtAuth,
+  (req, res) => autoShopController.fetchJobCardPage(req, res)
+);
+
+
+// Route to create a new JobCard for the auto shop owner
+autoShopRouter.post(
+  "/job-cards",
+  jwtAuth,
+  businessAndTeamUploadMiddleware,
+  (req, res) => {
+    console.log(req.body);
+    autoShopController.createJobCard(req, res);
+  }
+);
+
+// Route to fetch all JobCards for the current AutoShop owner (business)
+autoShopRouter.get(
+  "/job-cards",
+  jwtAuth,
+  (req, res) => autoShopController.getAllJobCards(req, res)
+);
+
+// Route to fetch all payments for the current auto shop's business profile
+autoShopRouter.get(
+  "/payments",
+  jwtAuth,
+  (req, res) => autoShopController.getAllPayments(req, res)
+);
+
+
 
 
 

@@ -6,6 +6,7 @@ import { User } from "../../Schema/user.schema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
 import servicesSchema from "../../Schema/services.schema.js";
 import DealModel from "../../Schema/deals.schema.js";
+import JobCard from "../../Schema/jobCard.schema.js";
 
 class AutoShopController {
 
@@ -1672,6 +1673,641 @@ async fetchMyDeals(req, res) {
         return res.status(500).json({ success: false, message: "Error fetching deals", error: error.message });
     }
 }
+
+/**
+ * Fetch Job Card Page for the current business, including:
+ * - MyCustomers with their vehicle details,
+ * - My Services,
+ * - My Deals.
+ *
+ * Expects the current authenticated user (`req.user`) to have a `businessProfile`.
+ */
+async fetchJobCardPage(req, res) {
+    try {
+        const userId = req.user.id;
+
+        // Fetch user with businessProfile and populate customers/vehicles
+        const user = await User.findById(userId).populate({
+            path: "myCustomers",
+            populate: { path: "myVehicles", model: "Vehicle" }
+        }).lean();
+        if (!user || !user.businessProfile) {
+            return res.status(404).json({ success: false, message: "Business profile not found for user" });
+        }
+
+        // Get the business profile with myDeals, and myServices.service (for service name & desc)
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile)
+            .populate({
+                path: "myServices.service",
+                select: "name desc" // Only fetch the name/desc, not the full subservices array
+            })
+            .populate("myDeals")
+            .lean();
+
+        if (!businessProfile) {
+            return res.status(404).json({ success: false, message: "Business profile not found" });
+        }
+
+        // For each myService in myServices, populate a subServices array with the actual subService objects
+        if (businessProfile.myServices && Array.isArray(businessProfile.myServices)) {
+            // Get all unique service ids
+            const serviceIds = businessProfile.myServices.map(ms => ms.service?._id).filter(Boolean);
+            const allServiceDocs = await (await import("../../Schema/services.schema.js")).default.find({
+                _id: { $in: serviceIds }
+            }).lean();
+
+            // Map serviceId -> serviceDoc
+            const serviceMap = {};
+            allServiceDocs.forEach(serviceDoc => {
+                serviceMap[serviceDoc._id.toString()] = serviceDoc;
+            });
+
+            businessProfile.myServices = businessProfile.myServices.map(myService => {
+                const serviceDoc = serviceMap[myService.service?._id?.toString()];
+                if (!serviceDoc || !Array.isArray(myService.subServices)) {
+                    return {
+                        ...myService,
+                        subServices: []
+                    };
+                }
+                const selectedSubServiceIds = (myService.subServices || []).map(s => s.subService?.toString());
+                // Populate subServices array in the same place, with only the matching subService objects
+                const populatedSubServices = (serviceDoc.services || []).filter(sub =>
+                    selectedSubServiceIds.includes(sub._id.toString())
+                );
+                // For compatibility: insert the actual subService docs into .subServices
+                return {
+                    ...myService,
+                    service: {
+                        _id: serviceDoc._id,
+                        name: serviceDoc.name,
+                        desc: serviceDoc.desc
+                    },
+                    subServices: populatedSubServices
+                };
+            });
+        }
+
+        // Structure the response payload with cleaned myServices
+        return res.status(200).json({
+            success: true,
+            data: {
+                myCustomers: user.myCustomers || [],
+                myServices: businessProfile.myServices || [],
+                myDeals: businessProfile.myDeals || []
+            }
+        });
+    } catch (error) {
+        console.error("[fetchJobCardPage] Error:", error);
+        return res.status(500).json({ success: false, message: "Error fetching job card page", error: error.message });
+    }
+}
+
+
+
+
+/**
+ * Create a JobCard for an auto shop owner.
+ * Validates:
+ *   - customerId is a customer of this AutoShop
+ *   - vehicleId is present in customer's vehicles
+ *   - serviceType and priorityLevel enums are valid
+ *   - All services/subServices exist in this BusinessProfile's myServices
+ * Returns: Created JobCard document
+ */
+
+async createJobCard(req, res) {
+    // Accept vehiclePhotos from file uploads (multer) via req.files["vehiclePhotos"]
+    // If there is an error anywhere that requires aborting, cleanup file uploads!
+
+    try {
+        if (typeof req.body.services === "string") {
+            try {
+                req.body.services = JSON.parse(req.body.services);
+            } catch (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid services JSON format"
+                });
+            }
+        }
+
+        const {
+            customerId,
+            vehicleId,
+            odometerReading,
+            issueDescription,
+            serviceType,
+            priorityLevel,
+            services,
+            additionalNotes,
+            technicalRemarks,
+            dealCode // Accept dealCode from the body (coupon code)
+        } = req.body;
+
+        if (typeof req.body.services === "string") {
+            req.body.services = JSON.parse(req.body.services);
+        }
+
+        // Get the uploaded files from req.files["vehiclePhotos"], array of file objects (if any)
+        let uploadedPhotos = [];
+        if (req.files && req.files["vehiclePhotos"]) {
+            if (Array.isArray(req.files["vehiclePhotos"])) {
+                uploadedPhotos = req.files["vehiclePhotos"];
+            } else if (req.files["vehiclePhotos"]) {
+                uploadedPhotos = [req.files["vehiclePhotos"]];
+            }
+        }
+        const vehiclePhotos = uploadedPhotos.map(f => f.path || f.location || f.filename).filter(Boolean);
+        
+
+        // Validate basic required fields
+        const missingFields = [];
+        if (!customerId) missingFields.push("customerId");
+        if (!vehicleId) missingFields.push("vehicleId");
+        if (!serviceType) missingFields.push("serviceType");
+        if (!priorityLevel) missingFields.push("priorityLevel");
+        if (!Array.isArray(services)) missingFields.push("services");
+
+        if (missingFields.length > 0) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({
+                success: false,
+                message: `Missing required fields: ${missingFields.join(", ")}`
+            });
+        }
+
+        // Validate enums
+        const allowedServiceTypes = ['Repair', 'Maintenance', 'Inspection'];
+        const allowedPriorityLevels = ['Normal', 'Urgent'];
+        if (!allowedServiceTypes.includes(serviceType)) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Invalid serviceType" });
+        }
+        if (!allowedPriorityLevels.includes(priorityLevel)) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Invalid priorityLevel" });
+        }
+        if (vehiclePhotos.length > 5) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Maximum 5 vehiclePhotos allowed" });
+        }
+
+        // 1. Find user/customer and check if customerId belongs to this workshop's customers
+        const user = await User.findById(req.user.id);
+        if (!user) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(404).json({ success: false, message: "AutoShop owner user not found" });
+        }
+        const myCustomersList = Array.isArray(user.myCustomers)
+            ? user.myCustomers.map(c => c.customer?._id?.toString() || c._id?.toString() || c.toString())
+            : [];
+        if (!myCustomersList.includes(customerId.toString())) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(403).json({ success: false, message: "Customer not registered with this business" });
+        }
+
+        // 2. Fetch customer & validate vehicleId in their myVehicles
+        const customerUser = await User.findById(customerId);
+        if (!customerUser) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(404).json({ success: false, message: "Customer not found" });
+        }
+        const myVehiclesList = Array.isArray(customerUser.myVehicles)
+            ? customerUser.myVehicles.map(v =>
+                v.vehicle?._id?.toString() || v._id?.toString() || v.toString()
+            ) : [];
+        if (!myVehiclesList.includes(vehicleId.toString())) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Vehicle does not belong to customer" });
+        }
+
+        // 3. Fetch AutoShop businessProfile, validate offered services and subservices
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
+        if (!businessProfile) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(404).json({ success: false, message: "Business profile not found" });
+        }
+        // Build allowed services & subServices set from BusinessProfile.myServices
+        const allowedServiceIds = new Set();
+        const allowedSubServiceIdsByService = {};
+        (businessProfile.myServices || []).forEach(ms => {
+            const serviceId = ms.service?._id?.toString() || ms.service?.toString();
+            if (serviceId) {
+                allowedServiceIds.add(serviceId);
+                allowedSubServiceIdsByService[serviceId] = new Set(
+                    (ms.subServices || []).map(ss => ss.subService?.toString())
+                );
+            }
+        });
+
+        console.log("--", allowedServiceIds);
+
+        // 4. Check each service in payload
+        for (const s of services) {
+            const sid = s.id?.toString();
+            if (!sid || !allowedServiceIds.has(sid)) {
+                if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+                return res.status(400).json({ success: false, message: `Service ${sid} not provided by this AutoShop` });
+            }
+            // Check subService IDs if present
+            if (Array.isArray(s.subServices)) {
+                const allowedSubIds = allowedSubServiceIdsByService[sid] || new Set();
+                for (const sub of s.subServices) {
+                    const subId = sub.id?.toString();
+                    if (subId && !allowedSubIds.has(subId)) {
+                        if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+                        return res.status(400).json({ success: false, message: `SubService ${subId} not available under Service ${sid}` });
+                    }
+                }
+            }
+        }
+
+        // 5. Calculate total amount (pre-discount) and process price data
+        // We'll expect each subService object to contain a price. Ignore ones missing price, but warn.
+        let totalAmount = 0;
+        let serviceMap = new Map();
+        // We'll use this to also store the discounted price structure for step 8
+        let servicesWithDiscounts = JSON.parse(JSON.stringify(services || []));
+
+        (services || []).forEach((serviceItem, serviceIdx) => {
+            const sId = serviceItem.id?.toString();
+            if (!sId) return;
+            let subTotal = 0;
+            if (Array.isArray(serviceItem.subServices)) {
+                serviceItem.subServices.forEach((ss, subIdx) => {
+                    const price = parseFloat(ss.price || 0);
+                    if (!isNaN(price)) {
+                        totalAmount += price;
+                        subTotal += price;
+                        // Will possibly be updated with discount later
+                    }
+                });
+            }
+            serviceMap.set(sId, subTotal);
+        });
+
+        // 6. Handle deal/coupon code (if provided), and recalculate discounted total
+        let appliedDeal = null;
+        let discountAmount = 0;
+        let discountPercentage = 0;
+        let newTotalAmount = totalAmount;
+
+        // Create discount details structure for response, reflecting where the discounts were taken from
+        let serviceDiscountDetails = [];
+
+        if (dealCode && typeof dealCode === "string" && dealCode.trim()) {
+            // Try to find a valid deal for this business profile and coupon code (enabled and not expired)
+            const now = new Date();
+            appliedDeal = await DealModel.findOne({
+                couponCode: dealCode,
+                createdBy: businessProfile._id,
+                dealEnabled: true,
+                $or: [
+                    { endDate: { $exists: false } },
+                    { endDate: null },
+                    { endDate: { $gte: now } }
+                ]
+            }).lean();
+
+            if (appliedDeal) {
+                // Only apply deal for relevant services or subservices as per deal rules
+                let eligibleSubtotal = 0;
+
+                // Deal Type: "all"
+                if (appliedDeal.value === "all") {
+                    eligibleSubtotal = totalAmount;
+                    discountPercentage = appliedDeal.percentageDiscount || 0;
+                    // Apply discount to all services and subservices
+                    (servicesWithDiscounts || []).forEach((serviceItem, idx) => {
+                        let subDiscounts = [];
+                        if (Array.isArray(serviceItem.subServices)) {
+                            serviceItem.subServices.forEach((ss, sIdx) => {
+                                const price = parseFloat(ss.price || 0);
+                                let subDiscount = 0;
+                                if (!isNaN(price) && discountPercentage > 0) {
+                                    subDiscount = Number(((price * discountPercentage) / 100).toFixed(2));
+                                    ss.discountedPrice = Number((price - subDiscount).toFixed(2));
+                                    ss.discountAmount = subDiscount;
+                                } else {
+                                    ss.discountedPrice = price;
+                                    ss.discountAmount = 0;
+                                }
+                                subDiscounts.push({
+                                    subServiceId: ss.id,
+                                    originalPrice: price,
+                                    discountedPrice: ss.discountedPrice,
+                                    discountAmount: subDiscount
+                                });
+                                eligibleSubtotal += price;
+                            });
+                        }
+                        serviceDiscountDetails.push({
+                            serviceId: serviceItem.id,
+                            discounts: subDiscounts
+                        });
+                    });
+                }
+                // Deal Type: "services"
+                else if (appliedDeal.value === "services" && appliedDeal.valueId) {
+                    discountPercentage = appliedDeal.percentageDiscount || 0;
+                    const eligibleServiceId = appliedDeal.valueId.toString();
+                    (servicesWithDiscounts || []).forEach((serviceItem, idx) => {
+                        let subDiscounts = [];
+                        if (serviceItem.id?.toString() === eligibleServiceId && Array.isArray(serviceItem.subServices)) {
+                            serviceItem.subServices.forEach((ss, sIdx) => {
+                                const price = parseFloat(ss.price || 0);
+                                let subDiscount = 0;
+                                if (!isNaN(price) && discountPercentage > 0) {
+                                    subDiscount = Number(((price * discountPercentage) / 100).toFixed(2));
+                                    ss.discountedPrice = Number((price - subDiscount).toFixed(2));
+                                    ss.discountAmount = subDiscount;
+                                    eligibleSubtotal += price;
+                                } else {
+                                    ss.discountedPrice = price;
+                                    ss.discountAmount = 0;
+                                }
+                                subDiscounts.push({
+                                    subServiceId: ss.id,
+                                    originalPrice: price,
+                                    discountedPrice: ss.discountedPrice,
+                                    discountAmount: subDiscount
+                                });
+                            });
+                            serviceDiscountDetails.push({
+                                serviceId: serviceItem.id,
+                                discounts: subDiscounts
+                            });
+                        } else if (Array.isArray(serviceItem.subServices)) {
+                            // No discount for these subservices
+                            serviceItem.subServices.forEach((ss, sIdx) => {
+                                const price = parseFloat(ss.price || 0);
+                                ss.discountedPrice = price;
+                                ss.discountAmount = 0;
+                                subDiscounts.push({
+                                    subServiceId: ss.id,
+                                    originalPrice: price,
+                                    discountedPrice: price,
+                                    discountAmount: 0
+                                });
+                            });
+                            serviceDiscountDetails.push({
+                                serviceId: serviceItem.id,
+                                discounts: subDiscounts
+                            });
+                        }
+                    });
+                }
+                // Deal Type: "subservices"
+                else if (appliedDeal.value === "subservices" && appliedDeal.valueId) {
+                    discountPercentage = appliedDeal.percentageDiscount || 0;
+                    const eligibleSubServiceId = appliedDeal.valueId.toString();
+                    (servicesWithDiscounts || []).forEach((serviceItem, idx) => {
+                        let subDiscounts = [];
+                        if (Array.isArray(serviceItem.subServices)) {
+                            serviceItem.subServices.forEach((ss, sIdx) => {
+                                const price = parseFloat(ss.price || 0);
+                                let subDiscount = 0;
+                                if (
+                                    ss.id?.toString() === eligibleSubServiceId &&
+                                    !isNaN(price) &&
+                                    discountPercentage > 0
+                                ) {
+                                    subDiscount = Number(((price * discountPercentage) / 100).toFixed(2));
+                                    ss.discountedPrice = Number((price - subDiscount).toFixed(2));
+                                    ss.discountAmount = subDiscount;
+                                    eligibleSubtotal += price;
+                                } else {
+                                    ss.discountedPrice = price;
+                                    ss.discountAmount = 0;
+                                }
+                                subDiscounts.push({
+                                    subServiceId: ss.id,
+                                    originalPrice: price,
+                                    discountedPrice: ss.discountedPrice,
+                                    discountAmount: subDiscount
+                                });
+                            });
+                        }
+                        serviceDiscountDetails.push({
+                            serviceId: serviceItem.id,
+                            discounts: subDiscounts
+                        });
+                    });
+                }
+
+                // Apply discount if eligible
+                if (eligibleSubtotal > 0 && discountPercentage > 0) {
+                    discountAmount = Number(((eligibleSubtotal * discountPercentage) / 100).toFixed(2));
+                    // Sum recalculated actual
+                    newTotalAmount = Number(
+                        (totalAmount - discountAmount).toFixed(2)
+                    );
+                }
+            } else {
+                // no deal found, rebuild discounts as no discount case
+                if (servicesWithDiscounts) {
+                    servicesWithDiscounts.forEach(serviceItem => {
+                        let subDiscounts = [];
+                        if (Array.isArray(serviceItem.subServices)) {
+                            serviceItem.subServices.forEach(ss => {
+                                const price = parseFloat(ss.price || 0);
+                                ss.discountedPrice = price;
+                                ss.discountAmount = 0;
+                                subDiscounts.push({
+                                    subServiceId: ss.id,
+                                    originalPrice: price,
+                                    discountedPrice: price,
+                                    discountAmount: 0
+                                });
+                            });
+                        }
+                        serviceDiscountDetails.push({
+                            serviceId: serviceItem.id,
+                            discounts: subDiscounts
+                        });
+                    });
+                }
+            }
+        } else {
+            // No deal provided: set discountedPrice = price everywhere
+            if (servicesWithDiscounts) {
+                servicesWithDiscounts.forEach(serviceItem => {
+                    let subDiscounts = [];
+                    if (Array.isArray(serviceItem.subServices)) {
+                        serviceItem.subServices.forEach(ss => {
+                            const price = parseFloat(ss.price || 0);
+                            ss.discountedPrice = price;
+                            ss.discountAmount = 0;
+                            subDiscounts.push({
+                                subServiceId: ss.id,
+                                originalPrice: price,
+                                discountedPrice: price,
+                                discountAmount: 0
+                            });
+                        });
+                    }
+                    serviceDiscountDetails.push({
+                        serviceId: serviceItem.id,
+                        discounts: subDiscounts
+                    });
+                });
+            }
+        }
+
+        // 7. Insert JobCard (add total, discount, dealCode, discountAmount)
+        // Use discounted (and discountAmount) fields for output, but store original prices structure.
+        // Store path(s) of uploaded Vehicle photos in vehiclePhotos field
+        // Ensure only the file paths/URLs of uploaded photos are stored in the JobCard
+        const jobCardDoc = new JobCard({
+            business: user.businessProfile,
+            customerId,
+            vehicleId,
+            odometerReading,
+            issueDescription,
+            serviceType,
+            priorityLevel,
+            services: servicesWithDiscounts.map(serviceItem => ({
+                id: serviceItem.id,
+                subServices: Array.isArray(serviceItem.subServices)
+                    ? serviceItem.subServices.map(ss => ({
+                        id: ss.id,
+                        price: ss.price,
+                        discountedPrice: ss.discountedPrice,
+                        discountAmount: ss.discountAmount
+                    }))
+                    : []
+            })),
+            additionalNotes,
+            vehiclePhotos: Array.isArray(vehiclePhotos) ? vehiclePhotos : [], // Only array of file paths/URLs
+            technicalRemarks,
+            dealApplied: appliedDeal ? {
+                name: appliedDeal.name,
+                percentageDiscount: appliedDeal.percentageDiscount,
+                dealCode: appliedDeal.couponCode
+            } : undefined,
+            totalPayableAmount: Number(newTotalAmount.toFixed(2)),
+        });
+
+        await jobCardDoc.save();
+
+        return res.status(201).json({
+            success: true,
+            message: "JobCard created successfully",
+            data: {
+                ...jobCardDoc.toObject(),
+                services: servicesWithDiscounts // send services with discount breakdown
+            },
+            dealApplied: appliedDeal ? {
+                name: appliedDeal.name,
+                percentageDiscount: appliedDeal.percentageDiscount,
+                dealCode: appliedDeal.couponCode
+            } : null,
+            serviceDiscountDetails, // Expanded breakdown for each service/subservice
+            totalPayableAmount: Number(newTotalAmount.toFixed(2)) // Added: total payable amount
+        });
+    } catch (err) {
+        // Delete uploaded vehicle photo(s) if an error occurred
+        if (req.files && req.files["vehiclePhotos"]) {
+            const files =
+                Array.isArray(req.files["vehiclePhotos"])
+                    ? req.files["vehiclePhotos"]
+                    : [req.files["vehiclePhotos"]];
+            if (files.length) {
+                await deleteUploadedFiles(files);
+            }
+        }
+        console.error("[createJobCard] Error:", err);
+        return res.status(500).json({ success: false, message: "Failed to create JobCard", error: err.message });
+    }
+}
+
+/**
+ * Get all JobCards for the current AutoShop owner (business).
+ * Returns job cards created by this user/business.
+ */
+async getAllJobCards(req, res) {
+    try {
+        // Get the requesting user
+        const userId = req.user && req.user.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        // Get the user's business profile
+        const user = await User.findById(userId).lean();
+        if (!user || !user.businessProfile) {
+            return res.status(404).json({ success: false, message: "AutoShop business profile not found" });
+        }
+
+        // Find all job cards created by this business
+        const jobCards = await JobCard.find({ business: user.businessProfile })
+            .populate([
+                { path: 'customerId', model: 'User', select: 'name phone email' },
+                { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' },
+            ])
+            .sort({ createdAt: -1 })
+            .lean();
+
+        return res.status(200).json({
+            success: true,
+            data: jobCards
+        });
+    } catch (err) {
+        console.error("[getAllJobCards] Error:", err);
+        return res.status(500).json({ success: false, message: "Failed to fetch JobCards", error: err.message });
+    }
+}
+
+/**
+ * Get all payments for the current auto shop's business profile.
+ * Returns all JobCards for this business where paymentStatus is 'Paid'.
+ * Only selects relevant payment fields and populates minimal customer & vehicle info.
+ */
+async getAllPayments(req, res) {
+    try {
+        // Get the requesting user
+        const userId = req.user && req.user.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        // Find the user's linked business profile
+        const user = await User.findById(userId).lean();
+        if (!user || !user.businessProfile) {
+            return res.status(404).json({ success: false, message: "AutoShop business profile not found" });
+        }
+
+        // Find all JobCards for this business with paymentStatus 'Paid'
+        const jobCardsWithPayments = await JobCard.find({
+                business: user.businessProfile
+            })
+            .select('customerId vehicleId totalPayableAmount paymentStatus dealApplied  createdAt')
+            .populate([
+                { path: 'customerId', model: 'User', select: 'name phone email' },
+                { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' }
+            ])
+            .sort({ createdAt: -1 })
+            .lean();
+
+        return res.status(200).json({
+            success: true,
+            data: jobCardsWithPayments
+        });
+
+    } catch (err) {
+        console.error("[getAllPayments] Error:", err);
+        return res.status(500).json({ 
+            success: false, 
+            message: "Failed to fetch payments", 
+            error: err.message 
+        });
+    }
+}
+
+
+
+
 
 
 
