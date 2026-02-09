@@ -125,6 +125,13 @@ autoShopRouter.post(
   (req, res) => autoShopController.verifyOnboardedCarowner(req, res)
 );
 
+// Route to fetch all master services (with subservices) for the platform (for auto shop use)
+autoShopRouter.get(
+  "/services",
+  jwtAuth,
+  (req, res) => autoShopController.fetchServices(req, res)
+);
+
 
 // Route to get all services and subservices in the current auto shop's business profile
 autoShopRouter.get(

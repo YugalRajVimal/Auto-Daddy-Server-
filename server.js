@@ -36,7 +36,7 @@ app.use(
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-const port = process.env.PORT || 8080;
+const port = process.env.PORT || 8822;
 
 app.use("/Uploads/Therapist", express.static("Uploads/Therapist"));
 

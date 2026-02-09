@@ -7,6 +7,8 @@ import { VehicleModel } from "../../Schema/vehicles.schema.js";
 import servicesSchema from "../../Schema/services.schema.js";
 import DealModel from "../../Schema/deals.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
+import Services from "../../Schema/services.schema.js";
+
 
 class AutoShopController {
 
@@ -1088,6 +1090,17 @@ verifyOnboardedCarowner = async (req, res) => {
  * Lists the "myServices" array with full service and subservice details.
  * Requires req.user to be authenticated autoshopowner.
  */
+
+// Fetch all services
+async fetchServices(req, res) {
+    try {
+      const allServices = await Services.find({});
+      res.status(200).json({ success: true, data: allServices });
+    } catch (err) {
+      res.status(500).json({ success: false, message: "Error fetching services", error: err.message });
+    }
+  }
+
 async getAllMyServices(req, res) {
     try {
         const userId = req.user?.id;
