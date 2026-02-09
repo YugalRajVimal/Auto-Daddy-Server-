@@ -24,13 +24,14 @@ authRouter.put("/complete-profile", jwtAuth, authController.completeProfile);
 
 authRouter.post("/signout", jwtAuth, authController.signOut);
 
+// ===== ADMIN AUTH ROUTES =====
+authRouter.post("/admin/check-auth", jwtAuth, authController.adminCheckAuth);
+authRouter.post("/admin/signin", authController.adminSignin);
+authRouter.post("/admin/verify-account", authController.adminVerifyAccount);
 
 
-// authRouter.post("/super-admin/check-auth",jwtAuth, superAdminAuthController.checkAuth);
-// authRouter.post("/super-admin/login", superAdminAuthController.login);
-// authRouter.post("/super-admin/forgot-password", superAdminAuthController.forgotPassword);
-// authRouter.post("/super-admin/verify-account", superAdminAuthController.verifyAccount);
-// authRouter.post("/super-admin/reset-password", superAdminAuthController.resetPassword);
+
+
 
 
 export default authRouter;
