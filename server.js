@@ -11,6 +11,8 @@ const app = express();
 const allowedOrigins = [
   "http://localhost:5173", // Vite
   "http://localhost:3000", // optional
+  "https://auto-daddy-admin.onrender.com/",
+  "https://www.auto-daddy-admin.onrender.com/",
   process.env.FRONTEND_URL
 ];
 
@@ -38,7 +40,7 @@ app.use(bodyParser.urlencoded({ extended: true }));
 
 const port = process.env.PORT || 8822;
 
-app.use("/Uploads/Therapist", express.static("Uploads/Therapist"));
+app.use("/Uploads", express.static("Uploads"));
 
 app.get("/", (req, res) => {
   res.send("Welcome to Auto Daddy App Server");

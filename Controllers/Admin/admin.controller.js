@@ -1,4 +1,5 @@
 import DealModel from "../../Schema/deals.schema.js";
+import JobCard from "../../Schema/jobCard.schema.js";
 import Services from "../../Schema/services.schema.js";
 import { User } from "../../Schema/user.schema.js";
 
@@ -6,6 +7,74 @@ import { User } from "../../Schema/user.schema.js";
 class AdminController {
 
 
+// @route   GET /admin/dashboard-details
+// @desc    Get dashboard counts for Car owners, Auto Shop owners, JobCards, Deals, Services, and SubServices
+// @access  Admin (authentication assumed at higher middleware)
+async getDashboardDetails(req, res) {
+  try {
+    // 1. Car owners count (role === 'car-owner')
+    const carOwnersCount = await User.countDocuments({ role: 'carowner' });
+
+    // 2. Auto Shop Owners count (role === 'autoshop-owner')
+    const autoShopOwnersCount = await User.countDocuments({ role: 'autoshopowner' });
+
+    // 3. All JobCards
+    const jobCardsCount = await JobCard.countDocuments({});
+
+    // --- Added: JobCards count per day (createdAt) for bar graph data ---
+    // We'll group by date (YYYY-MM-DD) using aggregation
+    const jobCardsByDateAggregation = await JobCard.aggregate([
+      {
+        $group: {
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+          },
+          count: { $sum: 1 }
+        }
+      },
+      { $sort: { _id: 1 } }
+    ]);
+    // Format as { date: '2024-06-04', count: n }
+    const jobCardsByDate = jobCardsByDateAggregation.map(item => ({
+      date: item._id,
+      count: item.count
+    }));
+
+    // 4. All Deals
+    const dealsCount = await DealModel.countDocuments({});
+
+    // 5. All Services
+    const services = await Services.find({});
+    const servicesCount = services.length;
+
+    // 6. All SubServices (sum of all subservices in all Services)
+    let subServicesCount = 0;
+    for (const svc of services) {
+      if (svc.services && Array.isArray(svc.services)) {
+        subServicesCount += svc.services.length;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        carOwnersCount,
+        autoShopOwnersCount,
+        jobCardsCount,
+        jobCardsByDate,  // <-- included here
+        dealsCount,
+        servicesCount,
+        subServicesCount,
+      }
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch dashboard counts",
+      error: err.message
+    });
+  }
+}
 
 // Add a new service (with optional subservices)
 async addService(req, res) {
@@ -136,13 +205,10 @@ async fetchServices(req, res) {
 }
 
 
-// Get all car owners
 async getAllCarOwners(req, res) {
   try {
-    const JobCard = (await import('../../Schema/jobCard.schema.js')).default;
-
     // Find users with role 'carowner', select only specified fields, and populate references
-    const carOwners = await User.find(
+    let carOwners = await User.find(
       { role: "carowner" },
       {
         name: 1,
@@ -158,18 +224,80 @@ async getAllCarOwners(req, res) {
         onboardedBy: 1
       }
     )
-    .populate({
-      path: 'myVehicles',
-      model: 'Vehicle',
-    })
-    .populate({
-      path: 'favoriteAutoShops',
-      model: 'BusinessProfile',
-    })
-    .populate({
-      path: 'onboardedBy',
-      model: 'User',
-      select: 'name email', // Optionally select name/email of who onboarded them
+      .populate({
+        path: 'myVehicles',
+        model: 'Vehicle',
+      })
+      .populate({
+        path: 'favoriteAutoShops',
+        model: 'BusinessProfile',
+      })
+      .populate({
+        path: 'onboardedBy',
+        model: 'User',
+        select: 'name email', // Optionally select name/email of who onboarded them
+      })
+      .lean();
+
+    // For each car owner, retrieve all JobCards where customerId matches the car owner's _id
+    // Gather all owner ids
+    const ownerIds = carOwners.map(owner => owner._id);
+
+    // Bulk fetch all JobCards for these owners, and populate 'business', 'vehicleId', 'customerId', 'services'
+    const allJobCards = await JobCard.find({ customerId: { $in: ownerIds } })
+      .populate({
+        path: 'business',
+        model: 'BusinessProfile',
+      })
+      .populate({
+        path: 'vehicleId',
+        model: 'Vehicle',
+      })
+      .populate({
+        path: 'customerId',
+        model: 'User',
+        select: 'name email' // or adjust as needed
+      })
+      .populate({
+        path: 'services.id',
+        model: 'Services',
+      })
+      .lean();
+
+    // Debug - log each job card with required info
+    allJobCards.forEach((jobCard, idx) => {
+      console.log(`[JobCard ${idx}]`);
+      console.log('  _id:', jobCard._id);
+      console.log('  business:', jobCard.business?._id, jobCard.business?.businessName);
+      console.log('  vehicleId:', jobCard.vehicleId?._id);
+      console.log('  customerId:', jobCard.customerId?._id, jobCard.customerId?.name);
+      if (Array.isArray(jobCard.services)) {
+        jobCard.services.forEach((serviceObj, sidx) => {
+          console.log(`    Service[${sidx}]:`, serviceObj.id?._id, serviceObj.id?.serviceName);
+        });
+      }
+    });
+
+    // Group JobCards by owner _id (customerId)
+    const jobCardsByOwner = {};
+    for (const jobCard of allJobCards) {
+      const ownerId = jobCard.customerId?._id
+        ? jobCard.customerId._id.toString()
+        : jobCard.customerId?.toString();
+      if (!ownerId) continue;
+      if (!jobCardsByOwner[ownerId]) {
+        jobCardsByOwner[ownerId] = [];
+      }
+      jobCardsByOwner[ownerId].push(jobCard);
+    }
+
+    // Attach jobCards for each owner
+    carOwners = carOwners.map(owner => {
+      const jobCards = jobCardsByOwner[owner._id.toString()] || [];
+      return {
+        ...owner,
+        jobCards
+      };
     });
 
     res.status(200).json({ success: true, data: carOwners });
@@ -177,6 +305,7 @@ async getAllCarOwners(req, res) {
     res.status(500).json({ success: false, message: "Error fetching car owners", error: err.message });
   }
 }
+
 
 // Get all auto shop owners
 async getAllAutoShopOwners(req, res) {
@@ -198,46 +327,38 @@ async getAllAutoShopOwners(req, res) {
         myCustomers: 1
       }
     )
-    .populate({
-      path: 'businessProfile',
-      model: 'BusinessProfile',
-      populate: [
-        {
-          path: 'myServices.service',
-          model: 'Services'
-        },
-        {
-          path: 'myDeals',
-          model: 'Deal'
-        }
-      ]
-    })
-    .populate({
-      path: 'myCustomers',
-      model: 'User',
-      select: 'name email phone' // Optional: select subset of customer info
-    });
+      .populate({
+        path: 'businessProfile',
+        model: 'BusinessProfile',
+        populate: [
+          {
+            path: 'myServices.service',
+            model: 'Services'
+          },
+          {
+            path: 'myDeals',
+            model: 'Deal'
+          }
+        ]
+      })
+      .populate({
+        path: 'myCustomers',
+        model: 'User',
+        select: 'name email phone' // Optional: select subset of customer info
+      })
+      .lean();
 
-    // For each auto shop owner's deals (if populated), 
-    // populate valueId with Service if deal.type is "services", or with subService if "subservices"
-
-    // At this point, after the main population, some deals might have been populated inside businessProfile.myDeals
-    // We'll iterate over each owner and their deals, and perform manual population as instructed.
-
-    // Helper function to populate valueId accordingly
+    // Helper function to populate valueId accordingly (unchanged)
     async function populateDealValueIds(deals) {
       if (!Array.isArray(deals)) return deals;
       return Promise.all(
         deals.map(async (deal) => {
           if (deal.type === 'services' && deal.valueId) {
-            // Populate valueId with the Service
             const ServiceModel = require('../../Schema/services.schema').default || require('../../Schema/services.schema');
             const service = await ServiceModel.findById(deal.valueId).lean();
             return { ...deal, value: service || null };
           } else if (deal.type === 'subservices' && deal.valueId) {
-            // Populate valueId as subService: lookup for a subService in all services
             const ServiceModel = require('../../Schema/services.schema').default || require('../../Schema/services.schema');
-            // Find the service document that contains this subservice by _id in its services array
             const serviceDoc = await ServiceModel.findOne({ "services._id": deal.valueId }, { "services.$": 1, name: 1 }).lean();
             let subservice = null;
             if (serviceDoc && serviceDoc.services && serviceDoc.services[0]) {
@@ -266,18 +387,44 @@ async getAllAutoShopOwners(req, res) {
       }
     }
 
-    // Fetch deals for each auto shop owner
+    // Collect all businessProfile _ids to fetch JobCards in one go
+    const businessProfileIds = autoShopOwnersRaw
+      .map(o => o.businessProfile && o.businessProfile._id ? o.businessProfile._id.toString() : null)
+      .filter(id => !!id);
+
+    // Bulk fetch all JobCards where 'business' matches any auto shop owner's businessProfile _id
+    // Use .lean() for performance, unless you need Mongoose docs for virtuals etc.
+    const allJobCards = await JobCard.find({ business: { $in: businessProfileIds } }).lean();
+
+    // Group JobCards by business (businessProfile _id)
+    const jobCardsByBusiness = {};
+    for (const jobCard of allJobCards) {
+      const businessId = jobCard.business?.toString();
+      if (!businessId) continue;
+      if (!jobCardsByBusiness[businessId]) {
+        jobCardsByBusiness[businessId] = [];
+      }
+      jobCardsByBusiness[businessId].push(jobCard);
+    }
+
+    // Fetch deals for each auto shop owner, and attach jobCards array for each owner (by their businessProfile)
     const autoShopOwners = await Promise.all(
       autoShopOwnersRaw.map(async (owner) => {
         let deals = [];
         if (owner.businessProfile?._id) {
           deals = await DealModel.find(
             { createdBy: owner.businessProfile._id }
-          );
+          ).lean();
         }
+        // Gather jobCards for this owner (their businessProfile._id)
+        const jobCards = owner.businessProfile && owner.businessProfile._id
+          ? (jobCardsByBusiness[owner.businessProfile._id.toString()] || [])
+          : [];
+
         return {
-          ...owner.toObject(),
-          deals
+          ...owner,
+          deals,
+          jobCards
         };
       })
     );
