@@ -12,6 +12,10 @@ adminRouter.get("/", (req, res) => {
   res.send("Welcome to Auto Daddy Admin APIs");
 });
 
+// Admin dashboard stats endpoint
+adminRouter.get("/dashboard", (req, res) => adminController.getDashboardDetails(req, res));
+
+
 
 
 

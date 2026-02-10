@@ -29,7 +29,7 @@ const jobServiceSchema = new Schema({
 
 const JobCardSchema = new Schema({
     business:{ type: Types.ObjectId, required: true, ref: 'BusinessProfile' },
-    customerId: { type: Types.ObjectId, required: true, ref: 'Customer' },
+    customerId: { type: Types.ObjectId, required: true, ref: 'User' },
     vehicleId: { type: Types.ObjectId, required: true, ref: 'Vehicle' },
     odometerReading: { type: Number },
     issueDescription: { type: String },
