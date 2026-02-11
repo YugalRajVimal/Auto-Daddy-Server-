@@ -512,7 +512,7 @@ class UserController {
                     path: 'myServices.subServices.subService', // Populate subServices
                 })
                 .populate({
-                    path: 'deals', // Populate deals
+                    path: 'myDeals', // Populate deals
                     model: 'Deal' // Make sure this matches your deals schema model name
                 });
 
