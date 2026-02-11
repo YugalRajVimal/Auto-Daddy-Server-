@@ -503,13 +503,17 @@ class UserController {
     // Fetch all auto shops (reuse logic from AutoShopController)
     getAllAutoShops = async (req, res) => {
         try {
-            // Populate myServices.service (reference to Services), and for each, populate subServices.subService (objectId)
+            // Find all auto shops and populate services, subServices, and deals
             const autoShops = await BusinessProfileModel.find({})
                 .populate({
-                    path: 'myServices.service', // First: main service info for each myService
+                    path: 'myServices.service', // Populate main service info
                 })
                 .populate({
-                    path: 'myServices.subServices.subService', // Then: for each myService, the selected subService ObjectId
+                    path: 'myServices.subServices.subService', // Populate subServices
+                })
+                .populate({
+                    path: 'deals', // Populate deals
+                    model: 'Deal' // Make sure this matches your deals schema model name
                 });
 
             return res.status(200).json({ success: true, data: autoShops });
