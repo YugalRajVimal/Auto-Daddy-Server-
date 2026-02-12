@@ -22,17 +22,13 @@ const UserSchema = new mongoose.Schema(
     phone:{type: String, default: ""},
     pincode:{type: String, default: null},
     address:{type: String, default: null},
-
-
+    profilePhoto:{type: String, default: null},
     isDisabled: { type: Boolean, default: false },
     isProfileComplete :{type: Boolean, default: false},
-
-
     //Car Owner
     favoriteAutoShops: [{ type: mongoose.Schema.Types.ObjectId, ref: "AutoShop", default: [] }],
     myVehicles: [{ type: mongoose.Schema.Types.ObjectId, ref: "Vehicle", default: [] }],
     onboardedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
-
     //Auto Shop Owner
     isAutoShopBusinessProfileComplete: { type: Boolean, default: false },
     businessProfile: { type: mongoose.Schema.Types.ObjectId, ref: "BusinessProfile", default: null },
