@@ -42,7 +42,6 @@ class AutoShopController {
             if (!user.businessProfile) {
                 return res.status(404).json({ message: "No business profile associated with user." });
             }
-            // No need for new mongoose.Types.ObjectId(user.businessProfile) if already ObjectId, but cast if string.
             const businessId = (typeof user.businessProfile === "string")
                 ? new mongoose.Types.ObjectId(user.businessProfile)
                 : user.businessProfile;
@@ -73,9 +72,19 @@ class AutoShopController {
                 count: item.count
             }));
 
+            // Fetch business profile to get businessLogo and businessName
+            const businessProfile = await BusinessProfileModel.findById(
+                businessId,
+                'businessLogo businessName'
+            ).lean();
+            const businessLogo = businessProfile ? businessProfile.businessLogo : null;
+            const businessName = businessProfile ? businessProfile.businessName : null;
+
             return res.status(200).json({
                 success: true,
-                jobCardsByDate: result
+                jobCardsByDate: result,
+                businessLogo,
+                businessName
             });
 
         } catch (error) {
