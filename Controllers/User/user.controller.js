@@ -513,7 +513,6 @@ class UserController {
                 })
                 .populate({
                     path: 'myDeals',
-                    // Explicitly match the Deal model and select fields as needed
                     model: 'Deal'
                 });
 
