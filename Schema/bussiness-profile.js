@@ -46,7 +46,7 @@ const businessProfileSchema = new Schema({
   myServices: [myServiceSchema],
 
   // Add support for linking deals to this business profile
-  myDeals: [{  type: Schema.Types.ObjectId, ref: "Deal" }],
+  myDeals: [{ type: Types.ObjectId, ref: "Deal" }],
 
   createdAt: {
     type: Date,

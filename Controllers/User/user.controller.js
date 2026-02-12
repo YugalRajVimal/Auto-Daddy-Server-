@@ -165,6 +165,11 @@ class UserController {
                 }
             }
 
+            // Handle "profilePhoto" if file uploaded (with multer)
+            if (req.file && req.file.path) {
+                updateFields.profilePhoto = req.file.path.replace(/\\/g, "/");
+            }
+
             if (Object.keys(updateFields).length === 0) {
                 return res.status(400).json({ message: "No profile fields provided to update." });
             }
@@ -201,13 +206,13 @@ class UserController {
 
             // Only return relevant info, still include phone in response (not updated)
             const {
-                name, email, phone, countryCode, pincode, address
+                name, email, phone, countryCode, pincode, address, profilePhoto
             } = updatedUser;
 
             return res.status(200).json({
                 success: true,
                 message: "Profile updated successfully.",
-                data: { name, email, phone, countryCode, pincode, address }
+                data: { name, email, phone, countryCode, pincode, address, profilePhoto }
             });
 
         } catch (error) {

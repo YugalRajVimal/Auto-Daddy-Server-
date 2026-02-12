@@ -42,6 +42,9 @@ const storage = multer.diskStorage({
     else if (file.fieldname === "teamMemberPhoto") {
       uploadPath = "./Uploads/TeamMembers";
     }
+    else if (file.fieldname === "profilePhoto") {
+      uploadPath = "./Uploads/UserProfiles";
+    }
 
     fs.mkdirSync(uploadPath, { recursive: true });
     cb(null, uploadPath);
@@ -73,6 +76,7 @@ const fileFilter = (req, file, cb) => {
     "vehiclePhotos",
     "businessLogo",
     "teamMemberPhoto",
+    "profilePhoto",
   ];
 
   if (imageFields.includes(file.fieldname)) {

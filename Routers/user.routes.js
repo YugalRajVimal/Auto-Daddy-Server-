@@ -2,6 +2,7 @@ import express from "express";
 import UserController from "../Controllers/User/user.controller.js";
 import jwtAuth from "../middlewares/Auth/auth.middleware.js";
 import { vehicleUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/vehicleUpload.middleware.js";
+import { upload } from "../middlewares/ImageUploadMiddlewares/fileUpload.middleware.js";
 
 
 
@@ -15,7 +16,7 @@ const userController = new UserController();
 userRouter.put("/complete-profile",jwtAuth,(req,res)=>{ userController.completeProfile(req,res)});
 userRouter.get("/profile",jwtAuth,(req,res)=>{ userController.getProfileDetails(req,res)});
 // Route to edit/update user profile (for car owners)
-userRouter.put("/edit-profile", jwtAuth, (req, res) => { userController.editProfile(req, res) });
+userRouter.put("/edit-profile", jwtAuth, upload.single('profilePhoto'),(req, res) => { userController.editProfile(req, res) });
 
 userRouter.post("/toggle-auto-shop-fav", jwtAuth, (req, res) => { userController.toggleAutoShopFav(req, res) });
 userRouter.get("/favorite-auto-shops", jwtAuth, (req, res) => { userController.getFavAutoShops(req, res) });
