@@ -115,9 +115,7 @@ class AuthController {
       countryCode = countryCode.trim();
       phone = phone.trim();
 
-      // Validate that the country code is in the correct format, e.g., "+91" for India or "+1" for US.
-      // This check ensures that the input must start with a "+" followed by 1 to 4 digits.
-      // For example, "+91" is a valid country code.
+      // Validate country code format
       if (!/^\+\d{1,4}$/.test(countryCode)) {
         console.log("[verifyAccount] Invalid country code.");
         return res.status(400).json({ message: "Invalid country code." });
@@ -167,11 +165,14 @@ class AuthController {
 
       console.log("[verifyAccount] Account verified: userId =", user._id);
 
+      // Send name and profilePhoto along with other needed fields
       return res.status(200).json({
         message: "Account verified successfully",
         token,
         isProfileComplete: user.isProfileComplete,
-        role: user.role
+        role: user.role,
+        name: user.name || null,
+        profilePhoto: user.profilePhoto || null
       });
 
     } catch (error) {
