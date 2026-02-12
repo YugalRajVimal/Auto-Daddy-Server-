@@ -13,6 +13,76 @@ import Services from "../../Schema/services.schema.js";
 class AutoShopController {
 
 
+    /**
+     * Get dashboard details for autoshopowner.
+     * Returns a count of jobCards grouped by each date.
+     */
+    /**
+     * Get dashboard details for autoshopowner.
+     * Returns a count of jobCards grouped by each date.
+     * This version aligns with the JobCard schema, using `business` as the
+     * reference field for the autoshopowner's business profile.
+     * 
+     * Handles: TypeError: Class constructor ObjectId cannot be invoked without 'new'
+     */
+    async getDashboardDetails(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({ message: "Unauthorized. User ID missing." });
+            }
+
+            // Ensure the user is an autoshopowner, fetch profile
+            const user = await User.findById(userId).lean();
+            if (!user || user.role !== "autoshopowner") {
+                return res.status(403).json({ message: "Forbidden. Only autoshopowners can access dashboard details." });
+            }
+
+            // Now: find their business profile (which JobCards reference via `business`)
+            if (!user.businessProfile) {
+                return res.status(404).json({ message: "No business profile associated with user." });
+            }
+            // No need for new mongoose.Types.ObjectId(user.businessProfile) if already ObjectId, but cast if string.
+            const businessId = (typeof user.businessProfile === "string")
+                ? new mongoose.Types.ObjectId(user.businessProfile)
+                : user.businessProfile;
+
+            // Aggregate job cards grouped by date, for this business.
+            const jobCardsByDate = await JobCard.aggregate([
+                {
+                    $match: {
+                        business: businessId
+                    }
+                },
+                {
+                    $group: {
+                        _id: {
+                            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
+                        },
+                        count: { $sum: 1 }
+                    }
+                },
+                {
+                    $sort: { _id: 1 }
+                }
+            ]);
+
+            // Format as { date, count }
+            const result = jobCardsByDate.map(item => ({
+                date: item._id,
+                count: item.count
+            }));
+
+            return res.status(200).json({
+                success: true,
+                jobCardsByDate: result
+            });
+
+        } catch (error) {
+            console.error("[getDashboardDetails] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    }
 
     //Profile
 /**

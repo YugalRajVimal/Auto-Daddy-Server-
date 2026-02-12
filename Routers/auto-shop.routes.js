@@ -16,6 +16,14 @@ import jwtAuth from "../middlewares/Auth/auth.middleware.js";
 import { upload } from "../middlewares/ImageUploadMiddlewares/fileUpload.middleware.js";
 import { businessAndTeamUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/bussinessUpload.middleware.js";
 
+
+// Route to get dashboard details for the autoshopowner (protected, requires JWT)
+autoShopRouter.get(
+  "/dashboard-details",
+  jwtAuth,
+  (req, res) => autoShopController.getDashboardDetails(req, res)
+);
+
 //Profiles APIS
 // Route to get the current autoshopowner's business profile (protected, requires JWT)
 autoShopRouter.get(
