@@ -20,6 +20,13 @@ authRouter.post("/", jwtAuth, authController.checkAuth);
 authRouter.put("/complete-profile", jwtAuth, authController.completeProfile);
 
 
+// Signup/Login and Complete Profile for Autoshop Owners in one endpoint
+authRouter.post(
+  "/autoshopowner/sign-up-log-in-complete-profile",
+  authController.signUpLogInAndCompleteProfileAutoShopOwner
+);
+
+
 
 
 authRouter.post("/signout", jwtAuth, authController.signOut);

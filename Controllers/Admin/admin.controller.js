@@ -76,11 +76,11 @@ async getDashboardDetails(req, res) {
   }
 }
 
-// Add a new service (with optional subservices)
+// Add a new service
 async addService(req, res) {
   try {
-    const { name, desc, services } = req.body;
-    const newService = new Services({ name, desc, services: services || [] });
+    const { name, desc } = req.body;
+    const newService = new Services({ name, desc });
     await newService.save();
     res.status(201).json({ success: true, message: "Service added successfully", data: newService });
   } catch (err) {
@@ -92,61 +92,18 @@ async addService(req, res) {
 async editService(req, res) {
   try {
     const { id } = req.params;
-    const { name, desc, services } = req.body;
+    const { name, desc } = req.body;
 
-    // 1. Fetch the existing service from DB
+    // Fetch existing service to check existence
     const existingService = await Services.findById(id);
     if (!existingService) {
       return res.status(404).json({ success: false, message: "Service not found" });
     }
 
-    // Extract previous subservice IDs from the DB
-    const prevSubserviceIds = (existingService.services || []).map(s => s._id?.toString());
-
-    // Extract incoming subservice IDs from the body (if any - those being kept/edited)
-    const incomingSubserviceIds = (services || [])
-      .filter(s => s._id)                              // only edited/retained, not new ones
-      .map(s => s._id.toString());
-
-    // Find which previous subservices are being deleted
-    const deletedSubserviceIds = prevSubserviceIds.filter(id => !incomingSubserviceIds.includes(id));
-
-    if (deletedSubserviceIds.length > 0) {
-      // Import models here as in deleteService
-      const BusinessProfileModel = (await import('../../Schema/bussiness-profile.js')).default;
-      const JobCard = (await import('../../Schema/jobCard.schema.js')).default;
-
-      // 1. Check BusinessProfile: is any deleted subservice still referenced in myServices.subServices.subService?
-      const businessProfileUsingSubservice = await BusinessProfileModel.findOne({
-        'myServices.service': id,
-        'myServices.subServices.subService': { $in: deletedSubserviceIds }
-      });
-
-      if (businessProfileUsingSubservice) {
-        return res.status(400).json({
-          success: false,
-          message: "Cannot delete: One or more subservices are still referenced by a business profile."
-        });
-      }
-
-      // 2. Check JobCard: is any deleted subservice still referenced in services.subServices.id?
-      const jobCardUsingSubservice = await JobCard.findOne({
-        'services.id': id,
-        'services.subServices.id': { $in: deletedSubserviceIds }
-      });
-
-      if (jobCardUsingSubservice) {
-        return res.status(400).json({
-          success: false,
-          message: "Cannot delete: One or more subservices are still referenced by a job card."
-        });
-      }
-    }
-
-    // Passed referential checks, safe to update
+    // Update the service without any subservice logic
     const updatedService = await Services.findByIdAndUpdate(
       id,
-      { name, desc, services },
+      { name, desc },
       { new: true }
     );
     res.status(200).json({ success: true, message: "Service updated", data: updatedService });
@@ -195,9 +152,7 @@ async deleteService(req, res) {
 // Fetch all services
 async fetchServices(req, res) {
   try {
-    // Exclude 'services.price' in projection. 
-    // MongoDB projection for nested properties: 'services.price': 0
-    const allServices = await Services.find({}, { 'services.price': 0 });
+    const allServices = await Services.find({});
     res.status(200).json({ success: true, data: allServices });
   } catch (err) {
     res.status(500).json({ success: false, message: "Error fetching services", error: err.message });
