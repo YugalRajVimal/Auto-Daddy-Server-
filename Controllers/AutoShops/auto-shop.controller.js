@@ -286,6 +286,41 @@ async completeBusinessProfile(req, res) {
             }
         }
 
+        // Days of the week reference
+        const VALID_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday","Sunday"];
+        // If openDays is a string that looks like an array, try to parse it
+        if (typeof openDays === "string") {
+            try {
+                // Try JSON parse
+                const tmp = JSON.parse(openDays);
+                if (Array.isArray(tmp)) {
+                    openDays = tmp;
+                }
+            } catch (e) {
+                // fallback: split by comma if not valid JSON array
+                openDays = openDays.split(",").map(s => s.trim()).filter(Boolean);
+            }
+        }
+
+        // Validate openDays as array of strings
+        if (!Array.isArray(openDays)) {
+            if (req.files) deleteUploadedFiles(req.files);
+            return res.status(400).json({ message: "openDays must be an array of day names." });
+        }
+
+        // Validate each value is a valid day name
+        for (const day of openDays) {
+            if (!VALID_DAYS.includes(day)) {
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(400).json({
+                    message: `openDays can only contain any of [${VALID_DAYS.join(", ")}]. Invalid value: "${day}"`
+                });
+            }
+        }
+
+        // Compute closedDays by excluding openDays from all valid days (Monday-Saturday)
+        const closedDays = VALID_DAYS.filter(day => !openDays.includes(day));
+
         console.log("[completeBusinessProfile] Received business profile details: ", {
             businessName,
             businessAddress,
@@ -297,6 +332,7 @@ async completeBusinessProfile(req, res) {
             businessHSTNumber,
             openHours,
             openDays,
+            closedDays,
         });
 
         // Required checks
@@ -344,6 +380,7 @@ async completeBusinessProfile(req, res) {
             businessHSTNumber,
             openHours,
             openDays,
+            closedDays,
             businessLogo,
         };
 
@@ -412,48 +449,94 @@ async editBusinessProfile(req, res) {
 
         // Validate user authentication
         if (!userId) {
+            console.log("[editBusinessProfile] No userId present in auth context");
             if (req.files) deleteUploadedFiles(req.files);
             return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
         }
 
-        // Lookup user and check role
+        // Lookup user
         const user = await User.findById(userId);
+        console.log("[editBusinessProfile] User lookup result:", user ? "FOUND" : "NOT FOUND", user?._id || "");
         if (!user) {
             if (req.files) deleteUploadedFiles(req.files);
             return res.status(404).json({ message: "User not found." });
         }
 
         if (user.role !== "autoshopowner") {
+            console.log(`[editBusinessProfile] User role not autoshopowner: ${user.role}`);
             if (req.files) deleteUploadedFiles(req.files);
             return res.status(403).json({ message: "Only users with role 'autoshopowner' can edit a business profile." });
         }
 
         // Must have an existing business profile
         if (!user.businessProfile) {
+            console.log("[editBusinessProfile] No businessProfile field in user document");
             if (req.files) deleteUploadedFiles(req.files);
             return res.status(404).json({ message: "Business profile not found." });
         }
 
-        // Fetch current business profile
+        // Fetch existing business profile
         let businessProfile = await BusinessProfileModel.findById(user.businessProfile);
         if (!businessProfile) {
+            console.log("[editBusinessProfile] Business profile document not found for id:", user.businessProfile);
             if (req.files) deleteUploadedFiles(req.files);
             return res.status(404).json({ message: "Business profile not found." });
         }
 
-        // Extract updatable fields from body (name and businessHSTNumber are NOT editable)
+        // Only allow editing allowed fields (do not allow editing businessName or businessHSTNumber)
         let {
             businessAddress,
             pincode,
-            longitude,
-            latitude,
             businessPhone,
             businessEmail,
             openHours,
             openDays,
+            lat,
+            lng,
         } = req.body;
 
-        // Handle businessLogo (image upload via multer)
+        // Parse lat/lng if sent as strings
+        if (typeof lat === "string") {
+            try { lat = parseFloat(lat); } catch { lat = undefined; }
+        }
+        if (typeof lng === "string") {
+            try { lng = parseFloat(lng); } catch { lng = undefined; }
+        }
+
+        // If openDays is a stringified array, parse
+        if (typeof openDays === "string") {
+            try {
+                const tmp = JSON.parse(openDays);
+                if (Array.isArray(tmp)) openDays = tmp;
+            } catch (e) {
+                openDays = openDays.split(",").map(s => s.trim()).filter(Boolean);
+            }
+        }
+
+        // Validate openDays if present
+        const VALID_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+        if (openDays !== undefined) {
+            if (!Array.isArray(openDays)) {
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(400).json({ message: "openDays must be an array of day names." });
+            }
+            for (const day of openDays) {
+                if (!VALID_DAYS.includes(day)) {
+                    if (req.files) deleteUploadedFiles(req.files);
+                    return res.status(400).json({
+                        message: `openDays can only contain any of [${VALID_DAYS.join(", ")}]. Invalid value: "${day}"`
+                    });
+                }
+            }
+        }
+
+        // Compute closedDays if openDays present
+        let closedDays;
+        if (openDays !== undefined) {
+            closedDays = VALID_DAYS.filter(day => !openDays.includes(day));
+        }
+
+        // Handle businessLogo (multer upload)
         let businessLogo = businessProfile.businessLogo;
         if (
             req.files &&
@@ -461,42 +544,45 @@ async editBusinessProfile(req, res) {
             Array.isArray(req.files.businessLogo) &&
             req.files.businessLogo.length > 0
         ) {
-            // Optionally delete old logo file here (if desired)
             businessLogo = req.files.businessLogo[0].path;
             filesToDelete.push(req.files.businessLogo[0]);
+            console.log("[editBusinessProfile] Received new businessLogo:", businessLogo);
         }
 
-        // Parse longitude/latitude if sent as strings (ensure they're numbers or undefined)
-        if (typeof longitude === "string") {
-            longitude = parseFloat(longitude);
-            if (isNaN(longitude)) longitude = undefined;
-        }
-        if (typeof latitude === "string") {
-            latitude = parseFloat(latitude);
-            if (isNaN(latitude)) latitude = undefined;
+        // Prepare map location (overwrites prev if either lat/lng given)
+        let businessMapLocation = businessProfile.businessMapLocation || {};
+        let latDefined = lat !== undefined && lat !== null && lat !== "";
+        let lngDefined = lng !== undefined && lng !== null && lng !== "";
+
+        if (latDefined || lngDefined) {
+            businessMapLocation = {};
+            if (latDefined) businessMapLocation.lat = lat;
+            if (lngDefined) businessMapLocation.lng = lng;
+            if (Object.keys(businessMapLocation).length === 0) businessMapLocation = undefined;
         }
 
-        // Prepare update fields (only allowed fields)
+        // Prepare update object (only allowed fields)
         const updateData = {};
 
         if (businessAddress !== undefined) updateData.businessAddress = businessAddress;
         if (pincode !== undefined) updateData.pincode = pincode;
-        // Only include longitude/latitude if BOTH are defined (not businessMapLocation)
-        if (longitude !== undefined && latitude !== undefined) {
-            updateData.longitude = longitude;
-            updateData.latitude = latitude;
-        }
+        if (latDefined || lngDefined) updateData.businessMapLocation = businessMapLocation;
         if (businessPhone !== undefined) updateData.businessPhone = businessPhone;
         if (businessEmail !== undefined) updateData.businessEmail = businessEmail;
         if (openHours !== undefined) updateData.openHours = openHours;
-        if (openDays !== undefined) updateData.openDays = openDays;
+        if (openDays !== undefined) {
+            updateData.openDays = openDays;
+            updateData.closedDays = closedDays;
+        }
         if (businessLogo !== undefined) updateData.businessLogo = businessLogo;
 
-        // start a transaction
+        console.log("[editBusinessProfile] Update fields:", updateData);
+
+        // Start transaction
         session = await mongoose.startSession();
         session.startTransaction();
 
-        // Update business profile document
+        // Update business profile doc
         Object.assign(businessProfile, updateData);
         await businessProfile.save({ session });
 
@@ -514,7 +600,7 @@ async editBusinessProfile(req, res) {
             try {
                 await session.abortTransaction();
                 session.endSession();
-            } catch {}
+            } catch { }
         }
         if (req.files) deleteUploadedFiles(req.files);
 
@@ -731,33 +817,75 @@ async editBusinessProfile(req, res) {
 // Search car owners by name, phone, or email
 searchCarOwner = async (req, res) => {
     try {
-        const { name, phone, email } = req.query;
+        const { name, phone, email, numberplate } = req.query;
 
-        if (!name && !phone && !email) {
-            return res.status(400).json({ message: "At least one search parameter (name, phone, or email) is required." });
+        if (!name && !phone && !email && !numberplate) {
+            return res.status(400).json({ message: "At least one search parameter (name, phone, email, or numberplate) is required." });
         }
 
-        // Construct query object
-        const searchQuery = { role: "carowner" };
+        // If searching by numberplate, do cross-collection lookup
+        if (numberplate) {
+            // Import VehicleModel at the top of your controller:
+            // import { VehicleModel } from "../../Schema/vehicles.schema.js";
 
-        if (name) {
-            // Case insensitive, partial match for name
-            searchQuery.name = { $regex: name, $options: "i" };
-        }
-        if (phone) {
-            searchQuery.phone = phone;
-        }
-        if (email) {
-            searchQuery.email = email;
-        }
+            // First, find vehicles that match the license plate number (case-insensitive, partial match)
+            const vehicleDocs = await VehicleModel.find(
+                { licensePlateNo: { $regex: numberplate, $options: "i" } }, 
+                { _id: 1 }
+            );
 
-        // Assuming there is a User model imported at the top
-        const users = await User.find(searchQuery, { name: 1, phone: 1, email: 1, _id: 1 });
+            if (vehicleDocs.length === 0) {
+                return res.status(200).json({
+                    message: "No car owners found with the given vehicle numberplate.",
+                    data: []
+                });
+            }
 
-        return res.status(200).json({
-            message: "Car owner(s) found.",
-            data: users
-        });
+            // Find all users (carowners) who have these vehicles in their myVehicles array
+            const vehicleIds = vehicleDocs.map(v => v._id);
+
+            // Build other search queries as well if provided (can combine with AND semantics)
+            const userQuery = { 
+                role: "carowner", 
+                myVehicles: { $in: vehicleIds }
+            };
+
+            if (name) {
+                userQuery.name = { $regex: name, $options: "i" };
+            }
+            if (phone) {
+                userQuery.phone = phone;
+            }
+            if (email) {
+                userQuery.email = email;
+            }
+
+            const users = await User.find(userQuery, { name: 1, phone: 1, email: 1, _id: 1 });
+            return res.status(200).json({
+                message: users.length > 0 ? "Car owner(s) found." : "No car owners found with the given criteria.",
+                data: users
+            });
+        } else {
+            // No numberplate, search by other criteria
+            const searchQuery = { role: "carowner" };
+
+            if (name) {
+                searchQuery.name = { $regex: name, $options: "i" };
+            }
+            if (phone) {
+                searchQuery.phone = phone;
+            }
+            if (email) {
+                searchQuery.email = email;
+            }
+
+            const users = await User.find(searchQuery, { name: 1, phone: 1, email: 1, _id: 1 });
+
+            return res.status(200).json({
+                message: users.length > 0 ? "Car owner(s) found." : "No car owners found with the given criteria.",
+                data: users
+            });
+        }
     } catch (error) {
         console.error("[searchCarOwner] Error:", error);
         return res.status(500).json({ message: "Internal Server Error" });
@@ -813,38 +941,223 @@ addToMyCustomers = async (req, res) => {
 fetchMyCustomers = async (req, res) => {
     try {
         const autoshopOwnerId = req.user?.id;
+        const { phone, numberPlate } = req.query;
 
         if (!autoshopOwnerId) {
             return res.status(401).json({ message: "Unauthorized." });
         }
 
-        // Find the autoshopowner and populate myCustomers with their vehicles
-        const autoshopOwner = await User.findOne({ _id: autoshopOwnerId, role: "autoshopowner" })
-            .populate({
-                path: "myCustomers",
-                select: "name email phone countryCode status isDisabled",
-                populate: [
-                    {
-                        path: "myVehicles",
-                        model: "Vehicle",
-                        select: "-carImages -licensePlateFrontImagePath -licensePlateBackImagePath"
-                    }
-                ]
-            })
-            .lean();
+        // First, find the autoshop owner (and sanity check role)
+        const autoshopOwner = await User.findOne({ _id: autoshopOwnerId, role: "autoshopowner" }).lean();
 
         if (!autoshopOwner) {
             return res.status(404).json({ message: "Auto shop owner not found." });
         }
 
+        // Prepare numberPlate search if provided
+        let vehicleIdsForPlate = [];
+        if (numberPlate) {
+            const vehicleDocs = await VehicleModel.find(
+                { licensePlateNo: { $regex: numberPlate, $options: "i" } },
+                { _id: 1 }
+            );
+            vehicleIdsForPlate = vehicleDocs.map(v => v._id.toString());
+        }
+
+        // Populate only those customers matching filter(s)
+        let customersQuery = User.find({
+            _id: { $in: autoshopOwner.myCustomers || [] }
+        })
+        .select("name email phone countryCode status isDisabled myVehicles address pincode")
+        .populate({
+            path: "myVehicles",
+            model: "Vehicle",
+            select: "-carImages -licensePlateFrontImagePath -licensePlateBackImagePath"
+        });
+
+        // Build filtering conditions
+        let andConditions = [];
+
+        if (phone) {
+            andConditions.push({ phone: phone });
+        }
+
+        if (numberPlate && vehicleIdsForPlate.length > 0) {
+            andConditions.push({ myVehicles: { $in: vehicleIdsForPlate } });
+        } else if (numberPlate && vehicleIdsForPlate.length === 0) {
+            // No vehicles match, so return empty directly
+            return res.status(200).json({ myCustomers: [] });
+        }
+
+        if (andConditions.length) {
+            customersQuery = customersQuery.where({ $and: andConditions });
+        }
+
+        const myCustomers = await customersQuery.lean();
+
+        // Ensure address and pincode are always sent. (Included in .select and thus in the object)
+
         return res.status(200).json({
-            myCustomers: autoshopOwner.myCustomers || [],
+            myCustomers: myCustomers || [],
         });
     } catch (error) {
         console.error("[fetchMyCustomers] Error:", error);
         return res.status(500).json({ message: "Internal Server Error" });
     }
 }
+
+/**
+ * Edit a customer (car owner) in myCustomers as an auto shop owner.
+ * This allows updating the customer's profile fields (name, email, phone, countryCode, address, pincode)
+ * Optionally: vehicles can be added/removed by updating "myVehicles" field (array of vehicle _ids).
+ * Only allows updating car owners already present in "myCustomers".
+ * 
+ * PATCH /autoshop/edit-customer
+ * Body: {
+ *   carOwnerId,                   // required
+ *   name, email, phone, countryCode, address, pincode, // optional fields to update
+ *   myVehicles (optional array of vehicle _ids)
+ * }
+ */
+editCustomer = async (req, res) => {
+    try {
+        const autoshopOwnerId = req.user?.id;
+        const {
+            carOwnerId,
+            name,
+            email,
+            phone,
+            countryCode,
+            address,
+            pincode,
+            vehicles // array of vehicle objects per requirement
+        } = req.body;
+
+        if (!autoshopOwnerId) {
+            return res.status(401).json({ message: "Unauthorized." });
+        }
+        if (!carOwnerId) {
+            return res.status(400).json({ message: "carOwnerId is required." });
+        }
+
+        // Fetch the autoshop owner and check they have this customer in myCustomers
+        const autoshopOwner = await User.findOne({ _id: autoshopOwnerId, role: "autoshopowner" }).lean();
+        if (!autoshopOwner) {
+            return res.status(404).json({ message: "Auto shop owner not found." });
+        }
+        if (
+            !autoshopOwner.myCustomers ||
+            !autoshopOwner.myCustomers.map(id => id.toString()).includes(carOwnerId.toString())
+        ) {
+            return res.status(403).json({ message: "This car owner is not your customer." });
+        }
+
+        // Now, fetch the car owner to check their existing myVehicles array
+        const customer = await User.findOne({ _id: carOwnerId, role: "carowner" }).lean();
+        if (!customer) {
+            return res.status(404).json({ message: "Car owner not found." });
+        }
+        const existingVehicleIds = Array.isArray(customer.myVehicles)
+            ? customer.myVehicles.map(id => id.toString())
+            : [];
+
+        // Prepare update fields
+        let updateFields = {};
+        if (name !== undefined) updateFields.name = name;
+        if (email !== undefined) updateFields.email = email;
+        if (phone !== undefined) updateFields.phone = phone;
+        if (countryCode !== undefined) updateFields.countryCode = countryCode;
+        if (address !== undefined) updateFields.address = address;
+        if (pincode !== undefined) updateFields.pincode = pincode;
+
+        // Will collect the vehicle ObjectIds for the updated myVehicles array
+        let updatedVehicleObjectIds = [];
+
+        if (Array.isArray(vehicles)) {
+            for (const v of vehicles) {
+                // Expect: vId, licensePlateNo, vinNo, vehicleName, model, year, odometerReading
+                let vehicleDoc = null;
+                if (v.vId && mongoose.Types.ObjectId.isValid(v.vId)) {
+                    const vehId = v.vId;
+                    // Check: Is vehId in this customer's myVehicles?
+                    if (!existingVehicleIds.includes(vehId.toString())) {
+                        return res.status(400).json({
+                            message: `Invalid vehicle id (${vehId}) for this customer.`
+                        });
+                    }
+                    vehicleDoc = await VehicleModel.findOneAndUpdate(
+                        { _id: vehId },
+                        {
+                            $set: {
+                                licensePlateNo: v.licensePlateNo,
+                                vinNo: v.vinNo,
+                                "make.name": v.vehicleName,
+                                "make.model": v.model,
+                                year: v.year,
+                                odometerReading: v.odometerReading
+                            }
+                        },
+                        { new: true }
+                    );
+                    if (vehicleDoc) {
+                        updatedVehicleObjectIds.push(vehicleDoc._id);
+                    }
+                }
+                // If vId not present, create a new vehicle document (no validation needed here)
+                if (!vehicleDoc) {
+                    // All fields required for new creation must be present
+                    if (v.licensePlateNo && v.vinNo && v.vehicleName && v.model && v.year && v.odometerReading) {
+                        const newVehicle = new VehicleModel({
+                            licensePlateNo: v.licensePlateNo,
+                            vinNo: v.vinNo,
+                            make: { name: v.vehicleName, model: v.model },
+                            year: v.year,
+                            odometerReading: v.odometerReading
+                        });
+                        const savedVehicle = await newVehicle.save();
+                        updatedVehicleObjectIds.push(savedVehicle._id);
+                    }
+                }
+            }
+            updateFields.myVehicles = updatedVehicleObjectIds;
+        }
+
+        if (Object.keys(updateFields).length === 0) {
+            return res.status(400).json({ message: "No update fields provided." });
+        }
+
+        // Only update the customer if their role is 'carowner'
+        const customerDoc = await User.findOneAndUpdate(
+            { _id: carOwnerId, role: "carowner" },
+            { $set: updateFields },
+            { new: true }
+        )
+        .select("name email phone countryCode status isDisabled myVehicles address pincode")
+        .populate({
+            path: "myVehicles",
+            model: "Vehicle",
+            select: "-carImages -licensePlateFrontImagePath -licensePlateBackImagePath"
+        })
+        .lean();
+
+        if (!customerDoc) {
+            return res.status(404).json({ message: "Car owner not found." });
+        }
+
+        // Return updated customer info
+        return res.status(200).json({
+            message: "Customer updated successfully.",
+            customer: customerDoc
+        });
+
+    } catch (error) {
+        console.error("[editCustomer] Error:", error);
+        return res.status(500).json({ message: "Internal Server Error" });
+    }
+}
+
+
+
 
 removeFromMyCustomers = async (req, res) => {
     try {
@@ -882,10 +1195,18 @@ removeFromMyCustomers = async (req, res) => {
 
 
 /**
- * Onboard a car owner with name, email, phone, pincode, role, address.
+ * Onboard a car owner with name, email, phone, pincode, role, address, and optionally multiple vehicles.
  * After successful creation, send OTP (default: 000000).
  * POST /autoshop/onboard-carowner
- * Body: { name, email, phone, countryCode, pincode, role, address }
+ * Body: {
+ *    name, email, phone, countryCode, pincode, role, address,
+ *    vehicles: [
+ *      {
+ *        licensePlateNo, vinNo, vehicleName, model, year, odometerReading
+ *      },
+ *      ...
+ *    ]
+ * }
  */
 onboardCarOwner = async (req, res) => {
     try {
@@ -897,12 +1218,7 @@ onboardCarOwner = async (req, res) => {
             pincode,
             role,
             address,
-            licensePlateNo,
-            vinNo,
-            vehicleName, // optional—may be undefined
-            model,
-            year,
-            odometerReading
+            vehicles // Expect an array of vehicle objects or undefined
         } = req.body;
 
         // Only require main fields for car owner, NOT vehicle
@@ -972,27 +1288,64 @@ onboardCarOwner = async (req, res) => {
             onboardedBy
         });
 
-        let newVehicle = null;
+        let newVehicles = [];
+        // Handle vehicles array
+        if (Array.isArray(vehicles)) {
+            for (const veh of vehicles) {
+                // Only add non-null/undefined fields to the payload for Vehicle
+                const {
+                    licensePlateNo,
+                    vinNo,
+                    vehicleName,
+                    model,
+                    year,
+                    odometerReading
+                } = veh || {};
 
-        // If vehicle fields present (at least one of licensePlateNo, vinNo, vehicleName, model, year)
-        if (
-            licensePlateNo ||
-            vinNo ||
-            vehicleName ||
-            model ||
-            year
+                const vehiclePayload = {};
+                if (licensePlateNo !== undefined) vehiclePayload.licensePlateNo = licensePlateNo;
+                if (vinNo !== undefined) vehiclePayload.vinNo = vinNo;
+                if (vehicleName !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), name: vehicleName };
+                if (model !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), model: model };
+                if (year !== undefined) vehiclePayload.year = year;
+                if (odometerReading !== undefined) vehiclePayload.odometerReading = odometerReading;
+
+                // For Vehicle schema, both make.name and make.model are required
+                if (
+                    vehiclePayload.licensePlateNo &&
+                    vehiclePayload.vinNo &&
+                    vehiclePayload.make &&
+                    vehiclePayload.make.name &&
+                    vehiclePayload.make.model &&
+                    vehiclePayload.year
+                ) {
+                    const createdVehicle = await VehicleModel.create(vehiclePayload);
+
+                    newCarOwner.myVehicles = newCarOwner.myVehicles || [];
+                    newCarOwner.myVehicles.push(createdVehicle._id);
+                    newVehicles.push(createdVehicle);
+                }
+            }
+            if (newVehicles.length > 0) {
+                await newCarOwner.save();
+            }
+        } else if (
+            // Fallback: accept vehicle data at root level for backward compatibility
+            req.body.licensePlateNo ||
+            req.body.vinNo ||
+            req.body.vehicleName ||
+            req.body.model ||
+            req.body.year
         ) {
             // Only add non-null/undefined fields to the payload for Vehicle
             const vehiclePayload = {};
-            if (licensePlateNo !== undefined) vehiclePayload.licensePlateNo = licensePlateNo;
-            if (vinNo !== undefined) vehiclePayload.vinNo = vinNo;
-            if (vehicleName !== undefined) vehiclePayload.make = { ...vehiclePayload.make, name: vehicleName };
-            if (model !== undefined) vehiclePayload.make = { ...vehiclePayload.make, model: model };
-            if (year !== undefined) vehiclePayload.year = year;
-            if (odometerReading !== undefined) vehiclePayload.odometerReading = odometerReading;
+            if (req.body.licensePlateNo !== undefined) vehiclePayload.licensePlateNo = req.body.licensePlateNo;
+            if (req.body.vinNo !== undefined) vehiclePayload.vinNo = req.body.vinNo;
+            if (req.body.vehicleName !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), name: req.body.vehicleName };
+            if (req.body.model !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), model: req.body.model };
+            if (req.body.year !== undefined) vehiclePayload.year = req.body.year;
+            if (req.body.odometerReading !== undefined) vehiclePayload.odometerReading = req.body.odometerReading;
 
-            // For Vehicle schema, both make.name and make.model are required
-            // Only create vehicle if all required vehicle fields are present
             if (
                 vehiclePayload.licensePlateNo &&
                 vehiclePayload.vinNo &&
@@ -1001,11 +1354,10 @@ onboardCarOwner = async (req, res) => {
                 vehiclePayload.make.model &&
                 vehiclePayload.year
             ) {
-                newVehicle = await VehicleModel.create(vehiclePayload);
-
-                // -- Now link vehicle to car owner (push to their myVehicles array)
+                const createdVehicle = await VehicleModel.create(vehiclePayload);
                 newCarOwner.myVehicles = newCarOwner.myVehicles || [];
-                newCarOwner.myVehicles.push(newVehicle._id);
+                newCarOwner.myVehicles.push(createdVehicle._id);
+                newVehicles.push(createdVehicle);
                 await newCarOwner.save();
             }
         }
@@ -1025,17 +1377,15 @@ onboardCarOwner = async (req, res) => {
                 isProfileComplete: newCarOwner.isProfileComplete,
                 status: newCarOwner.status,
                 onboardedBy: newCarOwner.onboardedBy,
-                vehicle: newVehicle
-                    ? {
-                        id: newVehicle._id,
-                        licensePlateNo: newVehicle.licensePlateNo,
-                        vinNo: newVehicle.vinNo,
-                        name: newVehicle.make?.name,
-                        model: newVehicle.make?.model,
-                        year: newVehicle.year,
-                        odometerReading: newVehicle.odometerReading
-                    }
-                    : null
+                vehicles: newVehicles.map(v => ({
+                    id: v._id,
+                    licensePlateNo: v.licensePlateNo,
+                    vinNo: v.vinNo,
+                    name: v.make?.name,
+                    model: v.make?.model,
+                    year: v.year,
+                    odometerReading: v.odometerReading
+                }))
             },
         });
     } catch (error) {

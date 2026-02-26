@@ -39,6 +39,7 @@ const businessProfileSchema = new Schema({
   businessHSTNumber: { type: String },
   openHours: { type: String },         // e.g., "08:00-20:00"
   openDays: { type: [String] },        // e.g., ["Monday", "Tuesday", ...]
+  closedDays:{type: [String]},
   teamMembers: [teamMemberSchema],
   businessLogo: { type: String },      // URL or file path to the logo
 

@@ -101,130 +101,6 @@ class AuthController {
     }
   };
 
-  // Verify Account with OTP per user.schema.js fields
-  verifyAccount = async (req, res) => {
-    try {
-      let { countryCode, phone, otp } = req.body;
-      console.log("[verifyAccount] Incoming params:", { countryCode, phone, otp });
-
-      if (!countryCode || !phone || !otp) {
-        console.log("[verifyAccount] Missing params:", { countryCode, phone, otp });
-        return res.status(400).json({ message: "Country code, phone number, and OTP are required" });
-      }
-
-      countryCode = countryCode.trim();
-      phone = phone.trim();
-
-      // Validate country code format
-      if (!/^\+\d{1,4}$/.test(countryCode)) {
-        console.log("[verifyAccount] Invalid country code.");
-        return res.status(400).json({ message: "Invalid country code." });
-      }
-      if (!/^\d{5,15}$/.test(phone)) {
-        console.log("[verifyAccount] Invalid phone number.");
-        return res.status(400).json({ message: "Invalid phone number." });
-      }
-
-      // Find user with matching phone and code
-      const user = await User.findOne({ countryCode, phone });
-
-      if (!user) {
-        console.log("[verifyAccount] User NOT found for", { countryCode, phone });
-        return res.status(401).json({ message: "Invalid phone or country code" });
-      }
-
-      // Check OTP and expiry with schema fields
-      if (!user.otp || !user.otpExpiresAt) {
-        console.log("[verifyAccount] OTP not present or expired fields missing.");
-        return res.status(401).json({ message: "OTP not sent, please request again." });
-      }
-      if (user.otp !== otp) {
-        return res.status(401).json({ message: "Invalid OTP" });
-      }
-      if (user.otpExpiresAt < new Date()) {
-        return res.status(401).json({ message: "OTP has expired. Please request a new OTP." });
-      }
-
-      // Update fields for verified user; clear OTP and set phoneVerified
-      user.otp = null;
-      user.otpExpiresAt = null;
-      user.otpGeneratedAt = null;
-      user.otpAttempts = 0;
-      user.phoneVerified = true;
-      user.lastLogin = new Date();
-      await user.save();
-
-      // Generate JWT
-      const tokenPayload = { id: user._id };
-      const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "1d" });
-
-      await ExpiredTokenModel.create({
-        token,
-        tokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000), // 1 day
-      });
-
-      console.log("[verifyAccount] Account verified: userId =", user._id);
-
-      // Send name and profilePhoto along with other needed fields
-      return res.status(200).json({
-        message: "Account verified successfully",
-        token,
-        isProfileComplete: user.isProfileComplete,
-        role: user.role,
-        name: user.name || null,
-        profilePhoto: user.profilePhoto || null
-      });
-
-    } catch (error) {
-      console.error("[verifyAccount] Error:", error);
-      return res.status(500).json({ message: "Internal Server Error" });
-    }
-  };
-
-  // Check Authorization with user.schema.js roles & maintenance
-  checkAuth = async (req, res) => {
-    try {
-      const { id } = req.user || {};
-
-      // Check if user with provided id exists in the database
-      const dbUser = await User.findOne({ _id: id });
-
-      if (!dbUser) {
-        return res.status(401).json({ message: "Unauthorized: User not found" });
-      }
-
-      // Check user status
-      if (dbUser.status === "suspended") {
-        return res.status(403).json({ message: "Your account has been suspended. Please contact support." });
-      }
-      if (dbUser.status === "deleted") {
-        return res.status(403).json({ message: "Your account has been deleted. Please contact support." });
-      }
-
-      // Check if profile is complete
-      if (dbUser.isProfileComplete === false) {
-        // 428 Precondition Required
-        return res.status(428).json({
-          message: "Your profile is incomplete. Please complete your profile to continue.",
-          phone: dbUser.phone
-        });
-      }
-
-      // Check if user is an autoshopowner and, if so, require their auto shop business profile to be completed
-      if (dbUser.role === "autoshopowner" && !dbUser.isAutoShopBusinessProfileComplete) {
-        // 428 Precondition Required
-        return res.status(428).json({
-          message: "Your auto shop business profile is incomplete. Please complete your business profile to continue.",
-          phone: dbUser.phone
-        });
-      }
-
-      return res.status(200).json({ message: "Verified" });
-    } catch (error) {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-  };
-
   completeProfile = async (req, res) => {
     try {
       // Ensure that the controller is behind jwtAuth middleware so req.user exists
@@ -313,6 +189,409 @@ class AuthController {
       return res.status(500).json({ message: "Internal Server Error" });
     }
   };
+
+
+  /**
+ * Combined Signup/Login and Complete Profile for Autoshop Owners
+ * Only supports autoshopowner role.
+ * Expects: countryCode, phone, email, name, pincode, address
+ */
+  signUpLogInAndCompleteProfileAutoShopOwner = async (req, res) => {
+    try {
+      let { countryCode, phone, email, name, pincode, address } = req.body;
+
+      // All required fields for profile + phone
+      if (!countryCode || !phone || !email || !name || !pincode || !address) {
+        return res.status(400).json({
+          message: "All fields (countryCode, phone, email, name, pincode, address) are required."
+        });
+      }
+
+      // Only allow autoshopowner role
+      const role = "autoshopowner";
+
+      // Input normalization
+      countryCode = countryCode.trim();
+      phone = phone.trim();
+      email = email.trim().toLowerCase();
+      name = name.trim();
+      pincode = pincode.toString().trim();
+      address = typeof address === "string" ? address.trim() : address;
+
+      // Field Validations
+      if (!/^\+?\d{1,4}$/.test(countryCode)) {
+        return res.status(400).json({ message: "Invalid country code." });
+      }
+      if (!/^\d{5,15}$/.test(phone)) {
+        return res.status(400).json({ message: "Invalid phone number." });
+      }
+      if (!name) {
+        return res.status(400).json({ message: "Name is required." });
+      }
+      if (!email || !/^[\w\-.]+@[\w\-]+\.[a-zA-Z]{2,}$/.test(email)) {
+        return res.status(400).json({ message: "A valid email is required." });
+      }
+      if (!pincode) {
+        return res.status(400).json({ message: "Pincode is required." });
+      }
+      if (!address) {
+        return res.status(400).json({ message: "Address is required." });
+      }
+
+      // Use standard OTP field
+      // const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otp = "000000";
+      const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      const otpGeneratedAt = new Date();
+
+      // Lookup by countryCode/phone
+      let user = await User.findOne({ countryCode, phone });
+
+      // If user exists
+      if (user) {
+        // Only support autoshopowner for this flow
+        if (user.role !== role) {
+          return res.status(409).json({
+            message: "User exists but is not an autoshopowner.",
+            userId: user._id
+          });
+        }
+        // Trigger login OTP and (optionally) update incomplete profile
+        user.otp = otp;
+        user.otpExpiresAt = otpExpiresAt;
+        user.otpGeneratedAt = otpGeneratedAt;
+        user.otpAttempts = 0;
+
+        // If profile is not complete, patch profile fields
+        if (!user.isProfileComplete) {
+          user.name = name;
+          user.email = email;
+          user.pincode = pincode;
+          user.address = address;
+          user.role = role;
+        }
+        await user.save();
+
+        return res.status(200).json({
+          message: user.isProfileComplete
+            ? "OTP sent successfully for login"
+            : "OTP sent and profile details updated.",
+          userId: user._id
+        });
+      }
+
+      // BEFORE creating new, check if email or phone already exists
+      const existingEmailUser = await User.findOne({ email: email });
+      if (existingEmailUser) {
+        return res.status(409).json({
+          message: "User with this email already exists.",
+          userId: existingEmailUser._id
+        });
+      }
+      const existingPhoneUser = await User.findOne({ countryCode, phone });
+      if (existingPhoneUser) {
+        return res.status(409).json({
+          message: "User with this phone already exists.",
+          userId: existingPhoneUser._id
+        });
+      }
+
+      // Create new autoshopowner user
+      user = await User.create({
+        countryCode,
+        phone,
+        email,
+        name,
+        pincode,
+        address,
+        role,
+        otp,
+        otpExpiresAt,
+        otpGeneratedAt,
+        otpAttempts: 0,
+        phoneVerified: false,
+        emailVerified: false,
+        isProfileComplete: true
+      });
+
+      return res.status(201).json({
+        message: "Sign-up, OTP sent, and profile completed successfully",
+        userId: user._id
+      });
+
+    } catch (error) {
+      console.error("[signUpLogInAndCompleteProfile/autoshopowner] Error:", error);
+      return res.status(500).json({ message: "Internal Server Error" });
+    }
+  }
+
+  // Verify Account with OTP per user.schema.js fields
+  verifyAccount = async (req, res) => {
+    try {
+      let { countryCode, phone, otp } = req.body;
+      console.log("[verifyAccount] Incoming params:", { countryCode, phone, otp });
+
+      if (!countryCode || !phone || !otp) {
+        console.log("[verifyAccount] Missing params:", { countryCode, phone, otp });
+        return res.status(400).json({ message: "Country code, phone number, and OTP are required" });
+      }
+
+      countryCode = countryCode.trim();
+      phone = phone.trim();
+
+      // Validate country code format
+      if (!/^\+\d{1,4}$/.test(countryCode)) {
+        console.log("[verifyAccount] Invalid country code.");
+        return res.status(400).json({ message: "Invalid country code." });
+      }
+      if (!/^\d{5,15}$/.test(phone)) {
+        console.log("[verifyAccount] Invalid phone number.");
+        return res.status(400).json({ message: "Invalid phone number." });
+      }
+
+      // Find user with matching phone and code; populate businessProfile if autoshopowner
+      // We'll check role after finding in DB
+      let user = await User.findOne({ countryCode, phone }).populate("businessProfile");
+
+      if (!user) {
+        console.log("[verifyAccount] User NOT found for", { countryCode, phone });
+        return res.status(401).json({ message: "Invalid phone or country code" });
+      }
+
+      // Check OTP and expiry with schema fields
+      if (!user.otp || !user.otpExpiresAt) {
+        console.log("[verifyAccount] OTP not present or expired fields missing.");
+        return res.status(401).json({ message: "OTP not sent, please request again." });
+      }
+      if (user.otp !== otp) {
+        return res.status(401).json({ message: "Invalid OTP" });
+      }
+      if (user.otpExpiresAt < new Date()) {
+        return res.status(401).json({ message: "OTP has expired. Please request a new OTP." });
+      }
+
+      // Update fields for verified user; clear OTP and set phoneVerified
+      user.otp = null;
+      user.otpExpiresAt = null;
+      user.otpGeneratedAt = null;
+      user.otpAttempts = 0;
+      user.phoneVerified = true;
+      user.lastLogin = new Date();
+      await user.save();
+
+      // Generate JWT
+      const tokenPayload = { id: user._id };
+      const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "1d" });
+
+      await ExpiredTokenModel.create({
+        token,
+        tokenExpiry: new Date(Date.now() + 24 * 60 * 60 * 1000), // 1 day
+      });
+
+      console.log("[verifyAccount] Account verified: userId =", user._id);
+
+      // Send name and profilePhoto along with other needed fields
+      // If autoshopowner, use businessLogo in profilePhoto by populating businessProfile
+      let profilePhoto = user.profilePhoto || null;
+      if (user.role === "autoshopowner" && user.businessProfile && user.businessProfile.businessLogo) {
+        profilePhoto = user.businessProfile.businessLogo;
+      }
+
+      return res.status(200).json({
+        message: "Account verified successfully",
+        token,
+        isProfileComplete: user.isProfileComplete,
+        isAutoShopBusinessProfileComplete: user.isAutoShopBusinessProfileComplete,
+        role: user.role,
+        name: user.name || null,
+        profilePhoto: profilePhoto
+      });
+
+    } catch (error) {
+      console.error("[verifyAccount] Error:", error);
+      return res.status(500).json({ message: "Internal Server Error" });
+    }
+  };
+
+  // Check Authorization with user.schema.js roles & maintenance
+  checkAuth = async (req, res) => {
+    try {
+      const { id } = req.user || {};
+
+      // Check if user with provided id exists in the database
+      const dbUser = await User.findOne({ _id: id });
+
+      if (!dbUser) {
+        return res.status(401).json({ message: "Unauthorized: User not found" });
+      }
+
+      // Check user status
+      if (dbUser.status === "suspended") {
+        return res.status(403).json({ message: "Your account has been suspended. Please contact support." });
+      }
+      if (dbUser.status === "deleted") {
+        return res.status(403).json({ message: "Your account has been deleted. Please contact support." });
+      }
+
+      // Check if profile is complete
+      if (dbUser.isProfileComplete === false) {
+        // 428 Precondition Required
+        return res.status(428).json({
+          message: "Your profile is incomplete. Please complete your profile to continue.",
+          phone: dbUser.phone
+        });
+      }
+
+      // Check if user is an autoshopowner and, if so, require their auto shop business profile to be completed
+      if (dbUser.role === "autoshopowner" && !dbUser.isAutoShopBusinessProfileComplete) {
+        // 428 Precondition Required
+        return res.status(428).json({
+          message: "Your auto shop business profile is incomplete. Please complete your business profile to continue.",
+          phone: dbUser.phone
+        });
+      }
+
+      return res.status(200).json({ message: "Verified" });
+    } catch (error) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+  };
+
+
+
+  /**
+   * Combined Signup/Login and Complete Profile for Autoshop Owners
+   * Only supports autoshopowner role.
+   * Expects: countryCode, phone, email, name, pincode, address
+   */
+  signUpLogInAndCompleteProfileAutoShopOwner = async (req, res) => {
+    try {
+      let { countryCode, phone, email, name, pincode, address } = req.body;
+
+      // All required fields for profile + phone
+      if (!countryCode || !phone || !email || !name || !pincode || !address) {
+        return res.status(400).json({
+          message: "All fields (countryCode, phone, email, name, pincode, address) are required."
+        });
+      }
+
+      // Only allow autoshopowner role
+      const role = "autoshopowner";
+
+      // Input normalization
+      countryCode = countryCode.trim();
+      phone = phone.trim();
+      email = email.trim().toLowerCase();
+      name = name.trim();
+      pincode = pincode.toString().trim();
+      address = typeof address === "string" ? address.trim() : address;
+
+      // Field Validations
+      if (!/^\+?\d{1,4}$/.test(countryCode)) {
+        return res.status(400).json({ message: "Invalid country code." });
+      }
+      if (!/^\d{5,15}$/.test(phone)) {
+        return res.status(400).json({ message: "Invalid phone number." });
+      }
+      if (!name) {
+        return res.status(400).json({ message: "Name is required." });
+      }
+      if (!email || !/^[\w\-.]+@[\w\-]+\.[a-zA-Z]{2,}$/.test(email)) {
+        return res.status(400).json({ message: "A valid email is required." });
+      }
+      if (!pincode) {
+        return res.status(400).json({ message: "Pincode is required." });
+      }
+      if (!address) {
+        return res.status(400).json({ message: "Address is required." });
+      }
+
+      // Use standard OTP field
+      // const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otp = "000000";
+      const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      const otpGeneratedAt = new Date();
+
+      // Lookup by countryCode/phone
+      let user = await User.findOne({ countryCode, phone });
+
+      // If user exists
+      if (user) {
+        // Only support autoshopowner for this flow
+        if (user.role !== role) {
+          return res.status(409).json({
+            message: "User exists but is not an autoshopowner.",
+            userId: user._id
+          });
+        }
+        // Trigger login OTP and (optionally) update incomplete profile
+        user.otp = otp;
+        user.otpExpiresAt = otpExpiresAt;
+        user.otpGeneratedAt = otpGeneratedAt;
+        user.otpAttempts = 0;
+
+        // If profile is not complete, patch profile fields
+        if (!user.isProfileComplete) {
+          user.name = name;
+          user.email = email;
+          user.pincode = pincode;
+          user.address = address;
+          user.role = role;
+        }
+        await user.save();
+
+        return res.status(200).json({
+          message: user.isProfileComplete
+            ? "OTP sent successfully for login"
+            : "OTP sent and profile details updated.",
+          userId: user._id
+        });
+      }
+
+      // BEFORE creating new, check if email or phone already exists
+      const existingEmailUser = await User.findOne({ email: email });
+      if (existingEmailUser) {
+        return res.status(409).json({
+          message: "User with this email already exists.",
+          userId: existingEmailUser._id
+        });
+      }
+      const existingPhoneUser = await User.findOne({ countryCode, phone });
+      if (existingPhoneUser) {
+        return res.status(409).json({
+          message: "User with this phone already exists.",
+          userId: existingPhoneUser._id
+        });
+      }
+
+      // Create new autoshopowner user
+      user = await User.create({
+        countryCode,
+        phone,
+        email,
+        name,
+        pincode,
+        address,
+        role,
+        otp,
+        otpExpiresAt,
+        otpGeneratedAt,
+        otpAttempts: 0,
+        phoneVerified: false,
+        emailVerified: false,
+        isProfileComplete: true
+      });
+
+      return res.status(201).json({
+        message: "Sign-up, OTP sent, and profile completed successfully",
+        userId: user._id
+      });
+
+    } catch (error) {
+      console.error("[signUpLogInAndCompleteProfile/autoshopowner] Error:", error);
+      return res.status(500).json({ message: "Internal Server Error" });
+    }
+  }
 
 
   // Sign In → Send OTP, only for known roles

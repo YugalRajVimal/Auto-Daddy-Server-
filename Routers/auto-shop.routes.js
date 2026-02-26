@@ -127,6 +127,14 @@ autoShopRouter.post(
   (req, res) => autoShopController.onboardCarOwner(req, res)
 );
 
+// Route to edit/update a car owner (customer) by autoshop owner
+autoShopRouter.put(
+  "/my-customers",
+  jwtAuth,
+  (req, res) => autoShopController.editCustomer(req, res)
+);
+
+
 // Route to verify onboarded car owner with OTP (for auto shop flow)
 autoShopRouter.post(
   "/verify-onboarded-carowner",jwtAuth,
