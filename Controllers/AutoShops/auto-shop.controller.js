@@ -1530,6 +1530,19 @@ async fetchServices(req, res) {
     }
   }
 
+/**
+ * Fetch all services (and selected subservices) for the current auto shop's business profile.
+ * Uses the business profile schema defined in @file_context_0 (bussiness-profile.js),
+ * where myServices is an array of objects:
+ *   {
+ *     service: ObjectId,           // Points to Services collection
+ *     subServices: [               // Manually entered (custom) subservices for this autoshop
+ *       { name, desc, price }
+ *     ]
+ *   }
+ * Each entry in myServices contains only custom subservice info (not references to master subservices).
+ * Response: For each, gives master service info and the custom subservices as saved.
+ */
 async getAllMyServices(req, res) {
     try {
         const userId = req.user?.id;
@@ -1537,7 +1550,7 @@ async getAllMyServices(req, res) {
             return res.status(401).json({ message: "Unauthorized. User ID missing." });
         }
 
-        // Find the autoshopowner with their businessProfile populated
+        // Look up the shop owner, ensure role/biz profile present
         const user = await User.findById(userId).select("businessProfile role").lean();
         if (!user || user.role !== "autoshopowner") {
             return res.status(404).json({ message: "AutoShop owner not found." });
@@ -1546,55 +1559,57 @@ async getAllMyServices(req, res) {
             return res.status(404).json({ message: "Business profile not found." });
         }
 
-        // Get the business profile with myServices array
+        // Find business profile (use .lean() for perf)
         const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
         if (!businessProfile) {
             return res.status(404).json({ message: "Business profile not found." });
         }
 
-        const myServices = businessProfile.myServices || [];
+        const myServices = Array.isArray(businessProfile.myServices)
+            ? businessProfile.myServices : [];
 
-        // Prepare a list of unique service IDs to fetch
-        const serviceIds = myServices.map(ms => ms.service);
-
-        // Fetch all services from the master service schema
-        const servicesData = await servicesSchema.find({ _id: { $in: serviceIds } }).lean();
-
-        // Create a map: serviceId -> serviceDoc for easy lookup
-        const servicesMap = {};
-        for (const service of servicesData) {
-            servicesMap[service._id.toString()] = service;
+        // If no myServices, return empty
+        if (!myServices.length) {
+            return res.status(200).json({ success: true, services: [] });
         }
 
-        // For each myService, fetch service name/details and subservice details
+        // Gather service IDs to resolve master info
+        const serviceIds = myServices.map(ms => ms.service).filter(Boolean);
+        if (!serviceIds.length) {
+            return res.status(200).json({ success: true, services: [] });
+        }
+
+        // Get service master info from Services collection
+        // Use .find({ _id: { $in: [...] } })
+        const servicesData = await servicesSchema.find({ _id: { $in: serviceIds } }).lean();
+        const servicesMap = {};
+        for (const svc of servicesData) {
+            servicesMap[svc._id.toString()] = svc;
+        }
+
+        // Build result as: [{ service: { id, name, desc }, selectedSubServices: [...] }, ...]
         const result = myServices.map(ms => {
-            const serviceDoc = servicesMap[ms.service?.toString()];
-            // Map selected subservices (from myService) to full subservice details
-            let selectedSubServices = [];
-            if (serviceDoc && Array.isArray(ms.subServices)) {
-                const allSubservices = serviceDoc.services || [];
-                selectedSubServices = ms.subServices
-                    .map(selSub => {
-                        // selSub may have subService field as ObjectId or string
-                        const subId = selSub.subService?.toString ? selSub.subService.toString() : selSub.subService;
-                        return allSubservices.find(sub => sub._id.toString() === subId);
-                    })
-                    .filter(Boolean);
-            }
+            const serviceDoc = ms.service
+                ? servicesMap[ms.service.toString()]
+                : null;
             return {
-                service: {
-                    id: serviceDoc?._id,
-                    name: serviceDoc?.name,
-                    desc: serviceDoc?.desc
-                },
-                selectedSubServices: selectedSubServices.map(sub => ({
-                    id: sub._id,
-                    name: sub.name,
-                    desc: sub.desc,
-                    price: sub.price
-                }))
+                service: serviceDoc
+                  ? {
+                        id: serviceDoc._id,
+                        name: serviceDoc.name,
+                        desc: serviceDoc.desc
+                    }
+                  : null,
+                selectedSubServices: Array.isArray(ms.subServices)
+                  ? ms.subServices.map(sub => ({
+                        // These are custom details as saved by this shop
+                        name: sub.name,
+                        desc: sub.desc,
+                        price: sub.price
+                    }))
+                  : []
             };
-        });
+        }).filter(item => item.service); // skip entries where the master service is missing/deleted
 
         return res.status(200).json({
             success: true,
@@ -1626,29 +1641,34 @@ async addToMyServices(req, res) {
         // Validate and parse input
         const { services } = req.body;
         if (!Array.isArray(services) || services.length === 0) {
-            return res.status(400).json({ message: "services (array) is required in request body." });
+            return res.status(400).json({ message: "`services` (array) is required in request body." });
         }
 
-        // Validate all subServices exist in their respective Service (from services schema)
+        // Validate all services exist in services master schema
         for (const serviceBlock of services) {
             if (!serviceBlock.id) {
                 return res.status(400).json({ message: "All entries in services must have an id (service Id)." });
             }
-
             const serviceDoc = await servicesSchema.findById(serviceBlock.id).lean();
             if (!serviceDoc) {
                 return res.status(400).json({ message: `Service with id "${serviceBlock.id}" does not exist.` });
             }
-
-            if (Array.isArray(serviceBlock.services) && serviceBlock.services.length > 0) {
-                // Make a set of valid subservice _ids as strings
-                const validSubIds = new Set((serviceDoc.services || []).map(sub => sub._id.toString()));
-                for (const subId of serviceBlock.services) {
-                    if (!validSubIds.has(subId.toString())) {
-                        return res.status(400).json({
-                            message: `SubService with id "${subId}" does not exist inside Service "${serviceBlock.id}".`
-                        });
-                    }
+            // Each serviceBlock.subServices must be an array (can be empty)
+            if (!Array.isArray(serviceBlock.subServices)) {
+                return res.status(400).json({ message: `subServices must be an array in service "${serviceBlock.id}".` });
+            }
+            // Check that custom subServices each have required fields
+            for (const sub of serviceBlock.subServices) {
+                if (
+                    !sub ||
+                    typeof sub.name !== "string" ||
+                    sub.name.trim() === ""
+                ) {
+                    return res.status(400).json({ message: `Each subService in service "${serviceBlock.id}" must have a non-empty 'name'.` });
+                }
+                // desc (optional), price (optional but if present must be number)
+                if ("price" in sub && typeof sub.price !== "number") {
+                    return res.status(400).json({ message: `subService 'price' (if provided) must be a number in service "${serviceBlock.id}".` });
                 }
             }
         }
@@ -1659,55 +1679,63 @@ async addToMyServices(req, res) {
             return res.status(404).json({ message: "Business profile not found." });
         }
 
-        // Build a map of present services and subservices
-        // present: { [serviceId]: Set of subServiceIds }
-        const present = {};
-        for (const entry of businessProfile.myServices) {
-            if (!entry.service) continue;
-            const sId = entry.service.toString();
-            if (!present[sId]) present[sId] = new Set();
-            for (const subObj of (entry.subServices||[])) {
-                if (subObj && subObj.subService) present[sId].add(subObj.subService.toString());
-            }
+        // Build a map of present services for easy lookup: serviceId => index of myServices
+        const presentServiceIdx = {};
+        for (let i = 0; i < businessProfile.myServices.length; ++i) {
+            const ms = businessProfile.myServices[i];
+            if (ms.service) presentServiceIdx[ms.service.toString()] = i;
         }
 
-        // Only add services and subservices that are NOT already present
+        // Only add/update services/subServices as per schema: 
+        // "myServices" is array of { service: ObjectId, subServices: [ { name, desc, price } ] }
         for (const serviceBlock of services) {
             const serviceId = serviceBlock.id?.toString();
             if (!serviceId) continue;
-            const inputSubIds = Array.isArray(serviceBlock.services) 
-                ? serviceBlock.services.map(id => id.toString())
-                : [];
 
-            let myServiceObj = businessProfile.myServices.find(ms => ms.service.toString() === serviceId);
+            // Create normalized array of incoming subServices (name, desc, price)
+            const incomingSubServices = (serviceBlock.subServices || []).map(sub => ({
+                name: sub.name,
+                desc: sub.desc || "",
+                price: typeof sub.price === "number" ? sub.price : undefined,
+            }));
 
-            // If service doesn't exist at all and no subservices are present, add entire service with all its subservices from request
-            if (!myServiceObj) {
+            // See if this service is already present for this business
+            const msIdx = presentServiceIdx[serviceId];
+            if (msIdx === undefined) {
+                // Not present at all: Add it
                 businessProfile.myServices.push({
                     service: serviceBlock.id,
-                    subServices: inputSubIds.map(subId => ({ subService: subId }))
+                    subServices: incomingSubServices
                 });
-                // Mark them as present now for deduplication if duplicates in array
-                present[serviceId] = new Set(inputSubIds);
-                continue;
-            }
+            } else {
+                // Already present: append only those subservices with unique name/desc/price
+                const exSubServices = businessProfile.myServices[msIdx].subServices || [];
 
-            // Service already exists. Only add subservices that are not present
-            const alreadyPresentSubs = present[serviceId] || new Set();
-            let added = false;
-            for (const subId of inputSubIds) {
-                if (!alreadyPresentSubs.has(subId)) {
-                    myServiceObj.subServices.push({ subService: subId });
-                    alreadyPresentSubs.add(subId);
-                    added = true;
+                // We'll use (name+desc+price) as uniqueness for custom subServices
+                const exSet = new Set(
+                    exSubServices.map(s =>
+                        `${s.name?.trim()}|${(s.desc||"").trim()}|${typeof s.price === "number" ? s.price : ""}`
+                    )
+                );
+
+                for (const sub of incomingSubServices) {
+                    const key = `${sub.name?.trim()}|${(sub.desc||"").trim()}|${typeof sub.price === "number" ? sub.price : ""}`;
+                    if (!exSet.has(key)) {
+                        exSubServices.push(sub);
+                        exSet.add(key);
+                    }
                 }
+                businessProfile.myServices[msIdx].subServices = exSubServices;
             }
-            // If all subservices were already present, nothing will be added
         }
 
         await businessProfile.save();
 
-        return res.status(200).json({ success: true, message: "Services added successfully.", myServices: businessProfile.myServices });
+        return res.status(200).json({
+            success: true,
+            message: "Services added successfully.",
+            myServices: businessProfile.myServices
+        });
     } catch (error) {
         console.error("[addToMyServices] Error:", error);
         return res.status(500).json({ message: "Internal Server Error" });
@@ -1718,256 +1746,371 @@ async addToMyServices(req, res) {
  * Remove services (and/or subservices) from current auto shop's business profile.
  * Expects req.user to be authenticated autoshopowner and req.body.services as described.
  */
-async removeFromMyServices(req, res) {
-    try {
-        const userId = req.user?.id;
-        if (!userId) {
-            return res.status(401).json({ message: "Unauthorized. User ID missing." });
-        }
 
-        // Find the autoshopowner with their businessProfile populated
-        const user = await User.findById(userId).select("businessProfile role").lean();
-        if (!user || user.role !== "autoshopowner") {
-            return res.status(404).json({ message: "AutoShop owner not found." });
-        }
-        if (!user.businessProfile) {
-            return res.status(404).json({ message: "Business profile not found." });
-        }
+// async removeFromMyServices(req, res) {
+//     try {
+//         const userId = req.user?.id;
+//         if (!userId) {
+//             return res.status(401).json({ message: "Unauthorized. User ID missing." });
+//         }
 
-        const { services } = req.body;
-        if (!Array.isArray(services) || services.length === 0) {
-            return res.status(400).json({ message: "services (array) is required in request body." });
-        }
+//         // Find the autoshopowner with their businessProfile populated
+//         const user = await User.findById(userId).select("businessProfile role").lean();
+//         if (!user || user.role !== "autoshopowner") {
+//             return res.status(404).json({ message: "AutoShop owner not found." });
+//         }
+//         if (!user.businessProfile) {
+//             return res.status(404).json({ message: "Business profile not found." });
+//         }
 
-        // Build removal map: serviceId -> Set of subServiceIds (if array empty, remove whole service)
-        const toRemove = {};
-        for (const s of services) {
-            const serviceId = s.id;
-            if (!serviceId) continue;
-            toRemove[serviceId] = Array.isArray(s.services) ? new Set(s.services) : new Set();
-        }
+//         const { services } = req.body;
+//         if (!Array.isArray(services) || services.length === 0) {
+//             return res.status(400).json({ message: "services (array) is required in request body." });
+//         }
 
-        // Edit business profile
-        const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
-        if (!businessProfile) {
-            return res.status(404).json({ message: "Business profile not found." });
-        }
+//         /**
+//          * Expect request body like:
+//          *   services: [
+//          *     {
+//          *       id: "serviceId",
+//          *       subServices: [
+//          *          { name, desc, price } // MATCH BY these fields
+//          *       ]
+//          *     },
+//          *     ...
+//          *   ]
+//          * 
+//          * If subServices array is empty or omitted, remove whole service entry.
+//          */
 
-        // Filter myServices according to removal plan
-        businessProfile.myServices = businessProfile.myServices.filter(ms => {
-            const svcId = ms.service.toString();
-            if (!toRemove[svcId]) return true; // Not targeted for removal
+//         // Build removal map: serviceId -> Set of subService keys (name|desc|price). If set empty: remove whole service.
+//         const toRemove = {};
+//         for (const s of services) {
+//             const serviceId = s.id?.toString();
+//             if (!serviceId) continue;
+//             if (!Array.isArray(s.subServices) || s.subServices.length === 0) {
+//                 // Remove whole service
+//                 toRemove[serviceId] = null;
+//             } else {
+//                 // Remove only matching subservices by composite key
+//                 const subServiceKeys = new Set(
+//                     s.subServices.map(sub => {
+//                         return `${sub.name?.trim()}|${(sub.desc||"").trim()}|${typeof sub.price === "number" ? sub.price : ""}`;
+//                     })
+//                 );
+//                 toRemove[serviceId] = subServiceKeys;
+//             }
+//         }
 
-            const subServicesToRemove = toRemove[svcId];
-            if (!subServicesToRemove.size) {
-                // No subServices array—instructed to remove whole service
-                return false;
-            }
+//         // Edit business profile
+//         const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
+//         if (!businessProfile) {
+//             return res.status(404).json({ message: "Business profile not found." });
+//         }
 
-            // Remove specific subServices
-            ms.subServices = (ms.subServices||[]).filter(ss => !subServicesToRemove.has(ss.subService.toString()));
+//         // Filter myServices according to removal plan
+//         businessProfile.myServices = businessProfile.myServices.filter(ms => {
+//             const svcId = ms.service.toString();
+//             if (!(svcId in toRemove)) return true; // Not targeted for removal
 
-            // If after removal this service has no subServices left, remove service entirely
-            return ms.subServices.length > 0;
-        });
+//             const removeSubKeys = toRemove[svcId];
+//             if (removeSubKeys === null) {
+//                 // Remove whole service
+//                 return false;
+//             }
 
-        await businessProfile.save();
+//             // Remove specific subServices by composite key match (name|desc|price)
+//             ms.subServices = (ms.subServices || []).filter(ss => {
+//                 const key = `${ss.name?.trim()}|${(ss.desc||"").trim()}|${typeof ss.price === "number" ? ss.price : ""}`;
+//                 return !removeSubKeys.has(key);
+//             });
 
-        return res.status(200).json({ success: true, message: "Services removed successfully.", myServices: businessProfile.myServices });
-    } catch (error) {
-        console.error("[removeFromMyServices] Error:", error);
-        return res.status(500).json({ message: "Internal Server Error" });
-    }
-}
+//             // If after removal this service has no subServices left, remove service entirely
+//             return ms.subServices.length > 0;
+//         });
+
+//         await businessProfile.save();
+
+//         return res.status(200).json({ success: true, message: "Services removed successfully.", myServices: businessProfile.myServices });
+//     } catch (error) {
+//         console.error("[removeFromMyServices] Error:", error);
+//         return res.status(500).json({ message: "Internal Server Error" });
+//     }
+// }
 
 // DEALS HANDLING SECTION
 
+
+async editMyServices(req, res) {
+    try {
+      const userId = req.user?.id;
+      if (!userId) {
+        return res.status(401).json({ message: "Unauthorized." });
+      }
+  
+      const user = await User.findById(userId)
+        .select("businessProfile role")
+        .lean();
+  
+      if (!user || user.role !== "autoshopowner") {
+        return res.status(404).json({ message: "AutoShop owner not found." });
+      }
+  
+      if (!user.businessProfile) {
+        return res.status(404).json({ message: "Business profile not found." });
+      }
+  
+      const { services } = req.body;
+      if (!Array.isArray(services) || services.length === 0) {
+        return res.status(400).json({ message: "`services` array is required." });
+      }
+  
+      const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
+      if (!businessProfile) {
+        return res.status(404).json({ message: "Business profile not found." });
+      }
+
+      // Make sure servicesSchema is imported as 'servicesSchema'
+      for (const block of services) {
+        const serviceId = block.id?.toString();
+        if (!serviceId) continue;
+
+        // Check in master services schema that this service exists
+        const serviceDoc = await servicesSchema.findById(serviceId).lean();
+        if (!serviceDoc) {
+          return res.status(400).json({ message: `Service with id "${serviceId}" does not exist.` });
+        }
+  
+        const msIndex = businessProfile.myServices.findIndex(
+          ms => ms.service.toString() === serviceId
+        );
+  
+        // 🔥 REMOVE ENTIRE SERVICE
+        if (block.removeService === true) {
+          if (msIndex !== -1) {
+            businessProfile.myServices.splice(msIndex, 1);
+          }
+          continue;
+        }
+  
+        const incomingSubs = Array.isArray(block.subServices) ? block.subServices : [];
+  
+        // 🔥 SERVICE DOES NOT EXIST → ADD
+        if (msIndex === -1) {
+          businessProfile.myServices.push({
+            service: serviceId,
+            subServices: incomingSubs.map(s => ({
+              name: s.name,
+              desc: s.desc || "",
+              price: typeof s.price === "number" ? s.price : undefined
+            }))
+          });
+          continue;
+        }
+  
+        // 🔥 SERVICE EXISTS → EDIT / REMOVE SUBSERVICES
+        let existingSubs = businessProfile.myServices[msIndex].subServices || [];
+  
+        if (block.removeSubServices === true) {
+          const removeNames = new Set(
+            incomingSubs.map(s => s.name.trim())
+          );
+          existingSubs = existingSubs.filter(
+            s => !removeNames.has(s.name.trim())
+          );
+        } else {
+          // ADD / UPDATE subServices (matched by name)
+          const subMap = new Map(
+            existingSubs.map(s => [s.name.trim(), s])
+          );
+  
+          for (const sub of incomingSubs) {
+            if (!sub.name || typeof sub.name !== "string") continue;
+  
+            if (subMap.has(sub.name.trim())) {
+              // UPDATE
+              const ex = subMap.get(sub.name.trim());
+              if ("desc" in sub) ex.desc = sub.desc || "";
+              if ("price" in sub && typeof sub.price === "number") ex.price = sub.price;
+            } else {
+              // ADD
+              existingSubs.push({
+                name: sub.name,
+                desc: sub.desc || "",
+                price: typeof sub.price === "number" ? sub.price : undefined
+              });
+            }
+          }
+        }
+  
+        // If no subServices left → remove service
+        if (existingSubs.length === 0) {
+          businessProfile.myServices.splice(msIndex, 1);
+        } else {
+          businessProfile.myServices[msIndex].subServices = existingSubs;
+        }
+      }
+  
+      await businessProfile.save();
+  
+      return res.status(200).json({
+        success: true,
+        message: "Services updated successfully.",
+        myServices: businessProfile.myServices
+      });
+  
+    } catch (error) {
+      console.error("[editMyServices] Error:", error);
+      return res.status(500).json({ message: "Internal Server Error" });
+    }
+  }
+  
 /**
  * Create a new deal and link it to the creator's business profile.
  * - Adds the deal's _id to BusinessProfile.myDeals.
  * - Sets Deal.createdBy to businessProfile._id.
+ * - Adapts to deals.schema.js fields: productName, productImage, description, price, discountedPrice, dealEnabled, offersEndOnDate, createdBy.
+ */
+/**
+ * Create a new deal and link it to the creator's business profile.
+ * - Adds the deal's _id to BusinessProfile.myDeals.
+ * - Sets Deal.createdBy to businessProfile._id.
+ * - Adapts to deals.schema.js fields: productName, productImage, description, price, discountedPrice, dealEnabled, offersEndOnDate, createdBy.
  */
 async createDeal(req, res) {
+    let uploadedProductImagePath;
     try {
-        const id = req.user.id;
-
-        // Fetch the user to get their businessProfile
-        const user = await User.findById(id).lean();
+        const userId = req.user.id;
+        const user = await User.findById(userId).lean();
         if (!user) {
+            if (req.files && req.files.productImage && req.files.productImage[0]?.path) {
+                if (req.files.productImage[0].path !== undefined) {
+                    deleteUploadedFiles([req.files.productImage[0].path]);
+                }
+            }
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        // Fetch the business profile for this user (requirement: user.businessProfile must exist)
         const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
         if (!businessProfile) {
+            if (req.files && req.files.productImage && req.files.productImage[0]?.path) {
+                if (req.files.productImage[0].path !== undefined) {
+                    deleteUploadedFiles([req.files.productImage[0].path]);
+                }
+            }
             return res.status(404).json({ success: false, message: "Business profile not found" });
         }
 
-        const {
-            name,
-            description,
-            value,
-            valueId,
-            percentageDiscount,
+        if (req.files && req.files.productImage && req.files.productImage[0]?.path) {
+            uploadedProductImagePath = req.files.productImage[0].path;
+        }
+
+        // Prevent productImage in req.body from being accepted as path
+        if ('productImage' in req.body) {
+            delete req.body.productImage;
+        }
+
+        let {
+            productName,
+            description = "",
+            price,
+            discountedPrice,
             dealEnabled,
-            startDate,
-            endDate,
-            additionalDetails,
-            couponCode, // <-- Coupon code is mandatory now
+            offersEndOnDate,
+            serviceId
         } = req.body;
 
-        // Validate mandatory fields
+        price = typeof price === "string" ? Number(price) : price;
+        discountedPrice = typeof discountedPrice === "string" ? Number(discountedPrice) : discountedPrice;
+        dealEnabled = (dealEnabled === true || dealEnabled === "true") ? true : false;
+
         if (
-            typeof name !== "string" ||
-            !name.trim() ||
-            typeof value !== "string" ||
-            !value.trim() ||
-            typeof percentageDiscount !== "number" ||
-            typeof couponCode !== "string" ||
-            !couponCode.trim()
+            typeof productName !== "string" || !productName.trim() ||
+            typeof price !== "number" || isNaN(price) ||
+            typeof discountedPrice !== "number" || isNaN(discountedPrice) ||
+            !offersEndOnDate ||
+            typeof serviceId !== "string" || !serviceId.trim()
         ) {
+            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
             return res.status(400).json({
                 success: false,
-                message: "name (string), value (string), percentageDiscount (number), and couponCode (string) are required.",
+                message: "productName (string), price (number), discountedPrice (number), offersEndOnDate (date), and serviceId (string) are required.",
             });
         }
 
-        // Validate value (must be one of the allowed enum values)
-        const allowedValues = ["services", "subservices", "all"];
-        if (!allowedValues.includes(value)) {
+        if (!mongoose.Types.ObjectId.isValid(serviceId.trim())) {
+            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
             return res.status(400).json({
                 success: false,
-                message: `value must be one of: ${allowedValues.join(", ")}`,
+                message: "serviceId must be a valid MongoDB ObjectId."
             });
         }
 
-        // Check couponCode uniqueness in this business profile
-        const existingDealWithCoupon = await DealModel.findOne({
-            couponCode: couponCode.trim(),
+        const service = await Services.findById(serviceId.trim()).lean();
+        if (!service) {
+            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+            return res.status(404).json({
+                success: false,
+                message: "The specified serviceId does not correspond to a valid service."
+            });
+        }
+
+        if (price < 0 || discountedPrice < 0) {
+            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+            return res.status(400).json({
+                success: false,
+                message: "price and discountedPrice must not be negative."
+            });
+        }
+        if (discountedPrice > price) {
+            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+            return res.status(400).json({
+                success: false,
+                message: "discountedPrice cannot be greater than price."
+            });
+        }
+
+        let offerEndDate = offersEndOnDate instanceof Date
+            ? offersEndOnDate
+            : new Date(offersEndOnDate);
+        if (isNaN(offerEndDate.getTime())) {
+            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+            return res.status(400).json({
+                success: false,
+                message: "offersEndOnDate must be a valid date."
+            });
+        }
+
+        const existingDeal = await DealModel.findOne({
+            productName: productName.trim(),
             createdBy: businessProfile._id,
+            serviceId: serviceId.trim(),
         }).lean();
-
-        if (existingDealWithCoupon) {
+        if (existingDeal) {
+            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
             return res.status(400).json({
                 success: false,
-                message: "A deal with the same coupon code already exists in your business profile."
+                message: "A deal with the same product name already exists for this service in your business profile."
             });
         }
 
-        // Service or subservice existence validation imports
-        let servicesSchema;
-        try {
-            servicesSchema = (await import("../../Schema/services.schema.js")).default;
-        } catch (err) {
-            console.error("Failed to import services schema:", err);
-            return res.status(500).json({ success: false, message: "Internal Server Error (import failure)" });
-        }
+        let finalProductImage = uploadedProductImagePath || "";
 
-        // If value is 'services' or 'subservices', valueId must be a valid ObjectId and checked in services schema
-        let processedValueId = undefined;
-
-        if (value === "services" || value === "subservices") {
-            if (!valueId || typeof valueId !== "string") {
-                return res.status(400).json({
-                    success: false,
-                    message: `valueId (string/ObjectId) is required when value is "${value}".`,
-                });
-            }
-            const mongoose = (await import('mongoose')).default;
-            if (!mongoose.Types.ObjectId.isValid(valueId)) {
-                return res.status(400).json({
-                    success: false,
-                    message: `valueId "${valueId}" is not a valid ObjectId.`,
-                });
-            }
-            processedValueId = valueId;
-
-            if (value === "services") {
-                // Check if this service exists in the master services collection
-                const service = await servicesSchema.findById(valueId).lean();
-                if (!service) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `Service with id "${valueId}" does not exist.`,
-                    });
-                }
-
-                // ===== BusinessProfile MyServices Presence Check =====
-                // Check if the service is present in the business profile's myServices
-                const existsInMyServices = (businessProfile.myServices || []).some(
-                    (myService) => myService.service && myService.service.toString() === valueId
-                );
-                if (!existsInMyServices) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `Service with id "${valueId}" is not present in your BusinessProfile myServices, so you cannot create a deal for it.`,
-                    });
-                }
-                // ===================================================
-            } else if (value === "subservices") {
-                // For subservices, find a service that has a subservice with this _id in its 'services' array
-                const parent = await servicesSchema.findOne({
-                    "services._id": valueId
-                }).lean();
-                if (!parent) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `SubService with id "${valueId}" does not exist in any service.`,
-                    });
-                }
-
-                // ===== BusinessProfile MyServices and SubService Presence Check =====
-                // Check if the parent service present in business profile's myServices
-                const myServiceObj = (businessProfile.myServices || []).find(
-                    (myService) => myService.service && myService.service.toString() === parent._id.toString()
-                );
-                if (!myServiceObj) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `Cannot create a deal: The parent Service containing your SubService is not present in your BusinessProfile myServices.`,
-                    });
-                }
-                // Check if the subService id is in the myServiceObj.subServices
-                const foundSubService = (myServiceObj.subServices || []).some(
-                    (sub) => sub.subService && sub.subService.toString() === valueId
-                );
-                if (!foundSubService) {
-                    return res.status(400).json({
-                        success: false,
-                        message: `Cannot create a deal: The requested SubService with id "${valueId}" is not present in your BusinessProfile myServices for Service "${parent._id}".`,
-                    });
-                }
-                // ===================================================
-            }
-        }
-        // If value is 'all', valueId must be undefined or ignored
-        if (value === "all" && valueId) {
-            return res.status(400).json({
-                success: false,
-                message: "valueId should not be provided when value is 'all'."
-            });
-        }
-
-        // Prepare deal object for mongoose
-        const dealData = {
-            name,
-            description,
-            value,
-            percentageDiscount,
-            dealEnabled: dealEnabled !== undefined ? dealEnabled : false,
-            startDate,
-            endDate,
-            additionalDetails,
+        const deal = new DealModel({
+            productName: productName.trim(),
+            productImage: finalProductImage,
+            description: typeof description === "string" ? description : "",
+            price: price,
+            discountedPrice: discountedPrice,
+            dealEnabled: !!dealEnabled,
+            offersEndOnDate: offerEndDate,
             createdBy: businessProfile._id,
-            couponCode, // Coupon code is mandatory, so always include
-        };
-        if (processedValueId) dealData.valueId = processedValueId;
+            serviceId: serviceId.trim()
+        });
 
-        const deal = new DealModel(dealData);
         await deal.save();
 
-        // Add newly created deal to the business's myDeals
-        businessProfile.myDeals = businessProfile.myDeals || [];
+        if (!Array.isArray(businessProfile.myDeals)) businessProfile.myDeals = [];
         businessProfile.myDeals.push(deal._id);
         await businessProfile.save();
 
@@ -1976,9 +2119,12 @@ async createDeal(req, res) {
             message: "Deal created successfully",
             data: deal
         });
+
     } catch (error) {
-        console.error("[createDeal] Error:", error);
-        // For Mongoose validation errors provide more details
+        console.log(error);
+        if (uploadedProductImagePath !== undefined) {
+            deleteUploadedFiles([uploadedProductImagePath]);
+        }
         if (error.name === "ValidationError") {
             return res.status(400).json({
                 success: false,
@@ -1997,76 +2143,226 @@ async createDeal(req, res) {
 /**
  * Edit an existing deal (only if the current business profile created it).
  * - Only allows update if the deal's createdBy matches the user's businessProfile.
- * - Does not update createdBy.
  */
 async editDeal(req, res) {
+    let uploadedProductImagePath;
     try {
         const userId = req.user.id;
-
         const user = await User.findById(userId).lean();
         if (!user) {
+            if (req.files && req.files.productImage && req.files.productImage[0]?.path) {
+                if (req.files.productImage[0].path !== undefined) {
+                    deleteUploadedFiles([req.files.productImage[0].path]);
+                }
+            }
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        // Fetch the business profile for this user (requirement: user.businessProfile must exist)
         const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
         if (!businessProfile) {
+            if (req.files && req.files.productImage && req.files.productImage[0]?.path) {
+                if (req.files.productImage[0].path !== undefined) {
+                    deleteUploadedFiles([req.files.productImage[0].path]);
+                }
+            }
             return res.status(404).json({ success: false, message: "Business profile not found" });
         }
-        
         const businessProfileId = businessProfile._id;
 
         const { id } = req.params;
         const updateData = { ...req.body };
-        // Prevent changing createdBy
+
+        if ('productImage' in updateData) {
+            delete updateData.productImage;
+        }
+
+        if (req.files && req.files.productImage && req.files.productImage[0]?.path) {
+            uploadedProductImagePath = req.files.productImage[0].path;
+            updateData.productImage = uploadedProductImagePath;
+        }
+
         delete updateData.createdBy;
 
-        // Ensure deal belongs to this business profile
+        if ('productName' in updateData) {
+            if (typeof updateData.productName !== "string" || !updateData.productName.trim()) {
+                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "productName must be a non-empty string." });
+            }
+            updateData.productName = updateData.productName.trim();
+        }
+        if ('description' in updateData && typeof updateData.description !== "string") {
+            updateData.description = "";
+        }
+        if ('price' in updateData) {
+            updateData.price = typeof updateData.price === "string" ? Number(updateData.price) : updateData.price;
+            if (typeof updateData.price !== "number" || isNaN(updateData.price)) {
+                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "price must be a number." });
+            }
+            if (updateData.price < 0) {
+                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "price must not be negative." });
+            }
+        }
+        if ('discountedPrice' in updateData) {
+            updateData.discountedPrice = typeof updateData.discountedPrice === "string"
+                ? Number(updateData.discountedPrice) : updateData.discountedPrice;
+            if (typeof updateData.discountedPrice !== "number" || isNaN(updateData.discountedPrice)) {
+                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "discountedPrice must be a number." });
+            }
+            if (updateData.discountedPrice < 0) {
+                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "discountedPrice must not be negative." });
+            }
+        }
+        if ('offersEndOnDate' in updateData) {
+            let offersEndDate = updateData.offersEndOnDate instanceof Date 
+                ? updateData.offersEndOnDate 
+                : new Date(updateData.offersEndOnDate);
+            if (isNaN(offersEndDate.getTime())) {
+                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "offersEndOnDate must be a valid date." });
+            }
+            updateData.offersEndOnDate = offersEndDate;
+        }
+        if ('dealEnabled' in updateData) {
+            updateData.dealEnabled = (
+                updateData.dealEnabled === true ||
+                updateData.dealEnabled === "true"
+            );
+        }
+
+        if ('serviceId' in updateData) {
+            if (typeof updateData.serviceId !== "string" || !updateData.serviceId.trim()) {
+                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({
+                    success: false,
+                    message: "serviceId must be a non-empty string."
+                });
+            }
+            updateData.serviceId = updateData.serviceId.trim();
+            if (!mongoose.Types.ObjectId.isValid(updateData.serviceId)) {
+                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({
+                    success: false,
+                    message: "serviceId must be a valid MongoDB ObjectId."
+                });
+            }
+            const service = await Services.findById(updateData.serviceId).lean();
+            if (!service) {
+                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(404).json({
+                    success: false,
+                    message: "The specified serviceId does not correspond to a valid service."
+                });
+            }
+        }
+
+        if ('discountedPrice' in updateData && 'price' in updateData) {
+            if (updateData.discountedPrice > updateData.price) {
+                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({
+                    success: false,
+                    message: "discountedPrice cannot be greater than price."
+                });
+            }
+        }
+
+        // Prevent duplicate deal (uniqueness for businessProfileId, serviceId, productName)
+        if ('productName' in updateData && 'serviceId' in updateData) {
+            const otherDeal = await DealModel.findOne({
+                productName: updateData.productName,
+                serviceId: updateData.serviceId,
+                createdBy: businessProfileId,
+                _id: { $ne: id }
+            }).lean();
+            if (otherDeal) {
+                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({
+                    success: false,
+                    message: "A deal with the same product name already exists for this service in your business profile."
+                });
+            }
+        } else if ('productName' in updateData) {
+            const currentDeal = await DealModel.findOne({ _id: id, createdBy: businessProfileId }).lean();
+            if (currentDeal && currentDeal.serviceId) {
+                const otherDeal = await DealModel.findOne({
+                    productName: updateData.productName,
+                    serviceId: currentDeal.serviceId,
+                    createdBy: businessProfileId,
+                    _id: { $ne: id }
+                }).lean();
+                if (otherDeal) {
+                    if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                    return res.status(400).json({
+                        success: false,
+                        message: "A deal with the same product name already exists for this service in your business profile."
+                    });
+                }
+            }
+        } else if ('serviceId' in updateData) {
+            const currentDeal = await DealModel.findOne({ _id: id, createdBy: businessProfileId }).lean();
+            if (currentDeal && currentDeal.productName) {
+                const otherDeal = await DealModel.findOne({
+                    productName: currentDeal.productName,
+                    serviceId: updateData.serviceId,
+                    createdBy: businessProfileId,
+                    _id: { $ne: id }
+                }).lean();
+                if (otherDeal) {
+                    if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                    return res.status(400).json({
+                        success: false,
+                        message: "A deal with the same product name already exists for this service in your business profile."
+                    });
+                }
+            }
+        }
+
         const deal = await DealModel.findOneAndUpdate(
             { _id: id, createdBy: businessProfileId },
             updateData,
             { new: true }
         );
         if (!deal) {
+            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
             return res.status(404).json({ success: false, message: "Deal not found or not permitted" });
         }
         return res.status(200).json({ success: true, message: "Deal updated", data: deal });
     } catch (error) {
-        console.error("[editDeal] Error:", error);
+        if (uploadedProductImagePath !== undefined) {
+            deleteUploadedFiles([uploadedProductImagePath]);
+        }
         return res.status(500).json({ success: false, message: "Error updating deal", error: error.message });
     }
 }
 
 /**
  * Delete a deal by ID (only if created by the current business profile).
- * - Also removes the deal's _id from BusinessProfile.myDeals.
+ * - Removes the deal's _id from BusinessProfile.myDeals.
  */
 async deleteDeal(req, res) {
     try {
-       const userId = req.user.id;
-
+        const userId = req.user.id;
         const user = await User.findById(userId).lean();
         if (!user) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        // Fetch the business profile for this user (requirement: user.businessProfile must exist)
         const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
         if (!businessProfile) {
             return res.status(404).json({ success: false, message: "Business profile not found" });
         }
-        
         const businessProfileId = businessProfile._id;
-        
         const { id } = req.params;
 
-        // Only delete if created by this business profile
+        // Delete only if createdBy matches
         const deal = await DealModel.findOneAndDelete({ _id: id, createdBy: businessProfileId });
         if (!deal) {
             return res.status(404).json({ success: false, message: "Deal not found or not permitted" });
         }
 
-        // Remove deal from myDeals array of the business profile
         await BusinessProfileModel.findByIdAndUpdate(
             businessProfileId,
             { $pull: { myDeals: deal._id } }
@@ -2081,33 +2377,30 @@ async deleteDeal(req, res) {
 
 /**
  * Fetch all deals for the current business profile (BusinessProfile.myDeals).
- * - Populates the actual Deal documents.
+ * Returns full Deal documents as an array.
  */
 async fetchMyDeals(req, res) {
     try {
-
-
-        const id = req.user.id;
-
-        // Fetch the user to get their businessProfile
-        const user = await User.findById(id).lean();
+        const userId = req.user.id;
+        const user = await User.findById(userId).lean();
         if (!user) {
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
-        // Fetch the business profile for this user (requirement: user.businessProfile must exist)
-        const businessProfile = await BusinessProfileModel.findById(user.businessProfile)
-        .populate("myDeals");
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
         if (!businessProfile) {
             return res.status(404).json({ success: false, message: "Business profile not found" });
         }
-       
 
-    
-        // Return all deals in myDeals
+        // myDeals is an array of ObjectId referencing Deal
+        const deals = await DealModel.find({
+            _id: { $in: businessProfile.myDeals || [] },
+            createdBy: businessProfile._id
+        }).sort({ createdAt: -1 });
+
         return res.status(200).json({
             success: true,
-            data: businessProfile.myDeals || []
+            data: deals
         });
 
     } catch (error) {
@@ -2137,11 +2430,11 @@ async fetchJobCardPage(req, res) {
             return res.status(404).json({ success: false, message: "Business profile not found for user" });
         }
 
-        // Get the business profile with myDeals, and myServices.service (for service name & desc)
+        // Get the business profile, populating references for myServices and myDeals
         const businessProfile = await BusinessProfileModel.findById(user.businessProfile)
             .populate({
                 path: "myServices.service",
-                select: "name desc" // Only fetch the name/desc, not the full subservices array
+                select: "name desc" // Only fetch the name & desc for service reference
             })
             .populate("myDeals")
             .lean();
@@ -2150,53 +2443,37 @@ async fetchJobCardPage(req, res) {
             return res.status(404).json({ success: false, message: "Business profile not found" });
         }
 
-        // For each myService in myServices, populate a subServices array with the actual subService objects
-        if (businessProfile.myServices && Array.isArray(businessProfile.myServices)) {
-            // Get all unique service ids
-            const serviceIds = businessProfile.myServices.map(ms => ms.service?._id).filter(Boolean);
-            const allServiceDocs = await (await import("../../Schema/services.schema.js")).default.find({
-                _id: { $in: serviceIds }
-            }).lean();
-
-            // Map serviceId -> serviceDoc
-            const serviceMap = {};
-            allServiceDocs.forEach(serviceDoc => {
-                serviceMap[serviceDoc._id.toString()] = serviceDoc;
-            });
-
-            businessProfile.myServices = businessProfile.myServices.map(myService => {
-                const serviceDoc = serviceMap[myService.service?._id?.toString()];
-                if (!serviceDoc || !Array.isArray(myService.subServices)) {
-                    return {
-                        ...myService,
-                        subServices: []
-                    };
+        // myServices.subServices is [{ name, desc, price }] - no ObjectId
+        let cleanedMyServices = (businessProfile.myServices || []).map(myService => {
+            let serviceDoc = myService.service;
+            const serviceInfo = serviceDoc && (serviceDoc.name || serviceDoc.desc)
+                ? {
+                    _id: serviceDoc._id,
+                    name: serviceDoc.name,
+                    desc: serviceDoc.desc
                 }
-                const selectedSubServiceIds = (myService.subServices || []).map(s => s.subService?.toString());
-                // Populate subServices array in the same place, with only the matching subService objects
-                const populatedSubServices = (serviceDoc.services || []).filter(sub =>
-                    selectedSubServiceIds.includes(sub._id.toString())
-                );
-                // For compatibility: insert the actual subService docs into .subServices
-                return {
-                    ...myService,
-                    service: {
-                        _id: serviceDoc._id,
-                        name: serviceDoc.name,
-                        desc: serviceDoc.desc
-                    },
-                    subServices: populatedSubServices
-                };
-            });
-        }
+                : myService.service;
+
+            return {
+                ...myService,
+                service: serviceInfo,
+                subServices: Array.isArray(myService.subServices)
+                    ? myService.subServices.map(sub => ({
+                        name: sub.name,
+                        desc: sub.desc,
+                        price: sub.price
+                    }))
+                    : []
+            };
+        });
 
         // Structure the response payload with cleaned myServices
         return res.status(200).json({
             success: true,
             data: {
                 myCustomers: user.myCustomers || [],
-                myServices: businessProfile.myServices || [],
-                myDeals: businessProfile.myDeals || []
+                myServices: cleanedMyServices,
+                // myDeals: businessProfile.myDeals || []
             }
         });
     } catch (error) {
@@ -2223,6 +2500,7 @@ async createJobCard(req, res) {
     // If there is an error anywhere that requires aborting, cleanup file uploads!
 
     try {
+        // Parse services if it's a string
         if (typeof req.body.services === "string") {
             try {
                 req.body.services = JSON.parse(req.body.services);
@@ -2238,20 +2516,17 @@ async createJobCard(req, res) {
             customerId,
             vehicleId,
             odometerReading,
+            dueOdometerReading,
             issueDescription,
             serviceType,
             priorityLevel,
             services,
             additionalNotes,
-            technicalRemarks,
-            dealCode // Accept dealCode from the body (coupon code)
+            technicalRemarks
+            // status  // REMOVED: status does not come from req.body anymore
         } = req.body;
 
-        if (typeof req.body.services === "string") {
-            req.body.services = JSON.parse(req.body.services);
-        }
-
-        // Get the uploaded files from req.files["vehiclePhotos"], array of file objects (if any)
+        // Uploaded photos handling
         let uploadedPhotos = [];
         if (req.files && req.files["vehiclePhotos"]) {
             if (Array.isArray(req.files["vehiclePhotos"])) {
@@ -2261,7 +2536,6 @@ async createJobCard(req, res) {
             }
         }
         const vehiclePhotos = uploadedPhotos.map(f => f.path || f.location || f.filename).filter(Boolean);
-        
 
         // Validate basic required fields
         const missingFields = [];
@@ -2282,6 +2556,7 @@ async createJobCard(req, res) {
         // Validate enums
         const allowedServiceTypes = ['Repair', 'Maintenance', 'Inspection'];
         const allowedPriorityLevels = ['Normal', 'Urgent'];
+        // const allowedStatus = ['Pending', 'Approved', 'Rejected']; // No longer relevant for input
         if (!allowedServiceTypes.includes(serviceType)) {
             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
             return res.status(400).json({ success: false, message: "Invalid serviceType" });
@@ -2290,12 +2565,13 @@ async createJobCard(req, res) {
             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
             return res.status(400).json({ success: false, message: "Invalid priorityLevel" });
         }
+        // status validation removed, always "Pending" on creation
         if (vehiclePhotos.length > 5) {
             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
             return res.status(400).json({ success: false, message: "Maximum 5 vehiclePhotos allowed" });
         }
 
-        // 1. Find user/customer and check if customerId belongs to this workshop's customers
+        // Find user/business & validate customer
         const user = await User.findById(req.user.id);
         if (!user) {
             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
@@ -2309,7 +2585,7 @@ async createJobCard(req, res) {
             return res.status(403).json({ success: false, message: "Customer not registered with this business" });
         }
 
-        // 2. Fetch customer & validate vehicleId in their myVehicles
+        // Fetch customer & check vehicleId
         const customerUser = await User.findById(customerId);
         if (!customerUser) {
             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
@@ -2324,311 +2600,92 @@ async createJobCard(req, res) {
             return res.status(400).json({ success: false, message: "Vehicle does not belong to customer" });
         }
 
-        // 3. Fetch AutoShop businessProfile, validate offered services and subservices
+        // Get business profile, and build allowed services/subservices lookup using serviceId and subService.name
         const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
         if (!businessProfile) {
             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
             return res.status(404).json({ success: false, message: "Business profile not found" });
         }
-        // Build allowed services & subServices set from BusinessProfile.myServices
+
+        // Build allowed services & subServices lookup by serviceId and subService name (not ObjectId)
         const allowedServiceIds = new Set();
-        const allowedSubServiceIdsByService = {};
+        const allowedSubServiceNamesByService = {};
         (businessProfile.myServices || []).forEach(ms => {
             const serviceId = ms.service?._id?.toString() || ms.service?.toString();
             if (serviceId) {
                 allowedServiceIds.add(serviceId);
-                allowedSubServiceIdsByService[serviceId] = new Set(
-                    (ms.subServices || []).map(ss => ss.subService?.toString())
+                allowedSubServiceNamesByService[serviceId] = new Set(
+                    (ms.subServices || []).map(ss =>
+                        (ss.subService?.name || ss.name || (typeof ss.subService === "string" ? ss.subService : undefined))
+                    ).filter(Boolean)
                 );
             }
         });
 
-        console.log("--", allowedServiceIds);
-
-        // 4. Check each service in payload
+        // Validate input services & subservices (by service id and subService name, not objectId)
         for (const s of services) {
-            const sid = s.id?.toString();
+            const sid = s.service?.toString() || s.id?.toString(); // now field is "service"
             if (!sid || !allowedServiceIds.has(sid)) {
                 if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
                 return res.status(400).json({ success: false, message: `Service ${sid} not provided by this AutoShop` });
             }
-            // Check subService IDs if present
             if (Array.isArray(s.subServices)) {
-                const allowedSubIds = allowedSubServiceIdsByService[sid] || new Set();
+                const allowedSubNames = allowedSubServiceNamesByService[sid] || new Set();
                 for (const sub of s.subServices) {
-                    const subId = sub.id?.toString();
-                    if (subId && !allowedSubIds.has(subId)) {
+                    const subName = typeof sub.name === "string" ? sub.name : null;
+                    if (!subName || !allowedSubNames.has(subName)) {
                         if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
-                        return res.status(400).json({ success: false, message: `SubService ${subId} not available under Service ${sid}` });
+                        return res.status(400).json({
+                            success: false,
+                            message: `SubService "${subName}" not available under Service ${sid}`
+                        });
                     }
                 }
             }
         }
 
-        // 5. Calculate total amount (pre-discount) and process price data
-        // We'll expect each subService object to contain a price. Ignore ones missing price, but warn.
+        // Calculate total amount (no discounts, deal/coupon removed)
         let totalAmount = 0;
-        let serviceMap = new Map();
-        // We'll use this to also store the discounted price structure for step 8
-        let servicesWithDiscounts = JSON.parse(JSON.stringify(services || []));
-
-        (services || []).forEach((serviceItem, serviceIdx) => {
-            const sId = serviceItem.id?.toString();
-            if (!sId) return;
+        const servicesPayload = (services || []).map(serviceItem => {
             let subTotal = 0;
-            if (Array.isArray(serviceItem.subServices)) {
-                serviceItem.subServices.forEach((ss, subIdx) => {
-                    const price = parseFloat(ss.price || 0);
-                    if (!isNaN(price)) {
-                        totalAmount += price;
-                        subTotal += price;
-                        // Will possibly be updated with discount later
-                    }
-                });
-            }
-            serviceMap.set(sId, subTotal);
+            const mappedSubServices = Array.isArray(serviceItem.subServices)
+                ? serviceItem.subServices.map(ss => {
+                    const price = parseFloat(ss.price ?? 0);
+                    if (!isNaN(price)) subTotal += price;
+                    return {
+                        name: ss.name,
+                        desc: ss.desc,
+                        price: isNaN(price) ? 0 : price,
+                    };
+                })
+                : [];
+            totalAmount += subTotal;
+
+            // Service is always ref to Services ObjectID
+            return {
+                service: serviceItem.service?.toString() || serviceItem.id?.toString(), // accept either, but schema expects "service"
+                subServices: mappedSubServices
+            };
         });
 
-        // 6. Handle deal/coupon code (if provided), and recalculate discounted total
-        let appliedDeal = null;
-        let discountAmount = 0;
-        let discountPercentage = 0;
-        let newTotalAmount = totalAmount;
-
-        // Create discount details structure for response, reflecting where the discounts were taken from
-        let serviceDiscountDetails = [];
-
-        if (dealCode && typeof dealCode === "string" && dealCode.trim()) {
-            // Try to find a valid deal for this business profile and coupon code (enabled and not expired)
-            const now = new Date();
-            appliedDeal = await DealModel.findOne({
-                couponCode: dealCode,
-                createdBy: businessProfile._id,
-                dealEnabled: true,
-                $or: [
-                    { endDate: { $exists: false } },
-                    { endDate: null },
-                    { endDate: { $gte: now } }
-                ]
-            }).lean();
-
-            if (appliedDeal) {
-                // Only apply deal for relevant services or subservices as per deal rules
-                let eligibleSubtotal = 0;
-
-                // Deal Type: "all"
-                if (appliedDeal.value === "all") {
-                    eligibleSubtotal = totalAmount;
-                    discountPercentage = appliedDeal.percentageDiscount || 0;
-                    // Apply discount to all services and subservices
-                    (servicesWithDiscounts || []).forEach((serviceItem, idx) => {
-                        let subDiscounts = [];
-                        if (Array.isArray(serviceItem.subServices)) {
-                            serviceItem.subServices.forEach((ss, sIdx) => {
-                                const price = parseFloat(ss.price || 0);
-                                let subDiscount = 0;
-                                if (!isNaN(price) && discountPercentage > 0) {
-                                    subDiscount = Number(((price * discountPercentage) / 100).toFixed(2));
-                                    ss.discountedPrice = Number((price - subDiscount).toFixed(2));
-                                    ss.discountAmount = subDiscount;
-                                } else {
-                                    ss.discountedPrice = price;
-                                    ss.discountAmount = 0;
-                                }
-                                subDiscounts.push({
-                                    subServiceId: ss.id,
-                                    originalPrice: price,
-                                    discountedPrice: ss.discountedPrice,
-                                    discountAmount: subDiscount
-                                });
-                                eligibleSubtotal += price;
-                            });
-                        }
-                        serviceDiscountDetails.push({
-                            serviceId: serviceItem.id,
-                            discounts: subDiscounts
-                        });
-                    });
-                }
-                // Deal Type: "services"
-                else if (appliedDeal.value === "services" && appliedDeal.valueId) {
-                    discountPercentage = appliedDeal.percentageDiscount || 0;
-                    const eligibleServiceId = appliedDeal.valueId.toString();
-                    (servicesWithDiscounts || []).forEach((serviceItem, idx) => {
-                        let subDiscounts = [];
-                        if (serviceItem.id?.toString() === eligibleServiceId && Array.isArray(serviceItem.subServices)) {
-                            serviceItem.subServices.forEach((ss, sIdx) => {
-                                const price = parseFloat(ss.price || 0);
-                                let subDiscount = 0;
-                                if (!isNaN(price) && discountPercentage > 0) {
-                                    subDiscount = Number(((price * discountPercentage) / 100).toFixed(2));
-                                    ss.discountedPrice = Number((price - subDiscount).toFixed(2));
-                                    ss.discountAmount = subDiscount;
-                                    eligibleSubtotal += price;
-                                } else {
-                                    ss.discountedPrice = price;
-                                    ss.discountAmount = 0;
-                                }
-                                subDiscounts.push({
-                                    subServiceId: ss.id,
-                                    originalPrice: price,
-                                    discountedPrice: ss.discountedPrice,
-                                    discountAmount: subDiscount
-                                });
-                            });
-                            serviceDiscountDetails.push({
-                                serviceId: serviceItem.id,
-                                discounts: subDiscounts
-                            });
-                        } else if (Array.isArray(serviceItem.subServices)) {
-                            // No discount for these subservices
-                            serviceItem.subServices.forEach((ss, sIdx) => {
-                                const price = parseFloat(ss.price || 0);
-                                ss.discountedPrice = price;
-                                ss.discountAmount = 0;
-                                subDiscounts.push({
-                                    subServiceId: ss.id,
-                                    originalPrice: price,
-                                    discountedPrice: price,
-                                    discountAmount: 0
-                                });
-                            });
-                            serviceDiscountDetails.push({
-                                serviceId: serviceItem.id,
-                                discounts: subDiscounts
-                            });
-                        }
-                    });
-                }
-                // Deal Type: "subservices"
-                else if (appliedDeal.value === "subservices" && appliedDeal.valueId) {
-                    discountPercentage = appliedDeal.percentageDiscount || 0;
-                    const eligibleSubServiceId = appliedDeal.valueId.toString();
-                    (servicesWithDiscounts || []).forEach((serviceItem, idx) => {
-                        let subDiscounts = [];
-                        if (Array.isArray(serviceItem.subServices)) {
-                            serviceItem.subServices.forEach((ss, sIdx) => {
-                                const price = parseFloat(ss.price || 0);
-                                let subDiscount = 0;
-                                if (
-                                    ss.id?.toString() === eligibleSubServiceId &&
-                                    !isNaN(price) &&
-                                    discountPercentage > 0
-                                ) {
-                                    subDiscount = Number(((price * discountPercentage) / 100).toFixed(2));
-                                    ss.discountedPrice = Number((price - subDiscount).toFixed(2));
-                                    ss.discountAmount = subDiscount;
-                                    eligibleSubtotal += price;
-                                } else {
-                                    ss.discountedPrice = price;
-                                    ss.discountAmount = 0;
-                                }
-                                subDiscounts.push({
-                                    subServiceId: ss.id,
-                                    originalPrice: price,
-                                    discountedPrice: ss.discountedPrice,
-                                    discountAmount: subDiscount
-                                });
-                            });
-                        }
-                        serviceDiscountDetails.push({
-                            serviceId: serviceItem.id,
-                            discounts: subDiscounts
-                        });
-                    });
-                }
-
-                // Apply discount if eligible
-                if (eligibleSubtotal > 0 && discountPercentage > 0) {
-                    discountAmount = Number(((eligibleSubtotal * discountPercentage) / 100).toFixed(2));
-                    // Sum recalculated actual
-                    newTotalAmount = Number(
-                        (totalAmount - discountAmount).toFixed(2)
-                    );
-                }
-            } else {
-                // no deal found, rebuild discounts as no discount case
-                if (servicesWithDiscounts) {
-                    servicesWithDiscounts.forEach(serviceItem => {
-                        let subDiscounts = [];
-                        if (Array.isArray(serviceItem.subServices)) {
-                            serviceItem.subServices.forEach(ss => {
-                                const price = parseFloat(ss.price || 0);
-                                ss.discountedPrice = price;
-                                ss.discountAmount = 0;
-                                subDiscounts.push({
-                                    subServiceId: ss.id,
-                                    originalPrice: price,
-                                    discountedPrice: price,
-                                    discountAmount: 0
-                                });
-                            });
-                        }
-                        serviceDiscountDetails.push({
-                            serviceId: serviceItem.id,
-                            discounts: subDiscounts
-                        });
-                    });
-                }
-            }
-        } else {
-            // No deal provided: set discountedPrice = price everywhere
-            if (servicesWithDiscounts) {
-                servicesWithDiscounts.forEach(serviceItem => {
-                    let subDiscounts = [];
-                    if (Array.isArray(serviceItem.subServices)) {
-                        serviceItem.subServices.forEach(ss => {
-                            const price = parseFloat(ss.price || 0);
-                            ss.discountedPrice = price;
-                            ss.discountAmount = 0;
-                            subDiscounts.push({
-                                subServiceId: ss.id,
-                                originalPrice: price,
-                                discountedPrice: price,
-                                discountAmount: 0
-                            });
-                        });
-                    }
-                    serviceDiscountDetails.push({
-                        serviceId: serviceItem.id,
-                        discounts: subDiscounts
-                    });
-                });
-            }
-        }
-
-        // 7. Insert JobCard (add total, discount, dealCode, discountAmount)
-        // Use discounted (and discountAmount) fields for output, but store original prices structure.
-        // Store path(s) of uploaded Vehicle photos in vehiclePhotos field
-        // Ensure only the file paths/URLs of uploaded photos are stored in the JobCard
+        // Create the job card document as per corrected schema,
+        // subServices = [{ name, desc, price }], no ObjectId for subService
+        // status will always be "Pending" on creation
         const jobCardDoc = new JobCard({
             business: user.businessProfile,
             customerId,
             vehicleId,
             odometerReading,
+            dueOdometerReading,
             issueDescription,
             serviceType,
             priorityLevel,
-            services: servicesWithDiscounts.map(serviceItem => ({
-                id: serviceItem.id,
-                subServices: Array.isArray(serviceItem.subServices)
-                    ? serviceItem.subServices.map(ss => ({
-                        id: ss.id,
-                        price: ss.price,
-                        discountedPrice: ss.discountedPrice,
-                        discountAmount: ss.discountAmount
-                    }))
-                    : []
-            })),
+            services: servicesPayload,
             additionalNotes,
-            vehiclePhotos: Array.isArray(vehiclePhotos) ? vehiclePhotos : [], // Only array of file paths/URLs
+            vehiclePhotos: Array.isArray(vehiclePhotos) ? vehiclePhotos : [],
             technicalRemarks,
-            dealApplied: appliedDeal ? {
-                name: appliedDeal.name,
-                percentageDiscount: appliedDeal.percentageDiscount,
-                dealCode: appliedDeal.couponCode
-            } : undefined,
-            totalPayableAmount: Number(newTotalAmount.toFixed(2)),
+            totalPayableAmount: Number(totalAmount.toFixed(2)),
+            status: "Pending"
         });
 
         await jobCardDoc.save();
@@ -2638,15 +2695,10 @@ async createJobCard(req, res) {
             message: "JobCard created successfully",
             data: {
                 ...jobCardDoc.toObject(),
-                services: servicesWithDiscounts // send services with discount breakdown
-            },
-            dealApplied: appliedDeal ? {
-                name: appliedDeal.name,
-                percentageDiscount: appliedDeal.percentageDiscount,
-                dealCode: appliedDeal.couponCode
-            } : null,
-            serviceDiscountDetails, // Expanded breakdown for each service/subservice
-            totalPayableAmount: Number(newTotalAmount.toFixed(2)) // Added: total payable amount
+                // attach calculated total & cleaned services array
+                totalPayableAmount: Number(totalAmount.toFixed(2)),
+                services: servicesPayload
+            }
         });
     } catch (err) {
         // Delete uploaded vehicle photo(s) if an error occurred

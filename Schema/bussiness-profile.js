@@ -13,7 +13,9 @@ const teamMemberSchema = new Schema({
 
 // SubService Selection Schema: Each subservice is referenced by ObjectId (since subservices are embedded in Services)
 const selectedSubServiceSchema = new Schema({
-  subService: { type: Types.ObjectId, required: true } // Reference to subService's _id INSIDE the parent service
+  name: { type: String, required: true },
+  desc: { type: String },
+  price: { type: Number }
 }, { _id: false });
 
 // MyService Schema: Each entry references a main Service, and contains selected sub-services as ObjectIds

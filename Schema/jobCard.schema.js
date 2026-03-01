@@ -14,17 +14,17 @@ const { Schema, Types } = mongoose;
  * - vehiclePhotos: Array of file paths or URLs (multiple vehicle photos)
  * - technicalRemarks: String
  */
-const subServiceSelectionSchema = new Schema({
-    id: { type: Types.ObjectId, required: true, ref: 'Services.services' }, // reference to subService's _id INSIDE the parent service
-    price: { type: Number }
-    ,
-    discountedPrice: { type: Number }, // discounted price after applying discount, optional
-    discountAmount: { type: Number }   // discount amount applied to this subservice, optional
+// Match the subService and myService schemas from bussiness-profile.js
+
+const selectedSubServiceSchema = new Schema({
+  name: { type: String, required: true },
+  desc: { type: String },
+  price: { type: Number },
 }, { _id: false });
 
 const jobServiceSchema = new Schema({
-    id: { type: Types.ObjectId, required: true, ref: 'Services' }, // reference to service's _id
-    subServices: [subServiceSelectionSchema]
+  service: { type: Types.ObjectId, ref: 'Services', required: true }, // reference to Services collection
+  subServices: [selectedSubServiceSchema] // Embedded subservice selection
 }, { _id: false });
 
 const JobCardSchema = new Schema({
@@ -32,6 +32,7 @@ const JobCardSchema = new Schema({
     customerId: { type: Types.ObjectId, required: true, ref: 'User' },
     vehicleId: { type: Types.ObjectId, required: true, ref: 'Vehicle' },
     odometerReading: { type: Number },
+    dueOdometerReading: { type: Number },
     issueDescription: { type: String },
     serviceType: {
         type: String,
@@ -62,7 +63,13 @@ const JobCardSchema = new Schema({
         default: 'Pending'
     },
     
-    technicalRemarks: { type: String }
+    technicalRemarks: { type: String },
+    status: {
+        type: String,
+        enum: ['Pending', 'Approved', 'Rejected'],
+        default: 'Pending',
+        description: 'Stores if the job card is approved from customer or not'
+    },
 }, { timestamps: true });
 
 const JobCard = mongoose.model("JobCard", JobCardSchema);

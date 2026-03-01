@@ -1,49 +1,42 @@
 import mongoose from 'mongoose';
 
 const dealSchema = new mongoose.Schema({
-  name: {
+  productName: {
     type: String,
     required: true,
+    trim: true
+  },
+  productImage: {
+    type: String,
+    required: false,
+    default: ''
   },
   description: {
     type: String,
     default: "",
   },
-  value: {
-    type: String,
-    enum: ["services", "subservices", "all"],
-    required: true,
-    // Defines the deal's scope: applies to services, subservices, or all
-  },
-  // If value is 'services' or 'subservices', optionally store their respective id (ObjectId or String)
-  valueId: {
-    type: mongoose.Schema.Types.ObjectId,
-    required: function() {
-      return this.value === "services" || this.value === "subservices";
-    },
-    refPath: 'value', // Will reference either categories or subcategories model if needed for population
-  },
-  percentageDiscount: {
+  price: {
     type: Number,
     required: true,
-    min: 0,
-    max: 100
+    min: 0
+  },
+  discountedPrice: {
+    type: Number,
+    required: true,
+    min: 0
   },
   dealEnabled: {
     type: Boolean,
     default: false,
   },
-  startDate: {
+  offersEndOnDate: {
     type: Date,
-    default: Date.now
+    required: true
   },
-  endDate: {
-    type: Date,
+  serviceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Services",
     required: false
-  },
-  additionalDetails: {
-    type: String,
-    default: "",
   },
   createdAt: {
     type: Date,
@@ -54,11 +47,6 @@ const dealSchema = new mongoose.Schema({
     ref: "BusinessProfile",
     required: false
   },
-  couponCode: {
-    type: String,
-    required: false,
-    default: ""
-  }
 }, { timestamps: true });
 
 const DealModel = mongoose.model("Deal", dealSchema);
