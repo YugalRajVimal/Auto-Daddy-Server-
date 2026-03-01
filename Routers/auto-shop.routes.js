@@ -165,25 +165,35 @@ autoShopRouter.post(
 );
 
 // Route to remove services (and/or subservices) from current auto shop's business profile
-autoShopRouter.delete(
+// autoShopRouter.delete(
+//   "/my-services",
+//   jwtAuth,
+//   (req, res) => autoShopController.removeFromMyServices(req, res)
+// );
+
+// Route to edit/update services (and subservices) for current auto shop's business profile
+autoShopRouter.put(
   "/my-services",
   jwtAuth,
-  (req, res) => autoShopController.removeFromMyServices(req, res)
+  (req, res) => autoShopController.editMyServices(req, res)
 );
+
 
 // Deal routes for auto-shop business profile
 
-// Create a new deal and link it to the business profile
+// Create a new deal and link it to the business profile (accepts single file upload for productImage)
 autoShopRouter.post(
   "/my-deals",
   jwtAuth,
+  businessAndTeamUploadMiddleware,
   (req, res) => autoShopController.createDeal(req, res)
 );
 
-// Edit an existing deal (only if created by the current business profile)
+// Edit an existing deal (only if created by the current business profile, accepts single file upload for productImage)
 autoShopRouter.put(
   "/my-deals/:id",
   jwtAuth,
+  businessAndTeamUploadMiddleware,
   (req, res) => autoShopController.editDeal(req, res)
 );
 
