@@ -817,54 +817,51 @@ async editBusinessProfile(req, res) {
 // Search car owners by name, phone, email, or numberplate, return all user details with vehicle(s) details
 searchCarOwner = async (req, res) => {
     try {
-        const { name, phone, email, numberplate } = req.query;
+        const { search } = req.body;
         const autoshopOwnerId = req.user?.id;
 
-        if (!name && !phone && !email && !numberplate) {
-            return res.status(400).json({ message: "At least one search parameter (name, phone, email, or numberplate) is required." });
+        if (!search || typeof search !== "string" || search.trim() === "") {
+            return res.status(400).json({ message: "A search parameter is required." });
         }
 
-        let userQuery = { role: "carowner" };
+        // Try to find all car owners matching anywhere in name, phone, email, or numberplate
+        // First, search for vehicles matching numberplate if search could be a numberplate fragment
+        let vehicleIds = [];
+        const vehicleDocs = await VehicleModel.find(
+            {
+                licensePlateNo: { $regex: search, $options: "i" }
+            },
+            { _id: 1 }
+        );
+        vehicleIds = vehicleDocs.map(v => v._id);
 
-        if (numberplate) {
-            // Find vehicles that match the license plate number (case-insensitive, partial match)
-            const vehicleDocs = await VehicleModel.find(
-                { licensePlateNo: { $regex: numberplate, $options: "i" } },
-                { _id: 1 }
-            );
+        // Build the OR query
+        const orConditions = [
+            { name: { $regex: search, $options: "i" } },
+            { phone: { $regex: search, $options: "i" } },
+            { email: { $regex: search, $options: "i" } }
+        ];
 
-            if (vehicleDocs.length === 0) {
-                return res.status(200).json({
-                    message: "No car owners found with the given vehicle numberplate.",
-                    data: []
-                });
-            }
-
-            const vehicleIds = vehicleDocs.map(v => v._id);
-            userQuery.myVehicles = { $in: vehicleIds };
-        }
-        if (name) {
-            userQuery.name = { $regex: name, $options: "i" };
-        }
-        if (phone) {
-            userQuery.phone = phone;
-        }
-        if (email) {
-            userQuery.email = email;
+        if (vehicleIds.length > 0) {
+            orConditions.push({ myVehicles: { $in: vehicleIds } });
         }
 
-        // Fetch all user fields (+details) and vehicles, except password
+        const userQuery = {
+            role: "carowner",
+            $or: orConditions
+        };
+
+        // Fetch users, populate their vehicles
         const users = await User.find(userQuery)
-            .select("-password") // exclude password field
+            .select("-password")
             .populate({
                 path: "myVehicles",
                 model: "Vehicle",
             });
 
-        // If the autoshop owner is searching and users are found, check if any is already in myCustomers
+        // Check which users are already customers
         let alreadyCustomerIds = [];
         if (users.length > 0 && autoshopOwnerId) {
-            // Find autoshopowner's myCustomers
             const autoshopOwner = await User.findById(autoshopOwnerId).select("myCustomers").lean();
             if (autoshopOwner && autoshopOwner.myCustomers && Array.isArray(autoshopOwner.myCustomers)) {
                 const customerIds = autoshopOwner.myCustomers.map(id => id.toString());
@@ -874,28 +871,15 @@ searchCarOwner = async (req, res) => {
             }
         }
 
-        if (alreadyCustomerIds.length > 0) {
-            // Mark each user with a flag if they are already myCustomer
-            const usersWithCustomerStatus = users.map(u => ({
-                ...u.toObject(),
-                alreadyAddedAsCustomer: alreadyCustomerIds.includes(u._id.toString())
-            }));
-
-            return res.status(409).json({
-                message: "One or more of the searched car owners are already added to your customers.",
-                alreadyAddedCustomerIds: alreadyCustomerIds,
-                data: usersWithCustomerStatus
-            });
-        }
-
-        // Mark each user with a flag as not already added
+        // Mark each user with a flag if they are already myCustomer
         const usersWithCustomerStatus = users.map(u => ({
             ...u.toObject(),
-            alreadyAddedAsCustomer: false
+            alreadyAddedAsCustomer: alreadyCustomerIds.includes(u._id.toString())
         }));
 
         return res.status(200).json({
-            message: users.length > 0 ? "Car owner(s) found." : "No car owners found with the given criteria.",
+            message: users.length > 0 ? "Car owner(s) found." : "No car owners found with the given search.",
+            alreadyAddedCustomerIds: alreadyCustomerIds,
             data: usersWithCustomerStatus
         });
 
