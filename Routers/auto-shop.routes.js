@@ -230,6 +230,19 @@ autoShopRouter.post(
   }
 );
 
+
+
+// Route to edit (update) an existing JobCard for the auto shop owner
+autoShopRouter.put(
+  "/job-cards/:jobCardId",
+  jwtAuth,
+  businessAndTeamUploadMiddleware,
+  (req, res) => autoShopController.editJobCard(req, res)
+);
+
+
+
+
 // Route to fetch all JobCards for the current AutoShop owner (business)
 autoShopRouter.get(
   "/job-cards",

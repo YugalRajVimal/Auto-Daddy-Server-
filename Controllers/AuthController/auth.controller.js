@@ -24,6 +24,8 @@ class AuthController {
       // Clean formatting (do not remove +)
       countryCode = countryCode.trim(); // Preserve leading '+'
       phone = phone.trim();
+      countryCode = countryCode.replace(/\s+/g, "");
+      phone = phone.replace(/\s+/g, "");
       if (email) email = email.trim().toLowerCase();
 
       // Validate

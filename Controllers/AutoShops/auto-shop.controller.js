@@ -860,7 +860,13 @@ searchCarOwner = async (req, res) => {
                 userQuery.email = email;
             }
 
-            const users = await User.find(userQuery, { name: 1, phone: 1, email: 1, _id: 1 });
+            const users = await User.find(userQuery)
+                .select("name email phone countryCode status isDisabled myVehicles address pincode")
+                .populate({
+                    path: "myVehicles",
+                    model: "Vehicle",
+                    select: "-carImages -licensePlateFrontImagePath -licensePlateBackImagePath"
+                });
             return res.status(200).json({
                 message: users.length > 0 ? "Car owner(s) found." : "No car owners found with the given criteria.",
                 data: users
@@ -2715,6 +2721,260 @@ async createJobCard(req, res) {
         return res.status(500).json({ success: false, message: "Failed to create JobCard", error: err.message });
     }
 }
+
+/**
+ * Edit a job card. Allows autoshopowner to update specific fields on their own job card.
+ * Only Pending status job cards can be edited.
+ * All validations similar to createJobCard will be performed.
+ *
+ * Only updates the following fields: odometerReading, dueOdometerReading,
+ * issueDescription, services, additionalNotes, technicalRemarks, vehiclePhotos.
+ * Will overwrite ALL those fields.
+ * Accepts vehiclePhotos - optional; if not sent, keeps existing. If sent, replaces.
+ * If new files are uploaded, cleans up old photos (from FS/S3 accordingly).
+ */
+async editJobCard(req, res) {
+    // Accept vehiclePhotos from file uploads (multer) via req.files["vehiclePhotos"]
+
+    try {
+        const { jobCardId } = req.params;
+
+        // Parse services if it's a string
+        if (typeof req.body.services === "string") {
+            try {
+                req.body.services = JSON.parse(req.body.services);
+            } catch (err) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid services JSON format"
+                });
+            }
+        }
+
+        const {
+            odometerReading,
+            dueOdometerReading,
+            issueDescription,
+            serviceType, // can't be updated but validated for match
+            priorityLevel, // can't be updated but validated for match
+            services,
+            additionalNotes,
+            technicalRemarks
+        } = req.body;
+
+        // Find requesting user
+        const user = await User.findById(req.user.id);
+        if (!user) {
+            // delete any uploaded new photos
+            if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
+            return res.status(404).json({ success: false, message: "AutoShop owner user not found" });
+        }
+
+        // Find the job card and check business ownership
+        const jobCard = await JobCard.findById(jobCardId);
+        if (!jobCard) {
+            if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
+            return res.status(404).json({ success: false, message: "JobCard not found" });
+        }
+        if (
+            !jobCard.business ||
+            jobCard.business.toString() !== (user.businessProfile?.toString?.() || user.businessProfile)
+        ) {
+            if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
+            return res.status(403).json({ success: false, message: "You do not own this JobCard" });
+        }
+        if (jobCard.status !== "Pending") {
+            if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
+            return res.status(400).json({ success: false, message: "Only Pending job cards can be edited." });
+        }
+
+        // Only allow update on fields outlined
+        // Get uploaded photos if available
+        let uploadedPhotos = [];
+        if (req.files && req.files["vehiclePhotos"]) {
+            if (Array.isArray(req.files["vehiclePhotos"])) {
+                uploadedPhotos = req.files["vehiclePhotos"];
+            } else if (req.files["vehiclePhotos"]) {
+                uploadedPhotos = [req.files["vehiclePhotos"]];
+            }
+        }
+        let vehiclePhotos;
+        if (uploadedPhotos.length) {
+            vehiclePhotos = uploadedPhotos.map(f => f.path || f.location || f.filename).filter(Boolean);
+        } else {
+            // If no new upload, keep existing
+            vehiclePhotos = jobCard.vehiclePhotos || [];
+        }
+
+        // Validate if fields are present and correct, similar to createJobCard
+        const missingFields = [];
+        if (!services || !Array.isArray(services)) missingFields.push("services");
+        if (!odometerReading && odometerReading !== 0) missingFields.push("odometerReading");
+        if (!priorityLevel) missingFields.push("priorityLevel");
+        if (!serviceType) missingFields.push("serviceType");
+        if (missingFields.length > 0) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({
+                success: false,
+                message: `Missing required fields: ${missingFields.join(", ")}`
+            });
+        }
+
+        // Validate type matches current
+        if (priorityLevel !== jobCard.priorityLevel) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Cannot change priorityLevel" });
+        }
+        if (serviceType !== jobCard.serviceType) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Cannot change serviceType" });
+        }
+
+        const allowedServiceTypes = ['Repair', 'Maintenance', 'Inspection'];
+        const allowedPriorityLevels = ['Normal', 'Urgent'];
+        if (!allowedServiceTypes.includes(serviceType)) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Invalid serviceType" });
+        }
+        if (!allowedPriorityLevels.includes(priorityLevel)) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Invalid priorityLevel" });
+        }
+        if (vehiclePhotos.length > 5) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Maximum 5 vehiclePhotos allowed" });
+        }
+
+        // Validate customer (should not change)
+        const customerUser = await User.findById(jobCard.customerId || jobCard.customer?._id);
+        if (!customerUser) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(404).json({ success: false, message: "Customer not found" });
+        }
+        const myVehiclesList = Array.isArray(customerUser.myVehicles)
+            ? customerUser.myVehicles.map(v =>
+                v.vehicle?._id?.toString() || v._id?.toString() || v.toString()
+            ) : [];
+        if (!myVehiclesList.includes((jobCard.vehicleId || jobCard.vehicle?._id)?.toString())) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Vehicle does not belong to customer" });
+        }
+
+        // Get business profile and build allowed services/subservices as in createJobCard
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
+        if (!businessProfile) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(404).json({ success: false, message: "Business profile not found" });
+        }
+
+        // Build allowed services/subServices
+        const allowedServiceIds = new Set();
+        const allowedSubServiceNamesByService = {};
+        (businessProfile.myServices || []).forEach(ms => {
+            const serviceId = ms.service?._id?.toString() || ms.service?.toString();
+            if (serviceId) {
+                allowedServiceIds.add(serviceId);
+                allowedSubServiceNamesByService[serviceId] = new Set(
+                    (ms.subServices || []).map(ss =>
+                        (ss.subService?.name || ss.name || (typeof ss.subService === "string" ? ss.subService : undefined))
+                    ).filter(Boolean)
+                );
+            }
+        });
+
+        // Validate input services/subservices (by service id and subService name, not objectId)
+        for (const s of services) {
+            const sid = s.service?.toString() || s.id?.toString();
+            if (!sid || !allowedServiceIds.has(sid)) {
+                if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+                return res.status(400).json({ success: false, message: `Service ${sid} not provided by this AutoShop` });
+            }
+            if (Array.isArray(s.subServices)) {
+                const allowedSubNames = allowedSubServiceNamesByService[sid] || new Set();
+                for (const sub of s.subServices) {
+                    const subName = typeof sub.name === "string" ? sub.name : null;
+                    if (!subName || !allowedSubNames.has(subName)) {
+                        if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+                        return res.status(400).json({
+                            success: false,
+                            message: `SubService "${subName}" not available under Service ${sid}`
+                        });
+                    }
+                }
+            }
+        }
+
+        // Calculate new total
+        let totalAmount = 0;
+        const servicesPayload = (services || []).map(serviceItem => {
+            let subTotal = 0;
+            const mappedSubServices = Array.isArray(serviceItem.subServices)
+                ? serviceItem.subServices.map(ss => {
+                    const price = parseFloat(ss.price ?? 0);
+                    if (!isNaN(price)) subTotal += price;
+                    return {
+                        name: ss.name,
+                        desc: ss.desc,
+                        price: isNaN(price) ? 0 : price,
+                    };
+                })
+                : [];
+            totalAmount += subTotal;
+
+            return {
+                service: serviceItem.service?.toString() || serviceItem.id?.toString(),
+                subServices: mappedSubServices
+            };
+        });
+
+        // If new vehicle photos are uploaded, remove old ones
+        if (uploadedPhotos.length && Array.isArray(jobCard.vehiclePhotos) && jobCard.vehiclePhotos.length) {
+            // Remove old vehicle photos (deleteUploadedFiles expects File[] or array of filename/paths)
+            try {
+                await deleteUploadedFiles(jobCard.vehiclePhotos);
+            } catch(err) {
+                // Ignore error, log
+                console.warn("Failed to clean up previous vehicle photos after jobcard edit", err);
+            }
+        }
+
+        // Update editable fields
+        jobCard.odometerReading = odometerReading;
+        jobCard.dueOdometerReading = dueOdometerReading;
+        jobCard.issueDescription = issueDescription;
+        jobCard.services = servicesPayload;
+        jobCard.additionalNotes = additionalNotes;
+        jobCard.technicalRemarks = technicalRemarks;
+        jobCard.vehiclePhotos = Array.isArray(vehiclePhotos) ? vehiclePhotos : [];
+        jobCard.totalPayableAmount = Number(totalAmount.toFixed(2));
+
+        await jobCard.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "JobCard updated successfully",
+            data: {
+                ...jobCard.toObject(),
+                totalPayableAmount: Number(totalAmount.toFixed(2)),
+                services: servicesPayload
+            }
+        });
+    } catch (err) {
+        // Cleanup any newly uploaded files on error
+        if (req.files && req.files["vehiclePhotos"]) {
+            const files =
+                Array.isArray(req.files["vehiclePhotos"])
+                    ? req.files["vehiclePhotos"]
+                    : [req.files["vehiclePhotos"]];
+            if (files.length) {
+                await deleteUploadedFiles(files);
+            }
+        }
+        console.error("[editJobCard] Error:", err);
+        return res.status(500).json({ success: false, message: "Failed to edit JobCard", error: err.message });
+    }
+}
+
 
 /**
  * Get all JobCards for the current AutoShop owner (business).
