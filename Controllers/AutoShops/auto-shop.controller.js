@@ -875,16 +875,28 @@ searchCarOwner = async (req, res) => {
         }
 
         if (alreadyCustomerIds.length > 0) {
+            // Mark each user with a flag if they are already myCustomer
+            const usersWithCustomerStatus = users.map(u => ({
+                ...u.toObject(),
+                alreadyAddedAsCustomer: alreadyCustomerIds.includes(u._id.toString())
+            }));
+
             return res.status(409).json({
                 message: "One or more of the searched car owners are already added to your customers.",
                 alreadyAddedCustomerIds: alreadyCustomerIds,
-                data: users
+                data: usersWithCustomerStatus
             });
         }
 
+        // Mark each user with a flag as not already added
+        const usersWithCustomerStatus = users.map(u => ({
+            ...u.toObject(),
+            alreadyAddedAsCustomer: false
+        }));
+
         return res.status(200).json({
             message: users.length > 0 ? "Car owner(s) found." : "No car owners found with the given criteria.",
-            data: users
+            data: usersWithCustomerStatus
         });
 
     } catch (error) {
