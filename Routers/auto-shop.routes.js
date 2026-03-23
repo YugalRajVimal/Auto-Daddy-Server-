@@ -113,7 +113,7 @@ autoShopRouter.get(
 );
 
 // Route to remove a car owner from the autoshopowner's myCustomers list
-autoShopRouter.delete(
+autoShopRouter.post(
   "/my-customers",
   jwtAuth,
   (req, res) => autoShopController.removeFromMyCustomers(req, res)
