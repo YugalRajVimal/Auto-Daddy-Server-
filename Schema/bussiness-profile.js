@@ -8,7 +8,8 @@ const teamMemberSchema = new Schema({
   email: { type: String },
   phone: { type: String },
   designation: { type: String },
-  photo: { type: String } // URL or file path to the photo
+  photo: { type: String }, // URL or file path to the photo
+  isActive: { type: Boolean, default: true } // Active status of the team member
 });
 
 // SubService Selection Schema: Each subservice is referenced by ObjectId (since subservices are embedded in Services)

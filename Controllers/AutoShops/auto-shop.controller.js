@@ -616,7 +616,7 @@ async editBusinessProfile(req, res) {
     async addTeamMember(req, res) {
         try {
             const userId = req.user?.id;
-            const { name, email, phone, designation } = req.body;
+            const { name, email, phone, designation, isActive } = req.body;
             // photo is expected in req.file (Multer), uploaded image
             if (!userId) {
                 return res.status(401).json({ message: "Unauthorized" });
@@ -628,7 +628,6 @@ async editBusinessProfile(req, res) {
             }
 
             const user = await User.findById(userId).populate("businessProfile");
-       
 
             if (!user || !user.businessProfile) {
                 if (req.file) deleteUploadedFile(req.file);
@@ -655,7 +654,21 @@ async editBusinessProfile(req, res) {
                 return res.status(400).json({ message: "A team member with this email or phone already exists." });
             }
 
+            // Ensure isActive is either boolean or undefined
+            let parsedIsActive = undefined;
+            if (typeof isActive !== "undefined") {
+                if (typeof isActive === "boolean") {
+                    parsedIsActive = isActive;
+                } else if (typeof isActive === "string") {
+                    // Accept 'true'/'false' as string values from form-data
+                    parsedIsActive = isActive === "true";
+                }
+            }
+
             const teamMember = { name, email, phone, designation, photo };
+            if (typeof parsedIsActive !== "undefined") {
+                teamMember.isActive = parsedIsActive;
+            }
 
             user.businessProfile.teamMembers.push(teamMember);
             await user.businessProfile.save();
@@ -740,7 +753,7 @@ async editBusinessProfile(req, res) {
         try {
             const userId = req.user?.id;
             const { memberId } = req.params; // expects /team-members/:memberId
-            const { name, email, phone, designation } = req.body;
+            const { name, email, phone, designation, isActive } = req.body;
             // new photo is expected in req.file (Multer)
             if (!userId) {
                 if (req.file) deleteUploadedFile(req.file);
@@ -790,6 +803,15 @@ async editBusinessProfile(req, res) {
             if (email !== undefined) teamMember.email = email;
             if (phone !== undefined) teamMember.phone = phone;
             if (designation !== undefined) teamMember.designation = designation;
+
+            // Support isActive change
+            if (typeof isActive !== "undefined") {
+                if (typeof isActive === "boolean") {
+                    teamMember.isActive = isActive;
+                } else if (typeof isActive === "string") {
+                    teamMember.isActive = isActive === "true";
+                }
+            }
 
             // Handle new photo upload, delete old photo if replaced
             if (req.file) {
