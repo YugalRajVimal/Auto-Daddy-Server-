@@ -818,6 +818,7 @@ async editBusinessProfile(req, res) {
 searchCarOwner = async (req, res) => {
     try {
         const { name, phone, email, numberplate } = req.query;
+        const autoshopOwnerId = req.user?.id;
 
         if (!name && !phone && !email && !numberplate) {
             return res.status(400).json({ message: "At least one search parameter (name, phone, email, or numberplate) is required." });
@@ -858,8 +859,28 @@ searchCarOwner = async (req, res) => {
             .populate({
                 path: "myVehicles",
                 model: "Vehicle",
-                // You may want to keep all details; otherwise, adjust fields as needed
             });
+
+        // If the autoshop owner is searching and users are found, check if any is already in myCustomers
+        let alreadyCustomerIds = [];
+        if (users.length > 0 && autoshopOwnerId) {
+            // Find autoshopowner's myCustomers
+            const autoshopOwner = await User.findById(autoshopOwnerId).select("myCustomers").lean();
+            if (autoshopOwner && autoshopOwner.myCustomers && Array.isArray(autoshopOwner.myCustomers)) {
+                const customerIds = autoshopOwner.myCustomers.map(id => id.toString());
+                alreadyCustomerIds = users
+                    .filter(u => customerIds.includes(u._id.toString()))
+                    .map(u => u._id.toString());
+            }
+        }
+
+        if (alreadyCustomerIds.length > 0) {
+            return res.status(409).json({
+                message: "One or more of the searched car owners are already added to your customers.",
+                alreadyAddedCustomerIds: alreadyCustomerIds,
+                data: users
+            });
+        }
 
         return res.status(200).json({
             message: users.length > 0 ? "Car owner(s) found." : "No car owners found with the given criteria.",
