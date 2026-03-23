@@ -814,7 +814,7 @@ async editBusinessProfile(req, res) {
     }
 
 
-// Search car owners by name, phone, or email
+// Search car owners by name, phone, email, or numberplate, return all user details with vehicle(s) details
 searchCarOwner = async (req, res) => {
     try {
         const { name, phone, email, numberplate } = req.query;
@@ -823,14 +823,12 @@ searchCarOwner = async (req, res) => {
             return res.status(400).json({ message: "At least one search parameter (name, phone, email, or numberplate) is required." });
         }
 
-        // If searching by numberplate, do cross-collection lookup
-        if (numberplate) {
-            // Import VehicleModel at the top of your controller:
-            // import { VehicleModel } from "../../Schema/vehicles.schema.js";
+        let userQuery = { role: "carowner" };
 
-            // First, find vehicles that match the license plate number (case-insensitive, partial match)
+        if (numberplate) {
+            // Find vehicles that match the license plate number (case-insensitive, partial match)
             const vehicleDocs = await VehicleModel.find(
-                { licensePlateNo: { $regex: numberplate, $options: "i" } }, 
+                { licensePlateNo: { $regex: numberplate, $options: "i" } },
                 { _id: 1 }
             );
 
@@ -841,57 +839,33 @@ searchCarOwner = async (req, res) => {
                 });
             }
 
-            // Find all users (carowners) who have these vehicles in their myVehicles array
             const vehicleIds = vehicleDocs.map(v => v._id);
-
-            // Build other search queries as well if provided (can combine with AND semantics)
-            const userQuery = { 
-                role: "carowner", 
-                myVehicles: { $in: vehicleIds }
-            };
-
-            if (name) {
-                userQuery.name = { $regex: name, $options: "i" };
-            }
-            if (phone) {
-                userQuery.phone = phone;
-            }
-            if (email) {
-                userQuery.email = email;
-            }
-
-            const users = await User.find(userQuery)
-                .select("name email phone countryCode status isDisabled myVehicles address pincode")
-                .populate({
-                    path: "myVehicles",
-                    model: "Vehicle",
-                    select: "-carImages -licensePlateFrontImagePath -licensePlateBackImagePath"
-                });
-            return res.status(200).json({
-                message: users.length > 0 ? "Car owner(s) found." : "No car owners found with the given criteria.",
-                data: users
-            });
-        } else {
-            // No numberplate, search by other criteria
-            const searchQuery = { role: "carowner" };
-
-            if (name) {
-                searchQuery.name = { $regex: name, $options: "i" };
-            }
-            if (phone) {
-                searchQuery.phone = phone;
-            }
-            if (email) {
-                searchQuery.email = email;
-            }
-
-            const users = await User.find(searchQuery, { name: 1, phone: 1, email: 1, _id: 1 });
-
-            return res.status(200).json({
-                message: users.length > 0 ? "Car owner(s) found." : "No car owners found with the given criteria.",
-                data: users
-            });
+            userQuery.myVehicles = { $in: vehicleIds };
         }
+        if (name) {
+            userQuery.name = { $regex: name, $options: "i" };
+        }
+        if (phone) {
+            userQuery.phone = phone;
+        }
+        if (email) {
+            userQuery.email = email;
+        }
+
+        // Fetch all user fields (+details) and vehicles, except password
+        const users = await User.find(userQuery)
+            .select("-password") // exclude password field
+            .populate({
+                path: "myVehicles",
+                model: "Vehicle",
+                // You may want to keep all details; otherwise, adjust fields as needed
+            });
+
+        return res.status(200).json({
+            message: users.length > 0 ? "Car owner(s) found." : "No car owners found with the given criteria.",
+            data: users
+        });
+
     } catch (error) {
         console.error("[searchCarOwner] Error:", error);
         return res.status(500).json({ message: "Internal Server Error" });
