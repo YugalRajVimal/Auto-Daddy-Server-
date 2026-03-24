@@ -839,7 +839,8 @@ async editBusinessProfile(req, res) {
 // Search car owners by name, phone, email, or numberplate, return all user details with vehicle(s) details
 searchCarOwner = async (req, res) => {
     try {
-        const { search } = req.body;
+        // Get search from query param instead of req.body
+        const { search } = req.query;
         const autoshopOwnerId = req.user?.id;
 
         if (!search || typeof search !== "string" || search.trim() === "") {
