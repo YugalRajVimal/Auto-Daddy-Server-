@@ -2412,15 +2412,28 @@ async fetchMyDeals(req, res) {
             return res.status(404).json({ success: false, message: "Business profile not found" });
         }
 
-        // myDeals is an array of ObjectId referencing Deal
-        const deals = await DealModel.find({
-            _id: { $in: businessProfile.myDeals || [] },
-            createdBy: businessProfile._id
-        }).sort({ createdAt: -1 });
+        // Group deals by serviceId: one array per serviceId, includes all deals for that serviceId.
+        const groupedDeals = await DealModel.aggregate([
+            {
+                $match: {
+                    _id: { $in: (businessProfile.myDeals || []).map(id => typeof id === "string" ? new mongoose.Types.ObjectId(id) : id) },
+                    createdBy: businessProfile._id
+                }
+            },
+            {
+                $group: {
+                    _id: "$serviceId", // group by serviceId (can be null)
+                    deals: { $push: "$$ROOT" }
+                }
+            },
+            {
+                $sort: { "_id": 1 } // Sort by serviceId for predictable order
+            }
+        ]);
 
         return res.status(200).json({
             success: true,
-            data: deals
+            data: groupedDeals
         });
 
     } catch (error) {
