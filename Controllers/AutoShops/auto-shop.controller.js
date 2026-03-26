@@ -2412,24 +2412,51 @@ async fetchMyDeals(req, res) {
             return res.status(404).json({ success: false, message: "Business profile not found" });
         }
 
-        // Group deals by serviceId: one array per serviceId, includes all deals for that serviceId.
-        const groupedDeals = await DealModel.aggregate([
-            {
-                $match: {
-                    _id: { $in: (businessProfile.myDeals || []).map(id => typeof id === "string" ? new mongoose.Types.ObjectId(id) : id) },
-                    createdBy: businessProfile._id
-                }
-            },
-            {
-                $group: {
-                    _id: "$serviceId", // group by serviceId (can be null)
-                    deals: { $push: "$$ROOT" }
-                }
-            },
-            {
-                $sort: { "_id": 1 } // Sort by serviceId for predictable order
+        // Fetch deals by business, then group by serviceId, attaching service name
+        const dealIds = (businessProfile.myDeals || []).map(id => 
+            typeof id === "string" ? new mongoose.Types.ObjectId(id) : id
+        );
+
+        // Populate service information for each deal
+        // 1. Find all deals for this business
+        const deals = await DealModel.find({
+            _id: { $in: dealIds },
+            createdBy: businessProfile._id
+        })
+        .populate({ path: "serviceId", select: "name" })
+        .lean();
+
+        // 2. Group deals by serviceId, include service name in group
+        const groupMap = {};
+        deals.forEach(deal => {
+            const serviceObj = deal.serviceId; // could be null or { _id, name }
+            const sid = serviceObj ? String(serviceObj._id) : "null";
+            if (!groupMap[sid]) {
+                groupMap[sid] = {
+                    serviceId: serviceObj ? serviceObj._id : null,
+                    serviceName: serviceObj ? serviceObj.name : null,
+                    deals: []
+                };
             }
-        ]);
+            // Replace deal.serviceId with only its _id for clarity, optionally keep
+            deal.serviceId = serviceObj ? serviceObj._id : null;
+            groupMap[sid].deals.push(deal);
+        });
+
+        // 3. Convert group map to array, sort by serviceName alphabetically or by serviceId if name missing
+        const groupedDeals = Object.values(groupMap)
+            .sort((a, b) => {
+                if (a.serviceName && b.serviceName) {
+                    return a.serviceName.localeCompare(b.serviceName);
+                }
+                if (a.serviceName) return -1;
+                if (b.serviceName) return 1;
+                // Fall back to serviceId string compare
+                if (a.serviceId && b.serviceId) {
+                    return String(a.serviceId).localeCompare(String(b.serviceId));
+                }
+                return 0;
+            });
 
         return res.status(200).json({
             success: true,
