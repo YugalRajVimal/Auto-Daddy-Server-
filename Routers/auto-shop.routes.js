@@ -229,6 +229,22 @@ autoShopRouter.post(
   }
 );
 
+// Route to edit (update) an existing JobCard for the auto shop owner
+autoShopRouter.put(
+  "/job-cards/:jobCardId",
+  jwtAuth,
+  businessAndTeamUploadMiddleware,
+  (req, res) => autoShopController.editJobCard(req, res)
+);
+
+// Route to delete a JobCard (only if it belongs to current business)
+autoShopRouter.delete(
+  "/job-cards/:jobCardId",
+  jwtAuth,
+  (req, res) => autoShopController.deleteJobCard(req, res)
+);
+
+
 // Route to search JobCards by many fields (job number, customer name, vehicle info, etc)
 autoShopRouter.get(
   "/job-cards/search",

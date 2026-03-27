@@ -2820,6 +2820,299 @@ async createJobCard(req, res) {
     }
 }
 
+/**
+ * Edit an existing JobCard for an auto shop owner.
+ * Allows updates only for JobCards belonging to this business.
+ * Only allows edits if the JobCard status is still "Pending".
+ * 
+ * Expects:
+ *   - req.params.jobCardId: ID of the job card to edit (in URL)
+ *   - req.body: updatable fields (same as createJobCard, except status/jobNo/business/customerId/vehicleId cannot be changed)
+ *   - Accepts new vehicle photos from req.files["vehiclePhotos"] (will append if < 5, or replace all if replacePhotos=true in body)
+ * 
+ * Returns updated JobCard document.
+ */
+async editJobCard(req, res) {
+    // Accept vehiclePhotos from file uploads (multer) via req.files["vehiclePhotos"]
+    // If there is an error anywhere that requires aborting, cleanup file uploads!
+
+    const { jobCardId } = req.params;
+
+    try {
+        // Find the job card, user, and validate permissions
+        const user = await User.findById(req.user.id);
+        if (!user || !user.businessProfile) {
+            if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
+            return res.status(404).json({ success: false, message: "Business profile not found for user" });
+        }
+        const businessId = user.businessProfile;
+
+
+        const jobCard = await JobCard.findById(jobCardId);
+        if (!jobCard) {
+            if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
+            return res.status(404).json({ success: false, message: "JobCard not found" });
+        }
+
+        if (String(jobCard.business) !== String(businessId)) {
+            if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
+            return res.status(403).json({ success: false, message: "You do not have permission to edit this job card" });
+        }
+
+        if (jobCard.status !== "Pending") {
+            if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
+            return res.status(400).json({ success: false, message: "Cannot edit JobCard after it is approved or rejected" });
+        }
+
+        // Handle file uploads
+        let uploadedPhotos = [];
+        if (req.files && req.files["vehiclePhotos"]) {
+            if (Array.isArray(req.files["vehiclePhotos"])) {
+                uploadedPhotos = req.files["vehiclePhotos"];
+            } else {
+                uploadedPhotos = [req.files["vehiclePhotos"]];
+            }
+        }
+        const uploadedPhotoPaths = uploadedPhotos.map(f => f.path || f.location || f.filename).filter(Boolean);
+
+        // Merge or replace photos
+        let finalVehiclePhotos = Array.isArray(jobCard.vehiclePhotos) ? [...jobCard.vehiclePhotos] : [];
+        const maxPhotos = 5;
+        const { replacePhotos } = req.body;
+
+        if (replacePhotos === "true" || replacePhotos === true) {
+            // Replace all
+            if (finalVehiclePhotos.length && uploadedPhotoPaths.length) {
+                await deleteUploadedFiles(finalVehiclePhotos);
+            }
+            finalVehiclePhotos = [...uploadedPhotoPaths];
+        } else if (uploadedPhotoPaths.length) {
+            // Append (if under limit)
+            if (finalVehiclePhotos.length + uploadedPhotoPaths.length > maxPhotos) {
+                await deleteUploadedFiles(uploadedPhotos);
+                return res.status(400).json({ success: false, message: `Maximum ${maxPhotos} vehiclePhotos allowed` });
+            }
+            finalVehiclePhotos = finalVehiclePhotos.concat(uploadedPhotoPaths);
+        }
+
+        if (finalVehiclePhotos.length > maxPhotos) {
+            // Defensive check (should never happen with above logic)
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: `Maximum ${maxPhotos} vehiclePhotos allowed` });
+        }
+
+        // Updatable fields
+        // Parse services if needed
+        let servicesPayload = [];
+        let totalAmount = 0;
+        if (req.body.services) {
+            let services = req.body.services;
+            if (typeof services === "string") {
+                try {
+                    services = JSON.parse(services);
+                } catch (e) {
+                    if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+                    return res.status(400).json({ success: false, message: "Invalid services JSON format" });
+                }
+            }
+            // Validate against business profile
+            const businessProfile = await BusinessProfileModel.findById(businessId).lean();
+            const allowedServiceIds = new Set();
+            const allowedSubServiceNamesByService = {};
+            (businessProfile.myServices || []).forEach(ms => {
+                const serviceId = ms.service?._id?.toString() || ms.service?.toString();
+                if (serviceId) {
+                    allowedServiceIds.add(serviceId);
+                    allowedSubServiceNamesByService[serviceId] = new Set(
+                        (ms.subServices || []).map(ss =>
+                            (ss.subService?.name || ss.name || (typeof ss.subService === "string" ? ss.subService : undefined))
+                        ).filter(Boolean)
+                    );
+                }
+            });
+
+            for (const s of services) {
+                const sid = s.service?.toString() || s.id?.toString();
+                if (!sid || !allowedServiceIds.has(sid)) {
+                    if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+                    return res.status(400).json({ success: false, message: `Service ${sid} not provided by this AutoShop` });
+                }
+                if (Array.isArray(s.subServices)) {
+                    const allowedSubNames = allowedSubServiceNamesByService[sid] || new Set();
+                    for (const sub of s.subServices) {
+                        const subName = typeof sub.name === "string" ? sub.name : null;
+                        if (!subName || !allowedSubNames.has(subName)) {
+                            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+                            return res.status(400).json({
+                                success: false,
+                                message: `SubService "${subName}" not available under Service ${sid}`
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Calculate amounts
+            servicesPayload = (services || []).map(serviceItem => {
+                let subTotal = 0;
+                const mappedSubServices = Array.isArray(serviceItem.subServices)
+                    ? serviceItem.subServices.map(ss => {
+                        const price = parseFloat(ss.price ?? 0);
+                        if (!isNaN(price)) subTotal += price;
+                        return {
+                            name: ss.name,
+                            desc: ss.desc,
+                            price: isNaN(price) ? 0 : price,
+                        };
+                    })
+                    : [];
+                totalAmount += subTotal;
+
+                return {
+                    service: serviceItem.service?.toString() || serviceItem.id?.toString(),
+                    subServices: mappedSubServices
+                };
+            });
+        } else {
+            // If not updating services, use old ones and keep price as is
+            servicesPayload = jobCard.services;
+            let sum = 0;
+            for (const sv of (Array.isArray(jobCard.services) ? jobCard.services : [])) {
+                for (const sub of (Array.isArray(sv.subServices) ? sv.subServices : [])) {
+                    sum += Number(sub.price || 0);
+                }
+            }
+            totalAmount = sum;
+        }
+
+        // Validate enums if present
+        const allowedServiceTypes = ['Repair', 'Maintenance', 'Inspection'];
+        const allowedPriorityLevels = ['Normal', 'Urgent'];
+        if (req.body.serviceType && !allowedServiceTypes.includes(req.body.serviceType)) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Invalid serviceType" });
+        }
+        if (req.body.priorityLevel && !allowedPriorityLevels.includes(req.body.priorityLevel)) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Invalid priorityLevel" });
+        }
+
+        // Labour charge
+        let parsedLabourCharge = req.body.labourCharge !== undefined
+            ? parseFloat(req.body.labourCharge)
+            : (typeof jobCard.labourCharge === "number" ? jobCard.labourCharge : 0);
+        if (isNaN(parsedLabourCharge)) parsedLabourCharge = 0;
+        // If updating labourCharge in the request, add to total
+        let totalWithLabour = totalAmount;
+        if (req.body.labourCharge !== undefined) {
+            totalWithLabour += parsedLabourCharge;
+        } else if (typeof jobCard.labourCharge === "number" && !isNaN(jobCard.labourCharge)) {
+            totalWithLabour += Number(jobCard.labourCharge);
+        }
+
+        // Updatable fields
+        const fieldsToUpdate = {
+            odometerReading: req.body.odometerReading !== undefined ? req.body.odometerReading : jobCard.odometerReading,
+            dueOdometerReading: req.body.dueOdometerReading !== undefined ? req.body.dueOdometerReading : jobCard.dueOdometerReading,
+            issueDescription: (req.body.issueDescription !== undefined ? req.body.issueDescription : jobCard.issueDescription),
+            serviceType: req.body.serviceType !== undefined ? req.body.serviceType : jobCard.serviceType,
+            priorityLevel: req.body.priorityLevel !== undefined ? req.body.priorityLevel : jobCard.priorityLevel,
+            services: servicesPayload,
+            additionalNotes: req.body.additionalNotes !== undefined ? req.body.additionalNotes : jobCard.additionalNotes,
+            vehiclePhotos: finalVehiclePhotos,
+            technicalRemarks: req.body.technicalRemarks !== undefined ? req.body.technicalRemarks : jobCard.technicalRemarks,
+            totalPayableAmount: Number(totalWithLabour.toFixed(2)),
+            labourCharge: parsedLabourCharge,
+            labourDuration: req.body.labourDuration !== undefined
+                ? (typeof req.body.labourDuration === "string" ? req.body.labourDuration : undefined)
+                : jobCard.labourDuration,
+        };
+
+        // Perform the update
+        for (const key in fieldsToUpdate) {
+            jobCard[key] = fieldsToUpdate[key];
+        }
+
+        await jobCard.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "JobCard updated successfully",
+            data: {
+                ...jobCard.toObject(),
+                totalPayableAmount: Number(totalWithLabour.toFixed(2)),
+                services: servicesPayload,
+                labourCharge: parsedLabourCharge,
+                labourDuration: fieldsToUpdate.labourDuration
+            }
+        });
+    } catch (err) {
+        // Delete uploaded files if something broke
+        if (req.files && req.files["vehiclePhotos"]) {
+            const files =
+                Array.isArray(req.files["vehiclePhotos"])
+                    ? req.files["vehiclePhotos"]
+                    : [req.files["vehiclePhotos"]];
+            if (files.length) {
+                await deleteUploadedFiles(files);
+            }
+        }
+        console.error("[editJobCard] Error:", err);
+        return res.status(500).json({ success: false, message: "Failed to edit JobCard", error: err.message });
+    }
+}
+
+/**
+ * Delete a JobCard by ID (only if it belongs to this business).
+ * Cleans up uploaded vehicle photos.
+ * 
+ * Expects:
+ *   - req.params.jobCardId: ID of the job card to delete (in URL)
+ * 
+ * Returns success/failure.
+ */
+async deleteJobCard(req, res) {
+    const { jobCardId } = req.params;
+    try {
+        // Find user and validate
+        const user = await User.findById(req.user.id);
+        if (!user || !user.businessProfile) {
+            return res.status(404).json({ success: false, message: "Business profile not found for user" });
+        }
+        const businessId = user.businessProfile;
+
+        // Find the JobCard
+        const jobCard = await JobCard.findById(jobCardId);
+        if (!jobCard) {
+            return res.status(404).json({ success: false, message: "JobCard not found" });
+        }
+
+        // Ensure this JobCard belongs to the logged-in user's business
+        if (String(jobCard.business) !== String(businessId)) {
+            return res.status(403).json({ success: false, message: "You do not have permission to delete this JobCard" });
+        }
+
+        // Clean up vehicle photos if any
+        if (Array.isArray(jobCard.vehiclePhotos) && jobCard.vehiclePhotos.length > 0) {
+            await deleteUploadedFiles(jobCard.vehiclePhotos);
+        }
+
+        // Delete the JobCard
+        await JobCard.deleteOne({ _id: jobCardId });
+
+        return res.status(200).json({ success: true, message: "JobCard deleted successfully" });
+    } catch (err) {
+        console.error("[deleteJobCard] Error:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to delete JobCard",
+            error: err.message
+        });
+    }
+}
+
+
+
 
 /**
  * Search JobCards by multiple fields:
