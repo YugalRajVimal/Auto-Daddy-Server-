@@ -1,6 +1,5 @@
 import mongoose from "mongoose";
 import { deleteUploadedFile, deleteUploadedFiles } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
-
 import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 import { User } from "../../Schema/user.schema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
@@ -8,6 +7,7 @@ import servicesSchema from "../../Schema/services.schema.js";
 import DealModel from "../../Schema/deals.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
 import Services from "../../Schema/services.schema.js";
+import counterSchema from "../../Schema/counter.schema.js";
 
 
 class AutoShopController {
@@ -2559,6 +2559,10 @@ async createJobCard(req, res) {
     // Accept vehiclePhotos from file uploads (multer) via req.files["vehiclePhotos"]
     // If there is an error anywhere that requires aborting, cleanup file uploads!
 
+    // Import Counter and JobCard if not already imported at top of file:
+    // import Counter from "../../Schema/counter.schema.js"; 
+    // import JobCard from "../../Schema/jobCard.schema.js";
+
     try {
         // Parse services if it's a string
         if (typeof req.body.services === "string") {
@@ -2572,6 +2576,7 @@ async createJobCard(req, res) {
             }
         }
 
+        // Add new fields
         const {
             customerId,
             vehicleId,
@@ -2582,7 +2587,9 @@ async createJobCard(req, res) {
             priorityLevel,
             services,
             additionalNotes,
-            technicalRemarks
+            technicalRemarks,
+            labourCharge,    // <--- Added Number
+            labourDuration   // <--- Added String
             // status  // REMOVED: status does not come from req.body anymore
         } = req.body;
 
@@ -2605,6 +2612,10 @@ async createJobCard(req, res) {
         if (!priorityLevel) missingFields.push("priorityLevel");
         if (!Array.isArray(services)) missingFields.push("services");
 
+        // Optional: If you want to require these fields, uncomment below
+        // if (labourCharge === undefined) missingFields.push("labourCharge");
+        // if (!labourDuration) missingFields.push("labourDuration");
+
         if (missingFields.length > 0) {
             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
             return res.status(400).json({
@@ -2616,7 +2627,6 @@ async createJobCard(req, res) {
         // Validate enums
         const allowedServiceTypes = ['Repair', 'Maintenance', 'Inspection'];
         const allowedPriorityLevels = ['Normal', 'Urgent'];
-        // const allowedStatus = ['Pending', 'Approved', 'Rejected']; // No longer relevant for input
         if (!allowedServiceTypes.includes(serviceType)) {
             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
             return res.status(400).json({ success: false, message: "Invalid serviceType" });
@@ -2625,7 +2635,6 @@ async createJobCard(req, res) {
             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
             return res.status(400).json({ success: false, message: "Invalid priorityLevel" });
         }
-        // status validation removed, always "Pending" on creation
         if (vehiclePhotos.length > 5) {
             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
             return res.status(400).json({ success: false, message: "Maximum 5 vehiclePhotos allowed" });
@@ -2684,7 +2693,7 @@ async createJobCard(req, res) {
 
         // Validate input services & subservices (by service id and subService name, not objectId)
         for (const s of services) {
-            const sid = s.service?.toString() || s.id?.toString(); // now field is "service"
+            const sid = s.service?.toString() || s.id?.toString();
             if (!sid || !allowedServiceIds.has(sid)) {
                 if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
                 return res.status(400).json({ success: false, message: `Service ${sid} not provided by this AutoShop` });
@@ -2704,7 +2713,7 @@ async createJobCard(req, res) {
             }
         }
 
-        // Calculate total amount (no discounts, deal/coupon removed)
+        // Calculate total amount
         let totalAmount = 0;
         const servicesPayload = (services || []).map(serviceItem => {
             let subTotal = 0;
@@ -2721,16 +2730,45 @@ async createJobCard(req, res) {
                 : [];
             totalAmount += subTotal;
 
-            // Service is always ref to Services ObjectID
             return {
-                service: serviceItem.service?.toString() || serviceItem.id?.toString(), // accept either, but schema expects "service"
+                service: serviceItem.service?.toString() || serviceItem.id?.toString(),
                 subServices: mappedSubServices
             };
         });
 
-        // Create the job card document as per corrected schema,
-        // subServices = [{ name, desc, price }], no ObjectId for subService
-        // status will always be "Pending" on creation
+        // Add labour charge if provided
+        let totalWithLabour = totalAmount;
+        let parsedLabourCharge = 0;
+        if (labourCharge !== undefined && !isNaN(parseFloat(labourCharge))) {
+            parsedLabourCharge = parseFloat(labourCharge);
+            totalWithLabour += parsedLabourCharge;
+        }
+
+        // ====== Generate jobNo using Counter collection ======
+        let jobNo;
+        try {
+            // Use a transaction-like retry in case of very high concurrency
+            // This increments the 'jobNo' counter and returns the new value atomically
+            const counter = await counterSchema.findOneAndUpdate(
+                { name: "jobNo" },
+                { $inc: { seq: 1 } },
+                { new: true, upsert: true }
+            );
+
+            if (counter && typeof counter.seq === "number") {
+                // Format: J00001 (5 digits with leading zeros)
+                const formatted = String(counter.seq).padStart(5, '0');
+                jobNo = `J${formatted}`;
+            } else {
+                throw new Error("Failed to generate jobNo: Counter sequence is undefined");
+            }
+        } catch (e) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            console.error("[createJobCard] Error generating jobNo:", e);
+            return res.status(500).json({ success: false, message: "Could not generate job number", error: e.message });
+        }
+
+        // Create the job card document
         const jobCardDoc = new JobCard({
             business: user.businessProfile,
             customerId,
@@ -2744,8 +2782,13 @@ async createJobCard(req, res) {
             additionalNotes,
             vehiclePhotos: Array.isArray(vehiclePhotos) ? vehiclePhotos : [],
             technicalRemarks,
-            totalPayableAmount: Number(totalAmount.toFixed(2)),
-            status: "Pending"
+            totalPayableAmount: Number(totalWithLabour.toFixed(2)),
+            // ---- Added fields below ----
+            labourCharge: parsedLabourCharge,
+            labourDuration: typeof labourDuration === "string" ? labourDuration : undefined,
+            // ------------------------------
+            status: "Pending",
+            jobNo
         });
 
         await jobCardDoc.save();
@@ -2755,9 +2798,10 @@ async createJobCard(req, res) {
             message: "JobCard created successfully",
             data: {
                 ...jobCardDoc.toObject(),
-                // attach calculated total & cleaned services array
-                totalPayableAmount: Number(totalAmount.toFixed(2)),
-                services: servicesPayload
+                totalPayableAmount: Number(totalWithLabour.toFixed(2)),
+                services: servicesPayload,
+                labourCharge: parsedLabourCharge,
+                labourDuration: typeof labourDuration === "string" ? labourDuration : undefined
             }
         });
     } catch (err) {
@@ -2775,6 +2819,334 @@ async createJobCard(req, res) {
         return res.status(500).json({ success: false, message: "Failed to create JobCard", error: err.message });
     }
 }
+
+
+/**
+ * Search JobCards by multiple fields:
+ * - JobNo (exact or partial)
+ * - Car Owner Name
+ * - Vehicle info (model, brand, regNo, VIN, etc)
+ * - Car Owner Phone Number
+ * - Car Owner Email
+ *
+ * This search works across all those fields and supports text/partial matches.
+ *
+ * Params:
+ *   - req.query.q: Search string (required)
+ *   - req.query.limit (optional)
+ *   - req.query.page (optional)
+ */
+// Search JobCards by multiple fields: JobNo (partial), Car Owner Name, Vehicle info, Car Owner Phone, Car Owner Email
+async searchJobCards(req, res) {
+    try {
+        const userId = req.user.id;
+        const { q, page = 1, limit = 10 } = req.query;
+        if (!q || typeof q !== "string" || !q.trim()) {
+            return res.status(400).json({ success: false, message: "Search string (q) is required" });
+        }
+        const searchStr = q.trim();
+
+        // Get the current auto shop owner's business profile
+        const user = await User.findById(userId).lean();
+        if (!user || !user.businessProfile) {
+            return res.status(404).json({ success: false, message: "Business profile not found for user" });
+        }
+
+        // Optionally, limit search to only this business's JobCards
+        const businessId = user.businessProfile;
+
+        // Construct aggregation pipeline for search
+        const pipeline = [
+            {
+                $match: { business: typeof businessId === "string" ? Types.ObjectId(businessId) : businessId }
+            },
+            // Look up car owner (customer)
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "customerId",
+                    foreignField: "_id",
+                    as: "customer"
+                }
+            },
+            {
+                $unwind: "$customer"
+            },
+            // Look up vehicle
+            {
+                $lookup: {
+                    from: "vehicles",
+                    localField: "vehicleId",
+                    foreignField: "_id",
+                    as: "vehicle"
+                }
+            },
+            {
+                $unwind: "$vehicle"
+            },
+            // Search across jobNo, customer name, customer phone, customer email, vehicle info
+            {
+                $match: {
+                    $or: [
+                        { jobNo: { $regex: searchStr, $options: "i" } },
+                        { "customer.name": { $regex: searchStr, $options: "i" } },
+                        { "customer.phoneNumber": { $regex: searchStr, $options: "i" } },
+                        { "customer.email": { $regex: searchStr, $options: "i" } },
+                        { "vehicle.model": { $regex: searchStr, $options: "i" } },
+                        { "vehicle.brand": { $regex: searchStr, $options: "i" } },
+                        { "vehicle.regNo": { $regex: searchStr, $options: "i" } },
+                        { "vehicle.vin": { $regex: searchStr, $options: "i" } },
+                    ]
+                }
+            },
+            // Sort by creation date descending (recent first)
+            { $sort: { createdAt: -1 } },
+            // Pagination
+            { $skip: (Number(page) - 1) * Number(limit) },
+            { $limit: Number(limit) },
+            // Format response (project)
+            {
+                $project: {
+                    _id: 1,
+                    jobNo: 1,
+                    status: 1,
+                    paymentStatus: 1,
+                    serviceType: 1,
+                    priorityLevel: 1,
+                    createdAt: 1,
+                    totalPayableAmount: 1,
+                    vehiclePhotos: 1,
+                    dealApplied: 1,
+                    odometerReading: 1,
+                    dueOdometerReading: 1,
+                    issueDescription: 1,
+                    services: 1,
+                    additionalNotes: 1,
+                    technicalRemarks: 1,
+                    labourCharge: 1,
+                    labourDuration: 1,
+                    customer: {
+                        _id: "$customer._id",
+                        name: "$customer.name",
+                        phoneNumber: "$customer.phoneNumber",
+                        email: "$customer.email"
+                    },
+                    vehicle: {
+                        _id: "$vehicle._id",
+                        brand: "$vehicle.brand",
+                        model: "$vehicle.model",
+                        regNo: "$vehicle.regNo",
+                        vin: "$vehicle.vin"
+                    }
+                }
+            }
+        ];
+
+        // Run aggregation
+        const JobCardModel = (await import("../../Schema/jobCard.schema.js")).default;
+        const results = await JobCardModel.aggregate(pipeline);
+
+        // For total count (useful for pagination)
+        const countPipeline = pipeline.slice(0, pipeline.findIndex(st => st.$skip !== undefined || st.$limit !== undefined));
+        countPipeline.push({ $count: "total" });
+        const totalResult = await JobCardModel.aggregate(countPipeline);
+        const total = totalResult.length > 0 ? totalResult[0].total : 0;
+
+        return res.status(200).json({
+            success: true,
+            total,
+            page: Number(page),
+            pageSize: results.length,
+            data: results
+        });
+    } catch (error) {
+        console.error("[searchJobCards] Error:", error);
+        return res.status(500).json({ success: false, message: "Error searching job cards", error: error.message });
+    }
+}
+
+/**
+ * Mark (update) payment status for a JobCard.
+ * Only allows: Pending -> Paid, Pending -> Cancelled, Paid -> Cancelled.
+ * Does NOT allow Paid -> Pending, Cancelled -> Pending, Paid -> Paid, etc.
+ * Only the autoshop owner of the business can perform this action.
+ * 
+ * Params:
+ *   - req.params.jobCardId: ID of the job card (required, as a route param)
+ *   - req.body.paymentStatus: "Paid" or "Cancelled"
+ */
+async markPaymentStatus(req, res) {
+    try {
+        const { jobCardId } = req.params;
+        const { paymentStatus } = req.body;
+
+        // Validate status
+        const allowedStatus = ["Paid", "Cancelled"];
+        if (!allowedStatus.includes(paymentStatus)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid paymentStatus. Only 'Paid' or 'Cancelled' is allowed."
+            });
+        }
+
+        // Fetch user, must have businessProfile (autoshop owner)
+        const user = await User.findById(req.user.id);
+        if (!user || !user.businessProfile) {
+            return res.status(403).json({
+                success: false,
+                message: "Unauthorized. User must be an auto shop owner."
+            });
+        }
+
+        // Lazy import JobCard if not imported at top
+        const JobCard = (await import("../../Schema/jobCard.schema.js")).default;
+
+        // Find the job card
+        const jobCard = await JobCard.findById(jobCardId);
+        if (!jobCard) {
+            return res.status(404).json({
+                success: false,
+                message: "JobCard not found"
+            });
+        }
+
+        // Check the jobCard belongs to the current user's business
+        if (String(jobCard.business) !== String(user.businessProfile)) {
+            return res.status(403).json({
+                success: false,
+                message: "You do not have permission to mark payment for this job card"
+            });
+        }
+
+        // Only allow status transitions: Pending -> Paid/Cancelled, Paid -> Cancelled
+        const validTransitions = {
+            Pending: ["Paid", "Cancelled"],
+            Paid: ["Cancelled"],
+            Cancelled: []
+        };
+
+        if (!validTransitions[jobCard.paymentStatus]?.includes(paymentStatus)) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot change paymentStatus from '${jobCard.paymentStatus}' to '${paymentStatus}'`
+            });
+        }
+
+        jobCard.paymentStatus = paymentStatus;
+        await jobCard.save();
+
+        return res.status(200).json({
+            success: true,
+            message: `Payment status updated to '${paymentStatus}'`,
+            data: jobCard
+        });
+    } catch (error) {
+        console.error("[markPaymentStatus] Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update payment status",
+            error: error.message
+        });
+    }
+}
+
+/**
+ * Mark (update) job status for a JobCard.
+ * Only allows: Pending -> Approved, Pending -> Rejected
+ * Does NOT allow Approved/Rejected -> Pending, Approved <-> Rejected or re-setting to the same value, etc.
+ * Only the autoshop owner of the business can perform this action.
+ * 
+ * Params:
+ *   - req.params.jobCardId: ID of the job card (route param, required)
+ *   - req.body.status: "Approved" or "Rejected" (required)
+ */
+async markJobStatus(req, res) {
+    try {
+        const { jobCardId } = req.params;
+        let { status } = req.body;
+
+        if (!jobCardId || !status) {
+            return res.status(400).json({
+                success: false,
+                message: "jobCardId (route param) and status (body) are required"
+            });
+        }
+
+        // Accept only these transitions:
+        // Pending -> Approved
+        // Pending -> Rejected
+        status = String(status).trim();
+        if (!["Approved", "Rejected"].includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid status. Only 'Approved' or 'Rejected' allowed."
+            });
+        }
+
+        // Fetch user & check ownership
+        const user = await User.findById(req.user.id);
+        if (!user || !user.businessProfile) {
+            return res.status(404).json({
+                success: false,
+                message: "Business profile not found for user"
+            });
+        }
+
+        // Find the job card
+        const JobCard = (await import("../../Schema/jobCard.schema.js")).default;
+        const jobCard = await JobCard.findById(jobCardId);
+        if (!jobCard) {
+            return res.status(404).json({
+                success: false,
+                message: "JobCard not found"
+            });
+        }
+
+        // Check the jobCard belongs to the current user's business
+        if (String(jobCard.business) !== String(user.businessProfile)) {
+            return res.status(403).json({
+                success: false,
+                message: "You do not have permission to mark status for this job card"
+            });
+        }
+
+        // Only allow defined transitions
+        const validTransitions = {
+            Pending: ["Approved", "Rejected"],
+            Approved: [],
+            Rejected: []
+        };
+
+        if (!validTransitions[jobCard.status]?.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Cannot change job status from '${jobCard.status}' to '${status}'`
+            });
+        }
+
+        jobCard.status = status;
+        await jobCard.save();
+
+        return res.status(200).json({
+            success: true,
+            message: `Job status updated to '${status}'`,
+            data: jobCard
+        });
+
+    } catch (error) {
+        console.error("[markJobStatus] Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update job status",
+            error: error.message
+        });
+    }
+}
+
+
+
+
+
 
 /**
  * Edit a job card. Allows autoshopowner to update specific fields on their own job card.

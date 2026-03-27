@@ -178,7 +178,6 @@ autoShopRouter.put(
   (req, res) => autoShopController.editMyServices(req, res)
 );
 
-
 // Deal routes for auto-shop business profile
 
 // Create a new deal and link it to the business profile (accepts single file upload for productImage)
@@ -229,6 +228,30 @@ autoShopRouter.post(
     autoShopController.createJobCard(req, res);
   }
 );
+
+// Route to search JobCards by many fields (job number, customer name, vehicle info, etc)
+autoShopRouter.get(
+  "/job-cards/search",
+  jwtAuth,
+  (req, res) => autoShopController.searchJobCards(req, res)
+);
+
+// Route to mark (update) payment status for a JobCard (by autoshop owner)
+autoShopRouter.post(
+  "/job-cards/:jobCardId/mark-payment-status",
+  jwtAuth,
+  (req, res) => autoShopController.markPaymentStatus(req, res)
+);
+
+// Route to mark (update) job status for a JobCard (by autoshop owner)
+autoShopRouter.post(
+  "/job-cards/:jobCardId/mark-job-status",
+  jwtAuth,
+  (req, res) => autoShopController.markJobStatus(req, res)
+);
+
+
+
 
 
 
