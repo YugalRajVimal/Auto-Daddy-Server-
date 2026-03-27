@@ -12,7 +12,7 @@ import mongoose from "mongoose";
  * - 'session-edit-request' => For Session Edit Request counter (format as per requirement)
  * 
  */
-const ALLOWED_NAMES = ["patient", "appointment", "lead", "therapist", "payment", "request","session-edit-request"];
+const ALLOWED_NAMES = ["jobNo"];
 
 const counterSchema = new mongoose.Schema({
   name: { 

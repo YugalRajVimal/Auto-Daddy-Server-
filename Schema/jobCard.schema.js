@@ -13,6 +13,9 @@ const { Schema, Types } = mongoose;
  * - additionalNotes: String
  * - vehiclePhotos: Array of file paths or URLs (multiple vehicle photos)
  * - technicalRemarks: String
+ * - labourCharge: Number
+ * - labourDuration: String
+ * - jobNo: String (unique generated job number for this job card)
  */
 // Match the subService and myService schemas from bussiness-profile.js
 
@@ -28,7 +31,7 @@ const jobServiceSchema = new Schema({
 }, { _id: false });
 
 const JobCardSchema = new Schema({
-    business:{ type: Types.ObjectId, required: true, ref: 'BusinessProfile' },
+    business: { type: Types.ObjectId, required: true, ref: 'BusinessProfile' },
     customerId: { type: Types.ObjectId, required: true, ref: 'User' },
     vehicleId: { type: Types.ObjectId, required: true, ref: 'Vehicle' },
     odometerReading: { type: Number },
@@ -62,14 +65,23 @@ const JobCardSchema = new Schema({
         enum: ['Pending', 'Paid', 'Cancelled'],
         default: 'Pending'
     },
-    
     technicalRemarks: { type: String },
+    // New fields added below:
+    labourCharge: { type: Number }, // Labour charge for the job
+    labourDuration: { type: String }, // Labour duration for the job
     status: {
         type: String,
         enum: ['Pending', 'Approved', 'Rejected'],
         default: 'Pending',
         description: 'Stores if the job card is approved from customer or not'
     },
+    jobNo: { 
+        type: String, 
+        unique: true, 
+        sparse: true,
+        index: true,
+        description: 'Auto-incremented job number in format like J00001'
+    }, // Unique Job Number (to be generated on creation)
 }, { timestamps: true });
 
 const JobCard = mongoose.model("JobCard", JobCardSchema);
