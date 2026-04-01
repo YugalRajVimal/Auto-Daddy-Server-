@@ -3134,10 +3134,6 @@ async searchJobCards(req, res) {
     try {
         const userId = req.user.id;
         const { q, page = 1, limit = 10 } = req.query;
-        if (!q || typeof q !== "string" || !q.trim()) {
-            return res.status(400).json({ success: false, message: "Search string (q) is required" });
-        }
-        const searchStr = q.trim();
 
         // Get the current auto shop owner's business profile
         const user = await User.findById(userId).lean();
@@ -3145,15 +3141,307 @@ async searchJobCards(req, res) {
             return res.status(404).json({ success: false, message: "Business profile not found for user" });
         }
 
-        // Optionally, limit search to only this business's JobCards
         const businessId = user.businessProfile;
+        const searchStr = typeof q === "string" ? q.trim() : "";
 
-        // Construct aggregation pipeline for search
+        // If q is provided and not empty, do NOT use any other filters, search in all data for this business
+        if (searchStr.length > 0) {
+            const pipeline = [
+                {
+                    $match: {
+                        business: typeof businessId === "string" ? Types.ObjectId(businessId) : businessId
+                    }
+                },
+                {
+                    $lookup: {
+                        from: "users",
+                        localField: "customerId",
+                        foreignField: "_id",
+                        as: "customer"
+                    }
+                },
+                { $unwind: "$customer" },
+                {
+                    $lookup: {
+                        from: "vehicles",
+                        localField: "vehicleId",
+                        foreignField: "_id",
+                        as: "vehicle"
+                    }
+                },
+                { $unwind: "$vehicle" },
+                {
+                    $match: {
+                        $or: [
+                            { jobNo: { $regex: searchStr, $options: "i" } },
+                            { "customer.name": { $regex: searchStr, $options: "i" } },
+                            { "vehicle.regNo": { $regex: searchStr, $options: "i" } },
+                            { "customer.phoneNumber": { $regex: searchStr, $options: "i" } },
+                            { "customer.email": { $regex: searchStr, $options: "i" } }
+                        ]
+                    }
+                },
+                { $sort: { createdAt: -1 } },
+                { $skip: (Number(page) - 1) * Number(limit) },
+                { $limit: Number(limit) },
+                {
+                    $project: {
+                        _id: 1,
+                        jobNo: 1,
+                        status: 1,
+                        paymentStatus: 1,
+                        serviceType: 1,
+                        priorityLevel: 1,
+                        createdAt: 1,
+                        totalPayableAmount: 1,
+                        vehiclePhotos: 1,
+                        dealApplied: 1,
+                        odometerReading: 1,
+                        dueOdometerReading: 1,
+                        issueDescription: 1,
+                        services: 1,
+                        additionalNotes: 1,
+                        technicalRemarks: 1,
+                        labourCharge: 1,
+                        labourDuration: 1,
+                        customer: {
+                            _id: "$customer._id",
+                            name: "$customer.name",
+                            phoneNumber: "$customer.phoneNumber",
+                            email: "$customer.email"
+                        },
+                        vehicle: {
+                            _id: "$vehicle._id",
+                            brand: "$vehicle.brand",
+                            model: "$vehicle.model",
+                            regNo: "$vehicle.regNo",
+                            vin: "$vehicle.vin"
+                        }
+                    }
+                }
+            ];
+
+            const results = await JobCard.aggregate(pipeline);
+
+            // For total count (with only search filter)
+            const countPipeline = [
+                {
+                    $match: {
+                        business: typeof businessId === "string" ? Types.ObjectId(businessId) : businessId
+                    }
+                },
+                {
+                    $lookup: {
+                        from: "users",
+                        localField: "customerId",
+                        foreignField: "_id",
+                        as: "customer"
+                    }
+                },
+                { $unwind: "$customer" },
+                {
+                    $lookup: {
+                        from: "vehicles",
+                        localField: "vehicleId",
+                        foreignField: "_id",
+                        as: "vehicle"
+                    }
+                },
+                { $unwind: "$vehicle" },
+                {
+                    $match: {
+                        $or: [
+                            { jobNo: { $regex: searchStr, $options: "i" } },
+                            { "customer.name": { $regex: searchStr, $options: "i" } },
+                            { "vehicle.regNo": { $regex: searchStr, $options: "i" } },
+                            { "customer.phoneNumber": { $regex: searchStr, $options: "i" } },
+                            { "customer.email": { $regex: searchStr, $options: "i" } }
+                        ]
+                    }
+                },
+                { $count: "total" }
+            ];
+
+            const totalResult = await JobCard.aggregate(countPipeline);
+            const total = totalResult.length > 0 ? totalResult[0].total : 0;
+
+            return res.status(200).json({
+                success: true,
+                total,
+                page: Number(page),
+                pageSize: results.length,
+                data: results
+            });
+        }
+
+        // If no q, proceed with default filtering (dates etc)
+        const {
+            dateType,
+            date,
+            week,
+            month,
+            year
+        } = req.query;
+
+        const emptySearch = (
+            (!q || (typeof q === "string" && q.trim().length === 0)) &&
+            !dateType && !date && !week && typeof month === "undefined" && typeof year === "undefined"
+        );
+
+        if (emptySearch) {
+            // If no search, show paginated results for the business
+            const pipeline = [
+                {
+                    $match: {
+                        business: typeof businessId === "string" ? Types.ObjectId(businessId) : businessId
+                    }
+                },
+                {
+                    $lookup: {
+                        from: "users",
+                        localField: "customerId",
+                        foreignField: "_id",
+                        as: "customer"
+                    }
+                },
+                { $unwind: "$customer" },
+                {
+                    $lookup: {
+                        from: "vehicles",
+                        localField: "vehicleId",
+                        foreignField: "_id",
+                        as: "vehicle"
+                    }
+                },
+                { $unwind: "$vehicle" },
+                { $sort: { createdAt: -1 } },
+                { $skip: (Number(page) - 1) * Number(limit) },
+                { $limit: Number(limit) },
+                {
+                    $project: {
+                        _id: 1,
+                        jobNo: 1,
+                        status: 1,
+                        paymentStatus: 1,
+                        serviceType: 1,
+                        priorityLevel: 1,
+                        createdAt: 1,
+                        totalPayableAmount: 1,
+                        vehiclePhotos: 1,
+                        dealApplied: 1,
+                        odometerReading: 1,
+                        dueOdometerReading: 1,
+                        issueDescription: 1,
+                        services: 1,
+                        additionalNotes: 1,
+                        technicalRemarks: 1,
+                        labourCharge: 1,
+                        labourDuration: 1,
+                        customer: {
+                            _id: "$customer._id",
+                            name: "$customer.name",
+                            phoneNumber: "$customer.phoneNumber",
+                            email: "$customer.email"
+                        },
+                        vehicle: {
+                            _id: "$vehicle._id",
+                            brand: "$vehicle.brand",
+                            model: "$vehicle.model",
+                            regNo: "$vehicle.regNo",
+                            vin: "$vehicle.vin"
+                        }
+                    }
+                }
+            ];
+
+            const results = await JobCard.aggregate(pipeline);
+            // For total count
+            const countPipeline = [
+                {
+                    $match: {
+                        business: typeof businessId === "string" ? Types.ObjectId(businessId) : businessId
+                    }
+                },
+                {
+                    $lookup: {
+                        from: "users",
+                        localField: "customerId",
+                        foreignField: "_id",
+                        as: "customer"
+                    }
+                },
+                { $unwind: "$customer" },
+                {
+                    $lookup: {
+                        from: "vehicles",
+                        localField: "vehicleId",
+                        foreignField: "_id",
+                        as: "vehicle"
+                    }
+                },
+                { $unwind: "$vehicle" },
+                { $count: "total" }
+            ];
+            const totalResult = await JobCard.aggregate(countPipeline);
+            const total = totalResult.length > 0 ? totalResult[0].total : 0;
+
+            return res.status(200).json({
+                success: true,
+                total,
+                page: Number(page),
+                pageSize: results.length,
+                data: results
+            });
+        }
+
+        // If filters (dateType/date/week/month/year) are provided and q is NOT present
+        let createdAtMatch = {};
+        let _dateType = dateType || "daily";
+        let startDate, endDate;
+        const now = new Date();
+        if (_dateType === "daily") {
+            let localDate = date ? new Date(date) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            startDate = new Date(localDate.setHours(0, 0, 0, 0));
+            endDate = new Date(startDate);
+            endDate.setDate(endDate.getDate() + 1);
+        } else if (_dateType === "weekly") {
+            let current = week ? new Date(week) : new Date();
+            let day = current.getDay();
+            let diffToMonday = ((day + 6) % 7);
+            startDate = new Date(current);
+            startDate.setDate(current.getDate() - diffToMonday);
+            startDate.setHours(0, 0, 0, 0);
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 7);
+        } else if (_dateType === "monthly") {
+            let _year = year ? Number(year) : now.getFullYear();
+            let _month;
+            if (typeof month === "string" && isNaN(month)) {
+                const monthNames = [
+                    "january", "february", "march", "april", "may", "june",
+                    "july", "august", "september", "october", "november", "december"
+                ];
+                _month = monthNames.findIndex(mn =>
+                    mn.startsWith(month.trim().toLowerCase())
+                );
+                if (_month === -1) _month = now.getMonth();
+            } else {
+                _month = (typeof month !== "undefined") ? Number(month) : now.getMonth();
+            }
+            startDate = new Date(_year, _month, 1, 0, 0, 0, 0);
+            endDate = new Date(_year, _month + 1, 1, 0, 0, 0, 0);
+        }
+        if (startDate && endDate) {
+            createdAtMatch.createdAt = { $gte: startDate, $lt: endDate };
+        }
+
         const pipeline = [
             {
-                $match: { business: typeof businessId === "string" ? Types.ObjectId(businessId) : businessId }
+                $match: {
+                    business: typeof businessId === "string" ? Types.ObjectId(businessId) : businessId,
+                    ...createdAtMatch
+                }
             },
-            // Look up car owner (customer)
             {
                 $lookup: {
                     from: "users",
@@ -3162,10 +3450,7 @@ async searchJobCards(req, res) {
                     as: "customer"
                 }
             },
-            {
-                $unwind: "$customer"
-            },
-            // Look up vehicle
+            { $unwind: "$customer" },
             {
                 $lookup: {
                     from: "vehicles",
@@ -3174,30 +3459,10 @@ async searchJobCards(req, res) {
                     as: "vehicle"
                 }
             },
-            {
-                $unwind: "$vehicle"
-            },
-            // Search across jobNo, customer name, customer phone, customer email, vehicle info
-            {
-                $match: {
-                    $or: [
-                        { jobNo: { $regex: searchStr, $options: "i" } },
-                        { "customer.name": { $regex: searchStr, $options: "i" } },
-                        { "customer.phoneNumber": { $regex: searchStr, $options: "i" } },
-                        { "customer.email": { $regex: searchStr, $options: "i" } },
-                        { "vehicle.model": { $regex: searchStr, $options: "i" } },
-                        { "vehicle.brand": { $regex: searchStr, $options: "i" } },
-                        { "vehicle.regNo": { $regex: searchStr, $options: "i" } },
-                        { "vehicle.vin": { $regex: searchStr, $options: "i" } },
-                    ]
-                }
-            },
-            // Sort by creation date descending (recent first)
+            { $unwind: "$vehicle" },
             { $sort: { createdAt: -1 } },
-            // Pagination
             { $skip: (Number(page) - 1) * Number(limit) },
             { $limit: Number(limit) },
-            // Format response (project)
             {
                 $project: {
                     _id: 1,
@@ -3235,14 +3500,12 @@ async searchJobCards(req, res) {
             }
         ];
 
-        // Run aggregation
-        const JobCardModel = (await import("../../Schema/jobCard.schema.js")).default;
-        const results = await JobCardModel.aggregate(pipeline);
+        const results = await JobCard.aggregate(pipeline);
 
-        // For total count (useful for pagination)
+        // For total count (skip pagination)
         const countPipeline = pipeline.slice(0, pipeline.findIndex(st => st.$skip !== undefined || st.$limit !== undefined));
         countPipeline.push({ $count: "total" });
-        const totalResult = await JobCardModel.aggregate(countPipeline);
+        const totalResult = await JobCard.aggregate(countPipeline);
         const total = totalResult.length > 0 ? totalResult[0].total : 0;
 
         return res.status(200).json({
@@ -3252,6 +3515,7 @@ async searchJobCards(req, res) {
             pageSize: results.length,
             data: results
         });
+
     } catch (error) {
         console.error("[searchJobCards] Error:", error);
         return res.status(500).json({ success: false, message: "Error searching job cards", error: error.message });
@@ -3777,6 +4041,119 @@ async getAllPayments(req, res) {
         });
     }
 }
+
+/**
+ * Get all job cards for this auto shop business with paymentStatus 'Paid'.
+ * Returns: jobNo, Customer Name, Customer Contact No, Customer Email, totalPayableAmount, paymentStatus
+ */
+async getAllPaidJobCards(req, res) {
+    try {
+        const userId = req.user && req.user.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        // Find user's business profile
+        const user = await User.findById(userId).lean();
+        if (!user || !user.businessProfile) {
+            return res.status(404).json({ success: false, message: "AutoShop business profile not found" });
+        }
+
+        // Fetch PAID job cards for business
+        const paidJobCards = await JobCard.find({
+            business: user.businessProfile,
+            paymentStatus: 'Paid'
+        })
+            .select('jobNo customerId totalPayableAmount paymentStatus')
+            .populate({
+                path: 'customerId',
+                model: 'User',
+                select: 'name phone email'
+            })
+            .sort({ createdAt: -1 })
+            .lean();
+
+        // Format result for required fields
+        const data = paidJobCards.map(job => ({
+            jobCardNumber: job.jobNo,
+            customerName: job.customerId?.name || "",
+            customerContactNo: job.customerId?.phone || "",
+            customerEmail: job.customerId?.email || "",
+            totalPayableAmount: job.totalPayableAmount,
+            paymentStatus: job.paymentStatus,
+        }));
+
+        return res.status(200).json({
+            success: true,
+            data
+        });
+
+    } catch (err) {
+        console.error("[getAllPaidJobCards] Error:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch paid JobCards",
+            error: err.message
+        });
+    }
+}
+
+/**
+ * Get all job cards for this auto shop business with paymentStatus not 'Paid'.
+ * Returns: jobNo, Customer Name, Customer Contact No, Customer Email, totalPayableAmount, paymentStatus
+ */
+async getAllUnpaidJobCards(req, res) {
+    try {
+        const userId = req.user && req.user.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        // Find user's business profile
+        const user = await User.findById(userId).lean();
+        if (!user || !user.businessProfile) {
+            return res.status(404).json({ success: false, message: "AutoShop business profile not found" });
+        }
+
+        // Fetch UNPAID job cards for business
+        const unpaidJobCards = await JobCard.find({
+            business: user.businessProfile,
+            paymentStatus: { $ne: 'Paid' }
+        })
+            .select('jobNo customerId totalPayableAmount paymentStatus')
+            .populate({
+                path: 'customerId',
+                model: 'User',
+                select: 'name phone email'
+            })
+            .sort({ createdAt: -1 })
+            .lean();
+
+        // Format result for required fields
+        const data = unpaidJobCards.map(job => ({
+            jobCardNumber: job.jobNo,
+            customerName: job.customerId?.name || "",
+            customerContactNo: job.customerId?.phone || "",
+            customerEmail: job.customerId?.email || "",
+            totalPayableAmount: job.totalPayableAmount,
+            paymentStatus: job.paymentStatus,
+        }));
+
+        return res.status(200).json({
+            success: true,
+            data
+        });
+
+    } catch (err) {
+        console.error("[getAllUnpaidJobCards] Error:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch unpaid JobCards",
+            error: err.message
+        });
+    }
+}
+
 
 
 

@@ -297,6 +297,22 @@ autoShopRouter.get(
 );
 
 
+// Route to fetch all "PAID" job cards for this auto shop business (compact list)
+autoShopRouter.get(
+  "/job-cards/paid",
+  jwtAuth,
+  (req, res) => autoShopController.getAllPaidJobCards(req, res)
+);
+
+// Route to fetch all "UNPAID" job cards for this auto shop business (compact list)
+autoShopRouter.get(
+  "/job-cards/unpaid",
+  jwtAuth,
+  (req, res) => autoShopController.getAllUnpaidJobCards(req, res)
+);
+
+
+
 
 
 
