@@ -33,6 +33,13 @@ const UserSchema = new mongoose.Schema(
     isAutoShopBusinessProfileComplete: { type: Boolean, default: false },
     businessProfile: { type: mongoose.Schema.Types.ObjectId, ref: "BusinessProfile", default: null },
     myCustomers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User", default: [] }],
+    // Track when a customer was added by the autoshopowner
+    myCustomersMeta: [
+      {
+        customer: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+        addedAt: { type: Date, default: Date.now }
+      }
+    ],
     
 
 

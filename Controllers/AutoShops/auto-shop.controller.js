@@ -934,21 +934,57 @@ addToMyCustomers = async (req, res) => {
         }
 
         // Only allow autoshopowner to add to myCustomers
-        const autoshopOwner = await User.findOne({ _id: autoshopOwnerId, role: "autoshopowner" });
+        const autoshopOwner = await User.findOne({ _id: autoshopOwnerId, role: "autoshopowner" }).lean();
         if (!autoshopOwner) {
             return res.status(403).json({ message: "Forbidden. Only autoshopowners can add customers." });
         }
 
-        // Add the carOwnerId to autoshopOwner.myCustomers if not already present
-        const updateResult = await User.findByIdAndUpdate(
-            autoshopOwnerId,
-            { $addToSet: { myCustomers: carOwnerId } }, // $addToSet avoids duplicates
-            { new: true }
-        ).lean();
+        // Check if already in myCustomers
+        const alreadyPresent = Array.isArray(autoshopOwner.myCustomers) 
+            && autoshopOwner.myCustomers.some(id => id.toString() === carOwnerId.toString());
+
+        // Always fetch fresh so we get up-to-date myCustomersMeta too.
+        let updatedUser;
+
+        if (!alreadyPresent) {
+            // Add to myCustomers, and add a fresh entry in myCustomersMeta
+            updatedUser = await User.findByIdAndUpdate(
+                autoshopOwnerId,
+                {
+                    $addToSet: { myCustomers: carOwnerId },
+                    $push: { myCustomersMeta: { customer: carOwnerId, addedAt: new Date() } }
+                },
+                { new: true }
+            ).lean();
+        } else {
+            // If already present, ensure myCustomersMeta has an entry (only 1 entry per customer)
+            const existingMetaUser = await User.findById(autoshopOwnerId)
+                                        .select("myCustomersMeta")
+                                        .lean();
+            const hasMeta = Array.isArray(existingMetaUser.myCustomersMeta) &&
+                existingMetaUser.myCustomersMeta.some(
+                    meta =>
+                        meta.customer &&
+                        meta.customer.toString() === carOwnerId.toString()
+                );
+            if (!hasMeta) {
+                updatedUser = await User.findByIdAndUpdate(
+                    autoshopOwnerId,
+                    { $push: { myCustomersMeta: { customer: carOwnerId, addedAt: new Date() } } },
+                    { new: true }
+                ).lean();
+            } else {
+                // No more updates needed; fetch the up-to-date version for consistency in response
+                updatedUser = await User.findById(autoshopOwnerId)
+                    .select("myCustomers myCustomersMeta")
+                    .lean();
+            }
+        }
 
         return res.status(200).json({
             message: "Car owner added to myCustomers successfully.",
-            myCustomers: updateResult.myCustomers
+            myCustomers: updatedUser.myCustomers,
+            myCustomersMeta: updatedUser.myCustomersMeta
         });
     } catch (error) {
         console.error("[addToMyCustomers] Error:", error);
@@ -961,15 +997,14 @@ addToMyCustomers = async (req, res) => {
 fetchMyCustomers = async (req, res) => {
     try {
         const autoshopOwnerId = req.user?.id;
-        const { phone, numberPlate } = req.query;
+        const { phone, numberPlate, dateType, date, week, month, year } = req.query;
 
         if (!autoshopOwnerId) {
             return res.status(401).json({ message: "Unauthorized." });
         }
 
-        // First, find the autoshop owner (and sanity check role)
+        // Find autoshop owner and check role
         const autoshopOwner = await User.findOne({ _id: autoshopOwnerId, role: "autoshopowner" }).lean();
-
         if (!autoshopOwner) {
             return res.status(404).json({ message: "Auto shop owner not found." });
         }
@@ -984,9 +1019,62 @@ fetchMyCustomers = async (req, res) => {
             vehicleIdsForPlate = vehicleDocs.map(v => v._id.toString());
         }
 
-        // Populate only those customers matching filter(s)
+        // === Prepare myCustomersMeta 'addedAt' filter ===
+        let startDate, endDate;
+        let _dateType = dateType || "daily";
+        const now = new Date();
+
+        if (_dateType === "daily") {
+            let localDate = date ? new Date(date) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            startDate = new Date(localDate.setHours(0, 0, 0, 0));
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 1);
+        } else if (_dateType === "weekly") {
+            let current = week ? new Date(week) : new Date();
+            let day = current.getDay();
+            let diffToMonday = ((day + 6) % 7);
+            startDate = new Date(current);
+            startDate.setDate(current.getDate() - diffToMonday);
+            startDate.setHours(0, 0, 0, 0);
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 7);
+        } else if (_dateType === "monthly") {
+            let _year = year ? Number(year) : now.getFullYear();
+            let _month;
+            if (typeof month === "string" && isNaN(month)) {
+                const monthNames = [
+                    "january", "february", "march", "april", "may", "june",
+                    "july", "august", "september", "october", "november", "december"
+                ];
+                _month = monthNames.findIndex(mn =>
+                    mn.startsWith(month.trim().toLowerCase())
+                );
+                if (_month === -1) _month = now.getMonth();
+            } else {
+                _month = (typeof month !== "undefined") ? Number(month) : now.getMonth();
+            }
+            startDate = new Date(_year, _month, 1, 0, 0, 0, 0);
+            endDate = new Date(_year, _month + 1, 1, 0, 0, 0, 0);
+        }
+
+        // --- Filter the customer's IDs by addedAt (myCustomersMeta) ---
+        const relevantMyCustomersMeta = Array.isArray(autoshopOwner.myCustomersMeta)
+            ? autoshopOwner.myCustomersMeta.filter(meta => {
+                if (!meta.customer || !meta.addedAt) return false;
+                const added = new Date(meta.addedAt);
+                return (!startDate || added >= startDate) && (!endDate || added < endDate);
+            })
+            : [];
+        // Only proceed with those customers added during the filtered period.
+        const filteredCustomerIds = relevantMyCustomersMeta.map(meta => meta.customer && meta.customer.toString()).filter(Boolean);
+
+        if (filteredCustomerIds.length === 0) {
+            return res.status(200).json({ myCustomers: [] });
+        }
+
+        // Build DB query for User customers ("carowner"s owned by this shop, plus filters)
         let customersQuery = User.find({
-            _id: { $in: autoshopOwner.myCustomers || [] }
+            _id: { $in: filteredCustomerIds }
         })
         .select("name email phone countryCode status isDisabled myVehicles address pincode")
         .populate({
@@ -1014,8 +1102,6 @@ fetchMyCustomers = async (req, res) => {
         }
 
         const myCustomers = await customersQuery.lean();
-
-        // Ensure address and pincode are always sent. (Included in .select and thus in the object)
 
         return res.status(200).json({
             myCustomers: myCustomers || [],
