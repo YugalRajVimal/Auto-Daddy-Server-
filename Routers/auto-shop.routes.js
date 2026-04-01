@@ -312,6 +312,22 @@ autoShopRouter.get(
 );
 
 
+// Route to fetch a single JobCard by its ObjectId
+autoShopRouter.get(
+  "/job-cards/:jobCardId",
+  jwtAuth,
+  (req, res) => autoShopController.getJobCardUsingJobCardId(req, res)
+);
+
+
+// Route to collect payment for a job card (Cash/Online)
+autoShopRouter.post(
+  "/job-cards/collect-payment",
+  jwtAuth,
+  (req, res) => autoShopController.collectPayment(req, res)
+);
+
+
 
 
 

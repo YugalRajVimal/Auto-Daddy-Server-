@@ -1,4 +1,4 @@
-import mongoose from "mongoose";
+import mongoose, { Types } from "mongoose";
 import { deleteUploadedFile, deleteUploadedFiles } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
 import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 import { User } from "../../Schema/user.schema.js";
@@ -8,6 +8,7 @@ import DealModel from "../../Schema/deals.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
 import Services from "../../Schema/services.schema.js";
 import counterSchema from "../../Schema/counter.schema.js";
+import Payment from "../../Schema/payment.schema.js";
 
 
 class AutoShopController {
@@ -256,7 +257,7 @@ async completeBusinessProfile(req, res) {
             return res.status(400).json({ message: "Business profile already completed." });
         }
 
-        // Extract business profile details (ignore businessMapLocation, parse lat/lng directly)
+        // Extract business profile details (include gst field)
         let {
             businessName,
             businessAddress,
@@ -268,6 +269,7 @@ async completeBusinessProfile(req, res) {
             openDays,
             lat,
             lng,
+            gst, // new gst field
         } = req.body;
 
         // Fallback for lat/lng as stringified JSON
@@ -286,16 +288,24 @@ async completeBusinessProfile(req, res) {
             }
         }
 
+        // Parse gst as number
+        if (typeof gst === "string" && gst !== "") {
+            const parsedGst = Number(gst);
+            gst = isNaN(parsedGst) ? undefined : parsedGst;
+        }
+        if (gst !== undefined && typeof gst !== "number") {
+            if (req.files) deleteUploadedFiles(req.files);
+            return res.status(400).json({ message: "gst must be a number." });
+        }
+
         // Days of the week reference
-        const VALID_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday","Sunday"];
+        const VALID_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
         // If openDays is a string that looks like an array, try to parse it
         if (typeof openDays === "string") {
             try {
                 // Try JSON parse
                 const tmp = JSON.parse(openDays);
-                if (Array.isArray(tmp)) {
-                    openDays = tmp;
-                }
+                if (Array.isArray(tmp)) openDays = tmp;
             } catch (e) {
                 // fallback: split by comma if not valid JSON array
                 openDays = openDays.split(",").map(s => s.trim()).filter(Boolean);
@@ -333,6 +343,7 @@ async completeBusinessProfile(req, res) {
             openHours,
             openDays,
             closedDays,
+            gst,
         });
 
         // Required checks
@@ -369,7 +380,7 @@ async completeBusinessProfile(req, res) {
             if (Object.keys(businessMapLocation).length === 0) businessMapLocation = undefined;
         }
 
-        // Prepare business profile data shaped according to businessProfileSchema
+        // Prepare business profile data shaped according to businessProfileSchema, including gst field
         const businessProfileDoc = {
             businessName,
             businessAddress,
@@ -382,6 +393,7 @@ async completeBusinessProfile(req, res) {
             openDays,
             closedDays,
             businessLogo,
+            gst, // ensure gst is a number or undefined
         };
 
         console.log("[completeBusinessProfile] Prepared businessProfileDoc for DB:", businessProfileDoc);
@@ -493,6 +505,7 @@ async editBusinessProfile(req, res) {
             openDays,
             lat,
             lng,
+            gst, // add gst
         } = req.body;
 
         // Parse lat/lng if sent as strings
@@ -501,6 +514,16 @@ async editBusinessProfile(req, res) {
         }
         if (typeof lng === "string") {
             try { lng = parseFloat(lng); } catch { lng = undefined; }
+        }
+
+        // Parse gst as number
+        if (typeof gst === "string" && gst !== "") {
+            const parsedGst = Number(gst);
+            gst = isNaN(parsedGst) ? undefined : parsedGst;
+        }
+        if (gst !== undefined && typeof gst !== "number") {
+            if (req.files) deleteUploadedFiles(req.files);
+            return res.status(400).json({ message: "gst must be a number." });
         }
 
         // If openDays is a stringified array, parse
@@ -575,6 +598,7 @@ async editBusinessProfile(req, res) {
             updateData.closedDays = closedDays;
         }
         if (businessLogo !== undefined) updateData.businessLogo = businessLogo;
+        if (gst !== undefined) updateData.gst = gst; // allow gst to be updated; must be a number
 
         console.log("[editBusinessProfile] Update fields:", updateData);
 
@@ -4203,7 +4227,7 @@ async getAllPaidJobCards(req, res) {
             business: user.businessProfile,
             paymentStatus: 'Paid'
         })
-            .select('jobNo customerId totalPayableAmount paymentStatus')
+            .select('_id jobNo customerId totalPayableAmount paymentStatus')
             .populate({
                 path: 'customerId',
                 model: 'User',
@@ -4214,6 +4238,7 @@ async getAllPaidJobCards(req, res) {
 
         // Format result for required fields
         const data = paidJobCards.map(job => ({
+            jobCardId: job._id,
             jobCardNumber: job.jobNo,
             customerName: job.customerId?.name || "",
             customerContactNo: job.customerId?.phone || "",
@@ -4259,7 +4284,7 @@ async getAllUnpaidJobCards(req, res) {
             business: user.businessProfile,
             paymentStatus: { $ne: 'Paid' }
         })
-            .select('jobNo customerId totalPayableAmount paymentStatus')
+            .select('_id jobNo customerId totalPayableAmount paymentStatus')
             .populate({
                 path: 'customerId',
                 model: 'User',
@@ -4270,6 +4295,7 @@ async getAllUnpaidJobCards(req, res) {
 
         // Format result for required fields
         const data = unpaidJobCards.map(job => ({
+            jobCardId: job._id,
             jobCardNumber: job.jobNo,
             customerName: job.customerId?.name || "",
             customerContactNo: job.customerId?.phone || "",
@@ -4292,6 +4318,289 @@ async getAllUnpaidJobCards(req, res) {
         });
     }
 }
+
+/**
+ * Get a single Job Card by its _id (ObjectId).
+ * Requires: req.params.jobCardId or req.query.jobCardId (as a string ObjectId)
+ */
+async getJobCardUsingJobCardId(req, res) {
+    try {
+        const userId = req.user && req.user.id;
+        const jobCardId = req.params.jobCardId || req.query.jobCardId;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        if (!jobCardId) {
+            return res.status(400).json({ success: false, message: "jobCardId is required in params or query" });
+        }
+
+        // Find the user to get the businessProfile
+        const user = await User.findById(userId).lean();
+        if (!user || !user.businessProfile) {
+            return res.status(404).json({ success: false, message: "Business profile not found for user" });
+        }
+        const businessId = user.businessProfile;
+
+        let objectJobCardId, objectBusinessId;
+
+        try {
+            objectJobCardId = typeof jobCardId === "string" ? (Types.ObjectId.isValid(jobCardId) ? new Types.ObjectId(jobCardId) : null) : jobCardId;
+            objectBusinessId = typeof businessId === "string" ? (Types.ObjectId.isValid(businessId) ? new Types.ObjectId(businessId) : null) : businessId;
+        } catch (err) {
+            return res.status(400).json({ success: false, message: "Invalid jobCardId or businessProfile ObjectId." });
+        }
+
+        if (!objectJobCardId || !objectBusinessId) {
+            return res.status(400).json({ success: false, message: "Invalid jobCardId or businessProfile ObjectId." });
+        }
+
+        // Fetch the JobCard with deep population using safe ObjectId conversion
+        const jobCardAggregatePipeline = [
+            {
+                $match: {
+                    _id: objectJobCardId,
+                    business: objectBusinessId
+                }
+            },
+            {
+                $lookup: {
+                    from: "users",
+                    localField: "customerId",
+                    foreignField: "_id",
+                    as: "customer"
+                }
+            },
+            { $unwind: { path: "$customer", preserveNullAndEmptyArrays: true } },
+            {
+                $lookup: {
+                    from: "vehicles",
+                    localField: "vehicleId",
+                    foreignField: "_id",
+                    as: "vehicle"
+                }
+            },
+            { $unwind: { path: "$vehicle", preserveNullAndEmptyArrays: true } },
+            {
+                $project: {
+                    _id: 1,
+                    jobNo: 1,
+                    status: 1,
+                    paymentStatus: 1,
+                    serviceType: 1,
+                    priorityLevel: 1,
+                    createdAt: 1,
+                    totalPayableAmount: 1,
+                    vehiclePhotos: 1,
+                    dealApplied: 1,
+                    odometerReading: 1,
+                    dueOdometerReading: 1,
+                    issueDescription: 1,
+                    services: 1,
+                    additionalNotes: 1,
+                    technicalRemarks: 1,
+                    labourCharge: 1,
+                    labourDuration: 1,
+                    customer: {
+                        _id: "$customer._id",
+                        name: "$customer.name",
+                        phoneNumber: "$customer.phoneNumber",
+                        email: "$customer.email"
+                    },
+                    vehicle: {
+                        _id: "$vehicle._id",
+                        brand: "$vehicle.brand",
+                        model: "$vehicle.model",
+                        regNo: "$vehicle.regNo",
+                        vin: "$vehicle.vin"
+                    }
+                }
+            }
+        ];
+
+        const [jobCardData] = await JobCard.aggregate(jobCardAggregatePipeline);
+
+        if (!jobCardData) {
+            return res.status(404).json({ success: false, message: "JobCard not found for business or you do not have permission." });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: jobCardData
+        });
+    } catch (error) {
+        console.error("[getJobCardUsingJobCardId] Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error retrieving job card",
+            error: error.message
+        });
+    }
+}
+
+
+
+
+
+/**
+ * Collect payment for a job card (Cash/Online). Marks job card paid.
+ * Only allows full payment for the total payable amount (no partial payments).
+ * If payment method is "Online", GST must be included and fetched from businessProfile.
+ * 
+ * req.body:
+ * - jobCardId
+ * - paymentMethod: "Cash" | "Online"
+ * - remark (optional)
+ * - amount (required)
+ */
+async collectPayment(req, res) {
+    try {
+        const { jobCardId, paymentMethod, remark, amount } = req.body;
+        const userId = req.user && req.user.id;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        // Validate payment method
+        const VALID_METHODS = ["Cash", "Online"];
+        if (!VALID_METHODS.includes(paymentMethod)) {
+            return res.status(400).json({ success: false, message: `Invalid payment method. Allowed: ${VALID_METHODS.join(", ")}` });
+        }
+
+        // Find JobCard
+        const jobCard = await JobCard.findById(jobCardId);
+        if (!jobCard) {
+            return res.status(404).json({ success: false, message: "JobCard not found." });
+        }
+
+        // Must not already be marked Paid
+        if (jobCard.paymentStatus === "Paid") {
+            return res.status(400).json({ success: false, message: "This JobCard is already marked as paid." });
+        }
+
+        // Check for associated business profile (collect payment only for own jobs)
+        const user = await User.findById(userId).lean();
+        if (!user || !user.businessProfile || jobCard.business?.toString() !== user.businessProfile.toString()) {
+            return res.status(403).json({ success: false, message: "You do not have permission to collect payment for this job card." });
+        }
+
+        // Always fetch businessProfile for GST calculation if needed
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
+        console.log(businessProfile)
+        let totalAmount = jobCard.totalPayableAmount || 0;
+        let gstRate = businessProfile && typeof businessProfile.gst === "number" && !isNaN(businessProfile.gst) ? businessProfile.gst : 0;
+        let gstAmount = 0;
+        let expectedAmount = totalAmount;
+
+        if (paymentMethod === "Online") {
+            // If GST is 10, jobcard amount is 25, expected is 25 + (25 * 0.10) = 27.5
+            if (gstRate > 0) {
+                gstAmount = Number((totalAmount * (gstRate / 100)).toFixed(2));
+                expectedAmount = Number((totalAmount + gstAmount).toFixed(2));
+            }
+        } else {
+            gstAmount = 0; // No GST for Cash
+            expectedAmount = totalAmount;
+        }
+
+        if (typeof amount !== "number" || amount !== expectedAmount) {
+            return res.status(400).json({
+                success: false,
+                message: paymentMethod === "Online"
+                    ? `Payment amount mismatch. Expected full amount (including GST): ${expectedAmount}`
+                    : `Payment amount mismatch. Expected full amount: ${expectedAmount}`,
+                expectedAmount,
+                receivedAmount: amount,
+                ...(paymentMethod === "Online" && gstAmount > 0 ? { gstAmount, gstRate } : {})
+            });
+        }
+
+        // Create Payment record
+        // Generate human-readable paymentId (INV-YYYY-XXX)
+        const lastPayment = await Payment.findOne().sort({ createdAt: -1 }).select("paymentId").lean();
+        let paymentIdSuffix = 1;
+        const year = new Date().getFullYear();
+        if (lastPayment && lastPayment.paymentId && typeof lastPayment.paymentId === "string") {
+            const m = lastPayment.paymentId.match(/INV-(\d{4})-(\d+)/);
+            if (m && Number(m[1]) === year) {
+                paymentIdSuffix = Number(m[2]) + 1;
+            }
+        }
+        const paymentId = `INV-${year}-${String(paymentIdSuffix).padStart(3, "0")}`;
+
+        const paymentData = {
+            paymentId,
+            totalAmount, // Subtotal before GST
+            amount, // Final paid (may include GST)
+            discountInfo: {
+                code: null,
+                percent: 0,
+                amount: 0
+            },
+            paymentMethod,
+            status: "paid",
+            paymentTime: new Date(),
+            remark: remark || "",
+        };
+
+        // For online payments, record GST breakdown if applicable
+        if (paymentMethod === "Online" && gstAmount > 0) {
+            paymentData.gst = {
+                rate: gstRate,
+                amount: gstAmount
+            };
+        }
+
+        const session = await mongoose.startSession();
+        session.startTransaction();
+
+        try {
+            // Save payment record
+            const payment = new Payment(paymentData);
+            await payment.save({ session });
+
+            // Mark jobCard as paid
+            jobCard.paymentStatus = "Paid";
+            jobCard.payment = payment._id; // Optionally reference payment on the JobCard
+            await jobCard.save({ session });
+
+            await session.commitTransaction();
+            session.endSession();
+
+            return res.status(200).json({
+                success: true,
+                message: paymentMethod === "Online"
+                    ? `Payment collected and job card marked as paid. Expected full amount (including GST): ${expectedAmount}`
+                    : "Payment collected and job card marked as paid.",
+                payment: {
+                    paymentId,
+                    amount,
+                    method: paymentMethod,
+                    status: "paid",
+                    ...(paymentMethod === "Online" && gstAmount > 0 ? { gstAmount, gstRate } : {})
+                },
+                jobCardId: jobCard._id
+            });
+        } catch (e) {
+            await session.abortTransaction();
+            session.endSession();
+            throw e;
+        }
+
+    } catch (err) {
+        console.error("[collectPayment] Error:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to collect payment",
+            error: err.message
+        });
+    }
+}
+
+
+
 
 
 
