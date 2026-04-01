@@ -31,7 +31,7 @@ const PaymentSchema = new Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['card', 'upi', 'netbanking', 'cash', 'wallet'],
+    enum: ['Cash', 'Online'],
     required: true, // Payment method
   },
   remark: {

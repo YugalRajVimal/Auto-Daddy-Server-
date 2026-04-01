@@ -40,6 +40,7 @@ const businessProfileSchema = new Schema({
   businessPhone: { type: String, required: true },
   businessEmail: { type: String, required: true },
   businessHSTNumber: { type: String },
+  gst: { type: Number }, // GST field added
   openHours: { type: String },         // e.g., "08:00-20:00"
   openDays: { type: [String] },        // e.g., ["Monday", "Tuesday", ...]
   closedDays:{type: [String]},
