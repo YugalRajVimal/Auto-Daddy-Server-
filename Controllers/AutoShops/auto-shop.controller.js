@@ -4063,8 +4063,61 @@ async getAllJobCards(req, res) {
             return res.status(404).json({ success: false, message: "AutoShop business profile not found" });
         }
 
-        // Find all job cards created by this business
-        const jobCards = await JobCard.find({ business: user.businessProfile })
+        // --- Filter Handling (daily, weekly, monthly) ---
+        const {
+            dateType,
+            date,
+            week,
+            month,
+            year
+        } = req.query;
+
+        let createdAtMatch = {};
+        let _dateType = dateType || "daily";
+        let startDate, endDate;
+        const now = new Date();
+        if (_dateType === "daily") {
+            let localDate = date ? new Date(date) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            startDate = new Date(localDate.setHours(0, 0, 0, 0));
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 1);
+        } else if (_dateType === "weekly") {
+            let current = week ? new Date(week) : new Date();
+            let day = current.getDay();
+            let diffToMonday = ((day + 6) % 7);
+            startDate = new Date(current);
+            startDate.setDate(current.getDate() - diffToMonday);
+            startDate.setHours(0, 0, 0, 0);
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 7);
+        } else if (_dateType === "monthly") {
+            let _year = year ? Number(year) : now.getFullYear();
+            let _month;
+            if (typeof month === "string" && isNaN(month)) {
+                const monthNames = [
+                    "january", "february", "march", "april", "may", "june",
+                    "july", "august", "september", "october", "november", "december"
+                ];
+                _month = monthNames.findIndex(mn =>
+                    mn.startsWith(month.trim().toLowerCase())
+                );
+                if (_month === -1) _month = now.getMonth();
+            } else {
+                _month = (typeof month !== "undefined") ? Number(month) : now.getMonth();
+            }
+            startDate = new Date(_year, _month, 1, 0, 0, 0, 0);
+            endDate = new Date(_year, _month + 1, 1, 0, 0, 0, 0);
+        }
+
+        if (startDate && endDate) {
+            createdAtMatch.createdAt = { $gte: startDate, $lt: endDate };
+        }
+
+        // Find all job cards created by this business, within date filter if supplied
+        const jobCards = await JobCard.find({
+                business: user.businessProfile,
+                ...createdAtMatch
+            })
             .populate([
                 { path: 'customerId', model: 'User', select: 'name phone email' },
                 { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' },
