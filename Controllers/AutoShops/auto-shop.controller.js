@@ -3810,11 +3810,6 @@ async markJobStatus(req, res) {
     }
 }
 
-
-
-
-
-
 /**
  * Edit a job card. Allows autoshopowner to update specific fields on their own job card.
  * Only Pending status job cards can be edited.
@@ -4356,7 +4351,7 @@ async getJobCardUsingJobCardId(req, res) {
             return res.status(400).json({ success: false, message: "Invalid jobCardId or businessProfile ObjectId." });
         }
 
-        // Fetch the JobCard with deep population using safe ObjectId conversion
+        // Fetch the JobCard with deep population
         const jobCardAggregatePipeline = [
             {
                 $match: {
@@ -4425,9 +4420,31 @@ async getJobCardUsingJobCardId(req, res) {
             return res.status(404).json({ success: false, message: "JobCard not found for business or you do not have permission." });
         }
 
+        // Fetch business profile to get GST for GST aware totals
+        const businessProfile = await BusinessProfileModel.findById(businessId).lean();
+        let gstRate = businessProfile && typeof businessProfile.gst === "number" && !isNaN(businessProfile.gst) ? businessProfile.gst : 0;
+        let totalAmount = jobCardData.totalPayableAmount || 0;
+        let gstAmount = 0;
+        let totalPayableOnline = totalAmount;
+        if (gstRate > 0) {
+            gstAmount = Number((totalAmount * (gstRate / 100)).toFixed(2));
+            totalPayableOnline = Number((totalAmount + gstAmount).toFixed(2));
+        }
+
+        // Add payable amounts to response
+        const responseData = {
+            ...jobCardData,
+            payableAmounts: {
+                cash: totalAmount,
+                online: totalPayableOnline,
+                gstRate,
+                gstAmount,
+            }
+        };
+
         return res.status(200).json({
             success: true,
-            data: jobCardData
+            data: responseData
         });
     } catch (error) {
         console.error("[getJobCardUsingJobCardId] Error:", error);
@@ -4438,10 +4455,6 @@ async getJobCardUsingJobCardId(req, res) {
         });
     }
 }
-
-
-
-
 
 /**
  * Collect payment for a job card (Cash/Online). Marks job card paid.
@@ -4598,26 +4611,6 @@ async collectPayment(req, res) {
         });
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 }
 
