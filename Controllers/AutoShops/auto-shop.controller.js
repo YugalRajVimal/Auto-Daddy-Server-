@@ -4216,36 +4216,72 @@ async getAllPaidJobCards(req, res) {
             return res.status(404).json({ success: false, message: "AutoShop business profile not found" });
         }
 
-        // Fetch PAID job cards for business
+        // Fetch business profile to get GST rate
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
+        let gstRate = businessProfile && typeof businessProfile.gst === "number" && !isNaN(businessProfile.gst)
+            ? businessProfile.gst
+            : 0;
+
+        // Fetch all PAID job cards for this business
         const paidJobCards = await JobCard.find({
             business: user.businessProfile,
-            paymentStatus: 'Paid'
+            paymentStatus: "Paid"
         })
-            .select('_id jobNo customerId totalPayableAmount paymentStatus')
-            .populate({
-                path: 'customerId',
-                model: 'User',
-                select: 'name phone email'
-            })
-            .sort({ createdAt: -1 })
-            .lean();
+        .select('_id jobNo customerId totalPayableAmount paymentStatus paymentMethod gst paymentAmount')
+        .populate({
+            path: 'customerId',
+            model: 'User',
+            select: 'name phone email'
+        })
+        .sort({ createdAt: -1 })
+        .lean();
 
-        // Format result for required fields
-        const data = paidJobCards.map(job => ({
-            jobCardId: job._id,
-            jobCardNumber: job.jobNo,
-            customerName: job.customerId?.name || "",
-            customerContactNo: job.customerId?.phone || "",
-            customerEmail: job.customerId?.email || "",
-            totalPayableAmount: job.totalPayableAmount,
-            paymentStatus: job.paymentStatus,
-        }));
+        const cashPayments = [];
+        const onlinePayments = [];
+
+        for (const job of paidJobCards) {
+            // Prepare base job data with "amount" as previous totalPayableAmount for all payments
+            const baseJob = {
+                jobCardId: job._id,
+                jobCardNumber: job.jobNo,
+                customerName: job.customerId?.name || "",
+                customerContactNo: job.customerId?.phone || "",
+                customerEmail: job.customerId?.email || "",
+                paymentStatus: job.paymentStatus,
+                paymentMethod: job.paymentMethod || "Cash", // fallback to Cash
+                amount: job.totalPayableAmount // "amount" instead of "totalPayableAmount"
+            };
+
+            if ((job.paymentMethod || "Cash") === "Online") {
+                // For Online, explicitly include GST and display total (inclusive)
+                const totalAmount = job.totalPayableAmount || 0;
+                let gstAmount = 0;
+                let totalPayableOnline = totalAmount;
+                if (gstRate > 0) {
+                    gstAmount = Number((totalAmount * (gstRate / 100)).toFixed(2));
+                    totalPayableOnline = Number((totalAmount + gstAmount).toFixed(2));
+                }
+
+                onlinePayments.push({
+                    ...baseJob,
+                    totalPayableAmount: totalPayableOnline,
+                    gstRate,
+                    gstAmount
+                });
+            } else {
+                // For Cash, just show normal amount
+                cashPayments.push({
+                    ...baseJob,
+                    totalPayableAmount: job.totalPayableAmount
+                });
+            }
+        }
 
         return res.status(200).json({
             success: true,
-            data
+            cashPayments,
+            onlinePayments
         });
-
     } catch (err) {
         console.error("[getAllPaidJobCards] Error:", err);
         return res.status(500).json({
@@ -4273,12 +4309,18 @@ async getAllUnpaidJobCards(req, res) {
             return res.status(404).json({ success: false, message: "AutoShop business profile not found" });
         }
 
-        // Fetch UNPAID job cards for business
+        // Fetch business profile to get GST rate for online payments
+        const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
+        let gstRate = businessProfile && typeof businessProfile.gst === "number" && !isNaN(businessProfile.gst)
+            ? businessProfile.gst
+            : 0;
+
+        // Fetch all job cards that are not "Paid" for the business
         const unpaidJobCards = await JobCard.find({
             business: user.businessProfile,
             paymentStatus: { $ne: 'Paid' }
         })
-            .select('_id jobNo customerId totalPayableAmount paymentStatus')
+            .select('_id jobNo customerId totalPayableAmount paymentStatus paymentMethod unpaid')
             .populate({
                 path: 'customerId',
                 model: 'User',
@@ -4287,20 +4329,52 @@ async getAllUnpaidJobCards(req, res) {
             .sort({ createdAt: -1 })
             .lean();
 
-        // Format result for required fields
-        const data = unpaidJobCards.map(job => ({
-            jobCardId: job._id,
-            jobCardNumber: job.jobNo,
-            customerName: job.customerId?.name || "",
-            customerContactNo: job.customerId?.phone || "",
-            customerEmail: job.customerId?.email || "",
-            totalPayableAmount: job.totalPayableAmount,
-            paymentStatus: job.paymentStatus,
-        }));
+        // Separate into Online and Cash unpaid job cards
+        const cashUnpaid = [];
+        const onlineUnpaid = [];
+
+        unpaidJobCards.forEach(job => {
+            const isOnline = job.paymentMethod === "Online" && job.unpaid === true;
+            const baseData = {
+                jobCardId: job._id,
+                jobCardNumber: job.jobNo,
+                customerName: job.customerId?.name || "",
+                customerContactNo: job.customerId?.phone || "",
+                customerEmail: job.customerId?.email || "",
+                paymentStatus: job.paymentStatus,
+                paymentMethod: job.paymentMethod || "Cash",
+                unpaid: job.unpaid,
+                amount: job.totalPayableAmount // show previous amount (before GST if relevant)
+            };
+
+            if (isOnline) {
+                const totalAmount = job.totalPayableAmount || 0;
+                let gstAmount = 0;
+                let totalPayableOnline = totalAmount;
+                if (gstRate > 0) {
+                    gstAmount = Number((totalAmount * (gstRate / 100)).toFixed(2));
+                    totalPayableOnline = Number((totalAmount + gstAmount).toFixed(2));
+                }
+                onlineUnpaid.push({
+                    ...baseData,
+                    // totalPayableAmount should be set to the online amount only
+                    totalPayableAmount: totalPayableOnline,
+                    gstRate,
+                    gstAmount
+                });
+            } else {
+                // All others are considered Cash (including undefined paymentMethod)
+                cashUnpaid.push({
+                    ...baseData,
+                    totalPayableAmount: job.totalPayableAmount
+                });
+            }
+        });
 
         return res.status(200).json({
             success: true,
-            data
+            cashUnpaid,
+            onlineUnpaid
         });
 
     } catch (err) {
@@ -4463,10 +4537,11 @@ async getJobCardUsingJobCardId(req, res) {
  * - jobCardId
  * - paymentMethod: "Cash" | "Online"
  */
-async markPaymentUnpaid(req, res) {
+async markPaymentInvoice(req, res) {
     try {
-        const { jobCardId, paymentMethod } = req.body;
+        const { jobCardId } = req.body;
         const userId = req.user && req.user.id;
+        const paymentMethod = "Online";
 
         if (!userId) {
             return res.status(401).json({ success: false, message: "Unauthorized" });
@@ -4569,27 +4644,12 @@ async collectPayment(req, res) {
 
         if (paymentMethod === "Online") {
 
-            // Check if jobCard is marked as unpaid and paymentMethod is 'Online'
-            if (!jobCard.unpaid || jobCard.paymentMethod !== "Online") {
-                console.log(jobCard.unpaid, jobCard.paymentMethod)
-                return res.status(400).json({
-                    success: false,
-                    message: "Payment can only be collected if the job card is marked as unpaid and payment method is 'Online'. Please use the unpaid mark API to update these fields first."
-                });
-            }
-
             if (gstRate > 0) {
                 gstAmount = Number((totalAmount * (gstRate / 100)).toFixed(2));
                 expectedAmount = Number((totalAmount + gstAmount).toFixed(2));
             }
         } else {
-            // If paymentMethod is 'Cash', but jobCard is already marked as unpaid and method 'Online', do not allow Cash collection until manually corrected.
-            if ( jobCard.paymentMethod === "Online") {
-                return res.status(400).json({
-                    success: false,
-                    message: "Cannot collect payment as 'Cash' because this job card payment method marked as 'Online'. Please use the appropriate API to update the payment method"
-                });
-            }
+      
             gstAmount = 0; // No GST for Cash
             expectedAmount = totalAmount;
         }
@@ -4648,6 +4708,8 @@ async collectPayment(req, res) {
         });
     }
 }
+
+
 
 
 }
