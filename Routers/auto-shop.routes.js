@@ -319,6 +319,14 @@ autoShopRouter.get(
   (req, res) => autoShopController.getJobCardUsingJobCardId(req, res)
 );
 
+// Route to mark payment as unpaid for a job card (Cash/Online)
+autoShopRouter.post(
+  "/job-cards/mark-payment-unpaid",
+  jwtAuth,
+  (req, res) => autoShopController.markPaymentUnpaid(req, res)
+);
+
+
 
 // Route to collect payment for a job card (Cash/Online)
 autoShopRouter.post(

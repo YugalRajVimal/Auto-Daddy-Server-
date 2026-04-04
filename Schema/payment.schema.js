@@ -34,6 +34,9 @@ const PaymentSchema = new Schema({
     enum: ['Cash', 'Online'],
     required: true, // Payment method
   },
+  unpaid: {
+    type: Boolean,
+  },
   remark: {
     type: String,
   }
