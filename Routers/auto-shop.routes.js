@@ -321,9 +321,9 @@ autoShopRouter.get(
 
 // Route to mark payment as unpaid for a job card (Cash/Online)
 autoShopRouter.post(
-  "/job-cards/mark-payment-unpaid",
+  "/job-cards/mark-payment-invoice",
   jwtAuth,
-  (req, res) => autoShopController.markPaymentUnpaid(req, res)
+  (req, res) => autoShopController.markPaymentInvoice(req, res)
 );
 
 
