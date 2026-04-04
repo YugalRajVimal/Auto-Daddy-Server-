@@ -65,6 +65,14 @@ const JobCardSchema = new Schema({
         enum: ['Pending', 'Paid', 'Cancelled'],
         default: 'Pending'
     },
+    paymentMethod: {
+        type: String,
+        enum: ['Cash', 'Online'],
+        default: 'Cash'
+    },
+    unpaid: {
+        type: Boolean,
+      },
     technicalRemarks: { type: String },
     // New fields added below:
     labourCharge: { type: Number }, // Labour charge for the job

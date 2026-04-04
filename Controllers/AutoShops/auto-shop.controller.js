@@ -8,7 +8,6 @@ import DealModel from "../../Schema/deals.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
 import Services from "../../Schema/services.schema.js";
 import counterSchema from "../../Schema/counter.schema.js";
-import Payment from "../../Schema/payment.schema.js";
 
 
 class AutoShopController {
@@ -4456,6 +4455,68 @@ async getJobCardUsingJobCardId(req, res) {
     }
 }
 
+
+/**
+ * Mark payment as unpaid for a specified job card, specifying via Cash or Online.
+ * 
+ * req.body:
+ * - jobCardId
+ * - paymentMethod: "Cash" | "Online"
+ */
+async markPaymentUnpaid(req, res) {
+    try {
+        const { jobCardId, paymentMethod } = req.body;
+        const userId = req.user && req.user.id;
+
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        // Validate payment method
+        const VALID_METHODS = ["Cash", "Online"];
+        if (!VALID_METHODS.includes(paymentMethod)) {
+            return res.status(400).json({ success: false, message: `Invalid payment method. Allowed: ${VALID_METHODS.join(", ")}` });
+        }
+
+        // Find JobCard
+        const jobCard = await JobCard.findById(jobCardId);
+        if (!jobCard) {
+            return res.status(404).json({ success: false, message: "JobCard not found." });
+        }
+
+        // Check for associated business profile (only own jobs)
+        const user = await User.findById(userId).lean();
+        if (!user || !user.businessProfile || jobCard.business?.toString() !== user.businessProfile.toString()) {
+            return res.status(403).json({ success: false, message: "You do not have permission to mark payment for this job card." });
+        }
+
+        // Update JobCard fields to mark as unpaid
+        jobCard.paymentStatus = "Pending";
+        jobCard.unpaid = true;
+        // Optionally: store paymentMethod directly on the JobCard if needed for history/audit
+        if (paymentMethod) {
+            jobCard.paymentMethod = paymentMethod;
+        }
+        await jobCard.save();
+
+        return res.status(200).json({
+            success: true,
+            message: `Payment for job card marked as unpaid via ${paymentMethod}`,
+            jobCardId: jobCard._id,
+            paymentStatus: jobCard.paymentStatus,
+            unpaid: jobCard.unpaid,
+            paymentMethod: jobCard.paymentMethod || paymentMethod
+        });
+    } catch (error) {
+        console.error("[markPaymentUnpaid] Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to mark payment as unpaid",
+            error: error.message
+        });
+    }
+}
+
 /**
  * Collect payment for a job card (Cash/Online). Marks job card paid.
  * Only allows full payment for the total payable amount (no partial payments).
@@ -4501,19 +4562,34 @@ async collectPayment(req, res) {
 
         // Always fetch businessProfile for GST calculation if needed
         const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
-        console.log(businessProfile)
         let totalAmount = jobCard.totalPayableAmount || 0;
         let gstRate = businessProfile && typeof businessProfile.gst === "number" && !isNaN(businessProfile.gst) ? businessProfile.gst : 0;
         let gstAmount = 0;
         let expectedAmount = totalAmount;
 
         if (paymentMethod === "Online") {
-            // If GST is 10, jobcard amount is 25, expected is 25 + (25 * 0.10) = 27.5
+
+            // Check if jobCard is marked as unpaid and paymentMethod is 'Online'
+            if (!jobCard.unpaid || jobCard.paymentMethod !== "Online") {
+                console.log(jobCard.unpaid, jobCard.paymentMethod)
+                return res.status(400).json({
+                    success: false,
+                    message: "Payment can only be collected if the job card is marked as unpaid and payment method is 'Online'. Please use the unpaid mark API to update these fields first."
+                });
+            }
+
             if (gstRate > 0) {
                 gstAmount = Number((totalAmount * (gstRate / 100)).toFixed(2));
                 expectedAmount = Number((totalAmount + gstAmount).toFixed(2));
             }
         } else {
+            // If paymentMethod is 'Cash', but jobCard is already marked as unpaid and method 'Online', do not allow Cash collection until manually corrected.
+            if ( jobCard.paymentMethod === "Online") {
+                return res.status(400).json({
+                    success: false,
+                    message: "Cannot collect payment as 'Cash' because this job card payment method marked as 'Online'. Please use the appropriate API to update the payment method"
+                });
+            }
             gstAmount = 0; // No GST for Cash
             expectedAmount = totalAmount;
         }
@@ -4530,78 +4606,39 @@ async collectPayment(req, res) {
             });
         }
 
-        // Create Payment record
-        // Generate human-readable paymentId (INV-YYYY-XXX)
-        const lastPayment = await Payment.findOne().sort({ createdAt: -1 }).select("paymentId").lean();
-        let paymentIdSuffix = 1;
-        const year = new Date().getFullYear();
-        if (lastPayment && lastPayment.paymentId && typeof lastPayment.paymentId === "string") {
-            const m = lastPayment.paymentId.match(/INV-(\d{4})-(\d+)/);
-            if (m && Number(m[1]) === year) {
-                paymentIdSuffix = Number(m[2]) + 1;
-            }
+        // Update the JobCard directly to reflect payment collection (NO separate Payment model)
+        jobCard.paymentStatus = "Paid";
+        jobCard.unpaid = false;
+        jobCard.paymentMethod = paymentMethod;
+        if (remark) {
+            jobCard.paymentRemark = remark;
         }
-        const paymentId = `INV-${year}-${String(paymentIdSuffix).padStart(3, "0")}`;
-
-        const paymentData = {
-            paymentId,
-            totalAmount, // Subtotal before GST
-            amount, // Final paid (may include GST)
-            discountInfo: {
-                code: null,
-                percent: 0,
-                amount: 0
-            },
-            paymentMethod,
-            status: "paid",
-            paymentTime: new Date(),
-            remark: remark || "",
-        };
-
-        // For online payments, record GST breakdown if applicable
-        if (paymentMethod === "Online" && gstAmount > 0) {
-            paymentData.gst = {
+        if (gstAmount > 0) {
+            jobCard.gst = {
                 rate: gstRate,
-                amount: gstAmount
+                amount: gstAmount,
             };
+        } else {
+            jobCard.gst = undefined;
         }
+        jobCard.paymentAmount = amount;
+        jobCard.paymentTime = new Date();
 
-        const session = await mongoose.startSession();
-        session.startTransaction();
+        await jobCard.save();
 
-        try {
-            // Save payment record
-            const payment = new Payment(paymentData);
-            await payment.save({ session });
-
-            // Mark jobCard as paid
-            jobCard.paymentStatus = "Paid";
-            jobCard.payment = payment._id; // Optionally reference payment on the JobCard
-            await jobCard.save({ session });
-
-            await session.commitTransaction();
-            session.endSession();
-
-            return res.status(200).json({
-                success: true,
-                message: paymentMethod === "Online"
-                    ? `Payment collected and job card marked as paid. Expected full amount (including GST): ${expectedAmount}`
-                    : "Payment collected and job card marked as paid.",
-                payment: {
-                    paymentId,
-                    amount,
-                    method: paymentMethod,
-                    status: "paid",
-                    ...(paymentMethod === "Online" && gstAmount > 0 ? { gstAmount, gstRate } : {})
-                },
-                jobCardId: jobCard._id
-            });
-        } catch (e) {
-            await session.abortTransaction();
-            session.endSession();
-            throw e;
-        }
-
+        return res.status(200).json({
+            success: true,
+            message: paymentMethod === "Online"
+                ? `Payment collected and job card marked as paid. Expected full amount (including GST): ${expectedAmount}`
+                : "Payment collected and job card marked as paid.",
+            jobCardId: jobCard._id,
+            paymentStatus: jobCard.paymentStatus,
+            unpaid: jobCard.unpaid,
+            paymentMethod: jobCard.paymentMethod,
+            paymentAmount: jobCard.paymentAmount,
+            ...(jobCard.paymentRemark ? { paymentRemark: jobCard.paymentRemark } : {}),
+            ...(paymentMethod === "Online" && gstAmount > 0 ? { gstAmount, gstRate } : {})
+        });
     } catch (err) {
         console.error("[collectPayment] Error:", err);
         return res.status(500).json({
@@ -4611,6 +4648,7 @@ async collectPayment(req, res) {
         });
     }
 }
+
 
 }
 
