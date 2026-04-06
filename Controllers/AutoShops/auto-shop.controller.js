@@ -4111,18 +4111,47 @@ async getAllJobCards(req, res) {
         } else if (_dateType === "monthly") {
             let _year = year ? Number(year) : now.getFullYear();
             let _month;
-            if (typeof month === "string" && isNaN(month)) {
-                const monthNames = [
-                    "january", "february", "march", "april", "may", "june",
-                    "july", "august", "september", "october", "november", "december"
-                ];
-                _month = monthNames.findIndex(mn =>
-                    mn.startsWith(month.trim().toLowerCase())
-                );
-                if (_month === -1) _month = now.getMonth();
+
+            if (typeof month !== "undefined" && month !== null) {
+                // Handle string month names, e.g. "february"
+                if (typeof month === "string" && isNaN(month)) {
+                    const monthNames = [
+                        "january", "february", "march", "april", "may", "june",
+                        "july", "august", "september", "october", "november", "december"
+                    ];
+                    _month = monthNames.findIndex(mn =>
+                        mn.startsWith(month.trim().toLowerCase())
+                    );
+                    if (_month === -1) _month = now.getMonth();
+                } else {
+                    // Allow month as integer, or zero-padded ("01", "02", etc)
+                    if (typeof month === "string" && month.match(/^\d{1,2}$/)) {
+                        let monthNum = Number(month);
+                        if (!isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
+                            _month = monthNum - 1; // Convert 1-12 to JS 0-indexed
+                        } else {
+                            _month = now.getMonth();
+                        }
+                    } else {
+                        // If month is already a number, use it directly (assume 0-based or 1-based)
+                        let monthNum = Number(month);
+                        if (!isNaN(monthNum)) {
+                            if (monthNum >= 1 && monthNum <= 12) {
+                                _month = monthNum - 1; // 1-based -> 0-based
+                            } else if (monthNum >= 0 && monthNum <= 11) {
+                                _month = monthNum;
+                            } else {
+                                _month = now.getMonth();
+                            }
+                        } else {
+                            _month = now.getMonth();
+                        }
+                    }
+                }
             } else {
-                _month = (typeof month !== "undefined") ? Number(month) : now.getMonth();
+                _month = now.getMonth();
             }
+
             startDate = new Date(_year, _month, 1, 0, 0, 0, 0);
             endDate = new Date(_year, _month + 1, 1, 0, 0, 0, 0);
         }
