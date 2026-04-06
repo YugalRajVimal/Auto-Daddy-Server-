@@ -4201,7 +4201,7 @@ async getAllPayments(req, res) {
 
 /**
  * Get all job cards for this auto shop business with paymentStatus 'Paid'.
- * Returns: jobNo, Customer Name, Customer Contact No, Customer Email, totalPayableAmount, paymentStatus
+ * Returns: jobNo, Customer Name, Customer Contact No, Customer Email, totalPayableAmount, paymentStatus, createdDate, createdTime
  */
 async getAllPaidJobCards(req, res) {
     try {
@@ -4227,7 +4227,7 @@ async getAllPaidJobCards(req, res) {
             business: user.businessProfile,
             paymentStatus: "Paid"
         })
-        .select('_id jobNo customerId totalPayableAmount paymentStatus paymentMethod gst paymentAmount')
+        .select('_id jobNo customerId totalPayableAmount paymentStatus paymentMethod gst paymentAmount createdAt')
         .populate({
             path: 'customerId',
             model: 'User',
@@ -4239,7 +4239,34 @@ async getAllPaidJobCards(req, res) {
         const cashPayments = [];
         const onlinePayments = [];
 
+        // Helper function to format date as DD/MM/YYYY
+        function formatDate(dateObj) {
+            if (!dateObj) return "";
+            const d = new Date(dateObj);
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            return `${day}/${month}/${year}`;
+        }
+
+        // Helper function to format time as HH:MM (24 hr)
+        function formatTime(dateObj) {
+            if (!dateObj) return "";
+            const d = new Date(dateObj);
+            const hours = String(d.getHours()).padStart(2, '0');
+            const mins = String(d.getMinutes()).padStart(2, '0');
+            return `${hours}:${mins}`;
+        }
+
         for (const job of paidJobCards) {
+            // Format createdAt into date and time strings in requested format
+            let createdDate = "";
+            let createdTime = "";
+            if (job.createdAt) {
+                createdDate = formatDate(job.createdAt);
+                createdTime = formatTime(job.createdAt);
+            }
+
             // Prepare base job data with "amount" as previous totalPayableAmount for all payments
             const baseJob = {
                 jobCardId: job._id,
@@ -4249,7 +4276,9 @@ async getAllPaidJobCards(req, res) {
                 customerEmail: job.customerId?.email || "",
                 paymentStatus: job.paymentStatus,
                 paymentMethod: job.paymentMethod || "Cash", // fallback to Cash
-                amount: job.totalPayableAmount // "amount" instead of "totalPayableAmount"
+                amount: job.totalPayableAmount, // "amount" instead of "totalPayableAmount"
+                date: createdDate,
+                time: createdTime
             };
 
             if ((job.paymentMethod || "Cash") === "Online") {
@@ -4294,7 +4323,7 @@ async getAllPaidJobCards(req, res) {
 
 /**
  * Get all job cards for this auto shop business with paymentStatus not 'Paid'.
- * Returns: jobNo, Customer Name, Customer Contact No, Customer Email, totalPayableAmount, paymentStatus
+ * Returns: jobNo, Customer Name, Customer Contact No, Customer Email, totalPayableAmount, paymentStatus, createdDate, createdTime
  */
 async getAllUnpaidJobCards(req, res) {
     try {
@@ -4315,12 +4344,31 @@ async getAllUnpaidJobCards(req, res) {
             ? businessProfile.gst
             : 0;
 
+        // Helper function to format date as DD/MM/YYYY
+        function formatDate(dateObj) {
+            if (!dateObj) return "";
+            const d = new Date(dateObj);
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            return `${day}/${month}/${year}`;
+        }
+
+        // Helper function to format time as HH:MM (24 hr)
+        function formatTime(dateObj) {
+            if (!dateObj) return "";
+            const d = new Date(dateObj);
+            const hours = String(d.getHours()).padStart(2, '0');
+            const mins = String(d.getMinutes()).padStart(2, '0');
+            return `${hours}:${mins}`;
+        }
+
         // Fetch all job cards that are not "Paid" for the business
         const unpaidJobCards = await JobCard.find({
             business: user.businessProfile,
             paymentStatus: { $ne: 'Paid' }
         })
-            .select('_id jobNo customerId totalPayableAmount paymentStatus paymentMethod unpaid')
+            .select('_id jobNo customerId totalPayableAmount paymentStatus paymentMethod unpaid createdAt')
             .populate({
                 path: 'customerId',
                 model: 'User',
@@ -4334,6 +4382,14 @@ async getAllUnpaidJobCards(req, res) {
         const onlineUnpaid = [];
 
         unpaidJobCards.forEach(job => {
+            // Format createdAt into date and time strings in requested format
+            let createdDate = "";
+            let createdTime = "";
+            if (job.createdAt) {
+                createdDate = formatDate(job.createdAt);
+                createdTime = formatTime(job.createdAt);
+            }
+
             const isOnline = job.paymentMethod === "Online" && job.unpaid === true;
             const baseData = {
                 jobCardId: job._id,
@@ -4344,7 +4400,9 @@ async getAllUnpaidJobCards(req, res) {
                 paymentStatus: job.paymentStatus,
                 paymentMethod: job.paymentMethod || "Cash",
                 unpaid: job.unpaid,
-                amount: job.totalPayableAmount // show previous amount (before GST if relevant)
+                amount: job.totalPayableAmount, // show previous amount (before GST if relevant)
+                date: createdDate,
+                time: createdTime
             };
 
             if (isOnline) {
