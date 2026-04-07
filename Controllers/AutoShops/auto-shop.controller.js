@@ -1064,18 +1064,32 @@ fetchMyCustomers = async (req, res) => {
         } else if (_dateType === "monthly") {
             let _year = year ? Number(year) : now.getFullYear();
             let _month;
-            if (typeof month === "string" && isNaN(month)) {
-                const monthNames = [
-                    "january", "february", "march", "april", "may", "june",
-                    "july", "august", "september", "october", "november", "december"
-                ];
-                _month = monthNames.findIndex(mn =>
-                    mn.startsWith(month.trim().toLowerCase())
-                );
-                if (_month === -1) _month = now.getMonth();
+
+            // Handle both string and number; allow "2" or 2 for February, "Feb", "February", etc.
+            if (typeof month !== "undefined" && month !== null) {
+                if (typeof month === "string" && isNaN(month)) {
+                    // String name
+                    const monthNames = [
+                        "january", "february", "march", "april", "may", "june",
+                        "july", "august", "september", "october", "november", "december"
+                    ];
+                    let monthLower = month.trim().toLowerCase();
+                    _month = monthNames.findIndex(mn => mn.startsWith(monthLower));
+                    if (_month === -1) _month = now.getMonth(); // fallback to current month
+                } else {
+                    // Number (from query or numeric string)
+                    // Accept 1 for Jan, 12 for Dec (convert to 0-based)
+                    let parsedNum = Number(month);
+                    if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) {
+                        _month = parsedNum - 1;
+                    } else {
+                        _month = now.getMonth();
+                    }
+                }
             } else {
-                _month = (typeof month !== "undefined") ? Number(month) : now.getMonth();
+                _month = now.getMonth();
             }
+
             startDate = new Date(_year, _month, 1, 0, 0, 0, 0);
             endDate = new Date(_year, _month + 1, 1, 0, 0, 0, 0);
         }
