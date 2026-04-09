@@ -8,6 +8,7 @@ import DealModel from "../../Schema/deals.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
 import Services from "../../Schema/services.schema.js";
 import counterSchema from "../../Schema/counter.schema.js";
+import VehicleType from "../../Schema/vehicle-type.schema.js";
 
 
 class AutoShopController {
@@ -2107,18 +2108,43 @@ async editMyServices(req, res) {
       return res.status(500).json({ message: "Internal Server Error" });
     }
   }
-  
+
+  /**
+   * Get all vehicle types and all services in one response.
+   * Returns:
+   *  {
+   *    success: true,
+   *    vehicleTypes: [...],
+   *    services: [...]
+   *  }
+   */
+  async getAllVehicleTypesAndServices(req, res) {
+    try {
+      const [vehicleTypes, services] = await Promise.all([
+        VehicleType.find({}).sort({ createdAt: -1 }).lean(),
+        Services.find({}).sort({ createdAt: -1 }).lean()
+      ]);
+      return res.status(200).json({
+        success: true,
+        vehicleTypes,
+        services
+      });
+    } catch (error) {
+      console.error("[getAllVehicleTypesAndServices] Error:", error);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch vehicle types and services"
+      });
+    }
+  }
+
 /**
- * Create a new deal and link it to the creator's business profile.
+ * Create a new deal (Service or Parts) and link it to the creator's business profile.
+ * Supports: dealType ("Service" or "Parts"), if Service then serviceId (ObjectId) is required,
+ * if Parts then partName (string) is required, plus description, discountedPrice, 
+ * offerEndsOnDate, province, dealEnabled, and vehicleTypeId (@vehicle-type.schema.js).
  * - Adds the deal's _id to BusinessProfile.myDeals.
- * - Sets Deal.createdBy to businessProfile._id.
- * - Adapts to deals.schema.js fields: productName, productImage, description, price, discountedPrice, dealEnabled, offersEndOnDate, createdBy.
- */
-/**
- * Create a new deal and link it to the creator's business profile.
- * - Adds the deal's _id to BusinessProfile.myDeals.
- * - Sets Deal.createdBy to businessProfile._id.
- * - Adapts to deals.schema.js fields: productName, productImage, description, price, discountedPrice, dealEnabled, offersEndOnDate, createdBy.
+ * - Sets Deal.createdBy to businessProfile._id (and User, see @deals.schema.js).
  */
 async createDeal(req, res) {
     let uploadedProductImagePath;
@@ -2126,131 +2152,172 @@ async createDeal(req, res) {
         const userId = req.user.id;
         const user = await User.findById(userId).lean();
         if (!user) {
-            if (req.files && req.files.productImage && req.files.productImage[0]?.path) {
-                if (req.files.productImage[0].path !== undefined) {
-                    deleteUploadedFiles([req.files.productImage[0].path]);
-                }
-            }
             return res.status(404).json({ success: false, message: "User not found" });
         }
 
         const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
         if (!businessProfile) {
-            if (req.files && req.files.productImage && req.files.productImage[0]?.path) {
-                if (req.files.productImage[0].path !== undefined) {
-                    deleteUploadedFiles([req.files.productImage[0].path]);
-                }
-            }
             return res.status(404).json({ success: false, message: "Business profile not found" });
         }
 
-        if (req.files && req.files.productImage && req.files.productImage[0]?.path) {
-            uploadedProductImagePath = req.files.productImage[0].path;
-        }
-
-        // Prevent productImage in req.body from being accepted as path
-        if ('productImage' in req.body) {
-            delete req.body.productImage;
-        }
-
         let {
-            productName,
-            description = "",
-            price,
+            dealType, // "Service" or "Parts"
+            serviceId,
+            partName,
+            description,
             discountedPrice,
+            offerEndsOnDate,
+            province,
             dealEnabled,
-            offersEndOnDate,
-            serviceId
+            vehicleTypeId
         } = req.body;
 
-        price = typeof price === "string" ? Number(price) : price;
+        // Normalize booleans/types & clean up
+        dealType = typeof dealType === "string" ? dealType.trim() : dealType;
+        partName = typeof partName === "string" ? partName.trim() : undefined;
+        description = typeof description === "string" ? description.trim() : "";
+        province = typeof province === "string" ? province.trim() : "";
         discountedPrice = typeof discountedPrice === "string" ? Number(discountedPrice) : discountedPrice;
-        dealEnabled = (dealEnabled === true || dealEnabled === "true") ? true : false;
+        dealEnabled = (dealEnabled === true || dealEnabled === "true" || dealEnabled === 1 || dealEnabled === "1");
+        vehicleTypeId = typeof vehicleTypeId === "string" ? vehicleTypeId.trim() : undefined;
 
+        // Validate dealType
+        if (!dealType || (dealType !== "Service" && dealType !== "Parts")) {
+            return res.status(400).json({ success: false, message: "dealType is required and must be 'Service' or 'Parts'." });
+        }
+
+        // For "Service" deals, require serviceId
+        if (dealType === "Service") {
+            if (typeof serviceId !== "string" || !serviceId.trim()) {
+                return res.status(400).json({ success: false, message: "serviceId is required for dealType 'Service'." });
+            }
+            serviceId = serviceId.trim();
+            if (!mongoose.Types.ObjectId.isValid(serviceId)) {
+                return res.status(400).json({ success: false, message: "serviceId must be a valid MongoDB ObjectId." });
+            }
+            const service = await Services.findById(serviceId).lean();
+            if (!service) {
+                return res.status(404).json({ success: false, message: "The specified serviceId does not correspond to a valid service." });
+            }
+        }
+
+        // For "Parts" deals, require partName
+        if (dealType === "Parts") {
+            if (!partName) {
+                return res.status(400).json({ success: false, message: "partName is required for dealType 'Parts'." });
+            }
+        }
+
+        // Mandatory: description (cannot be missing or empty string)
+        if (typeof description !== "string" || description.trim().length === 0) {
+            return res.status(400).json({ success: false, message: "description is required and cannot be empty." });
+        }
+
+        // Mandatory: discountedPrice (must be present, number, >= 0)
         if (
-            typeof productName !== "string" || !productName.trim() ||
-            typeof price !== "number" || isNaN(price) ||
-            typeof discountedPrice !== "number" || isNaN(discountedPrice) ||
-            !offersEndOnDate ||
-            typeof serviceId !== "string" || !serviceId.trim()
+            discountedPrice === undefined ||
+            discountedPrice === null ||
+            typeof discountedPrice !== "number" ||
+            isNaN(discountedPrice) ||
+            discountedPrice < 0
         ) {
-            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+            if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
             return res.status(400).json({
                 success: false,
-                message: "productName (string), price (number), discountedPrice (number), offersEndOnDate (date), and serviceId (string) are required.",
+                message: "discountedPrice is required and must be a number greater than or equal to zero."
             });
         }
 
-        if (!mongoose.Types.ObjectId.isValid(serviceId.trim())) {
-            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+        // Mandatory: province (cannot be missing or empty string)
+        if (typeof province !== "string" || province.trim().length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "serviceId must be a valid MongoDB ObjectId."
+                message: "province is required and cannot be empty."
             });
         }
 
-        const service = await Services.findById(serviceId.trim()).lean();
-        if (!service) {
-            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-            return res.status(404).json({
+        // Mandatory: dealEnabled
+        if (
+            typeof req.body.dealEnabled === "undefined" ||
+            req.body.dealEnabled === null ||
+            (typeof req.body.dealEnabled === "string" && req.body.dealEnabled.trim().length === 0)
+        ) {
+            return res.status(400).json({
                 success: false,
-                message: "The specified serviceId does not correspond to a valid service."
+                message: "dealEnabled is required and cannot be empty."
             });
         }
 
-        if (price < 0 || discountedPrice < 0) {
-            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+        // offerEndsOnDate validation (expecting '2026-05-20T18:30:00.000Z' ISO format)
+        if (!offerEndsOnDate || typeof offerEndsOnDate !== "string") {
             return res.status(400).json({
                 success: false,
-                message: "price and discountedPrice must not be negative."
+                message: "offerEndsOnDate is required and must be a string in ISO format."
             });
         }
-        if (discountedPrice > price) {
-            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+        // Try to parse to Date
+        let offerEndsDate = new Date(offerEndsOnDate);
+        if (
+            isNaN(offerEndsDate.getTime()) ||
+            offerEndsDate <= new Date()
+        ) {
             return res.status(400).json({
-                success: false,
-                message: "discountedPrice cannot be greater than price."
-            });
-        }
-
-        let offerEndDate = offersEndOnDate instanceof Date
-            ? offersEndOnDate
-            : new Date(offersEndOnDate);
-        if (isNaN(offerEndDate.getTime())) {
-            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-            return res.status(400).json({
-                success: false,
-                message: "offersEndOnDate must be a valid date."
+                success: false, 
+                message: "offerEndsOnDate must be a valid ISO date string and must be in the future."
             });
         }
 
-        const existingDeal = await DealModel.findOne({
-            productName: productName.trim(),
+        // vehicleTypeId validation
+        if (!vehicleTypeId || !mongoose.Types.ObjectId.isValid(vehicleTypeId)) {
+            return res.status(400).json({
+                success: false, message: "vehicleTypeId is required and must be a valid MongoDB ObjectId."
+            });
+        }
+        const vehicleType = await VehicleType.findById(vehicleTypeId).lean();
+        if (!vehicleType) {
+            return res.status(400).json({
+                success: false, message: "vehicleTypeId does not correspond to a valid vehicle type."
+            });
+        }
+
+        // Prevent duplicate: businessProfile._id, dealType, (serviceId or partName), vehicleTypeId
+        let uniqueQuery = {
+            dealType,
             createdBy: businessProfile._id,
-            serviceId: serviceId.trim(),
-        }).lean();
-        if (existingDeal) {
-            if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+            vehicleTypeId: vehicleTypeId
+        };
+        if (dealType === "Service") {
+            uniqueQuery.serviceId = serviceId;
+        } else {
+            uniqueQuery.partName = partName;
+        }
+        const duplicateDeal = await DealModel.findOne(uniqueQuery).lean();
+        if (duplicateDeal) {
             return res.status(400).json({
                 success: false,
-                message: "A deal with the same product name already exists for this service in your business profile."
+                message: "A deal with these values already exists for your business profile."
             });
         }
 
-        let finalProductImage = uploadedProductImagePath || "";
-
-        const deal = new DealModel({
-            productName: productName.trim(),
-            productImage: finalProductImage,
-            description: typeof description === "string" ? description : "",
-            price: price,
-            discountedPrice: discountedPrice,
+        // Build deal fields per schema (add createdBy: businessProfile._id and user: userId)
+        let dealDoc = {
+            dealType,
+            description,
+            discountedPrice,
+            offerEndsOnDate: offerEndsDate,
+            province,
             dealEnabled: !!dealEnabled,
-            offersEndOnDate: offerEndDate,
             createdBy: businessProfile._id,
-            serviceId: serviceId.trim()
-        });
+            user: userId,
+            vehicleTypeId
+        };
+        if (dealType === "Service") {
+            dealDoc.serviceId = serviceId;
+        } else {
+            dealDoc.partName = partName;
+        }
 
+        const deal = new DealModel(dealDoc);
         await deal.save();
 
         if (!Array.isArray(businessProfile.myDeals)) businessProfile.myDeals = [];
@@ -2265,9 +2332,7 @@ async createDeal(req, res) {
 
     } catch (error) {
         console.log(error);
-        if (uploadedProductImagePath !== undefined) {
-            deleteUploadedFiles([uploadedProductImagePath]);
-        }
+
         if (error.name === "ValidationError") {
             return res.status(400).json({
                 success: false,
@@ -2284,8 +2349,9 @@ async createDeal(req, res) {
 }
 
 /**
- * Edit an existing deal (only if the current business profile created it).
- * - Only allows update if the deal's createdBy matches the user's businessProfile.
+ * Edit an existing deal (only if current business profile created it).
+ * Update only allowed if dealType/owner matches. Allows updating all fields per schema.
+ * Preserves createdBy and user fields.
  */
 async editDeal(req, res) {
     let uploadedProductImagePath;
@@ -2294,9 +2360,7 @@ async editDeal(req, res) {
         const user = await User.findById(userId).lean();
         if (!user) {
             if (req.files && req.files.productImage && req.files.productImage[0]?.path) {
-                if (req.files.productImage[0].path !== undefined) {
-                    deleteUploadedFiles([req.files.productImage[0].path]);
-                }
+                deleteUploadedFiles([req.files.productImage[0].path]);
             }
             return res.status(404).json({ success: false, message: "User not found" });
         }
@@ -2304,175 +2368,213 @@ async editDeal(req, res) {
         const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
         if (!businessProfile) {
             if (req.files && req.files.productImage && req.files.productImage[0]?.path) {
-                if (req.files.productImage[0].path !== undefined) {
-                    deleteUploadedFiles([req.files.productImage[0].path]);
-                }
+                deleteUploadedFiles([req.files.productImage[0].path]);
             }
             return res.status(404).json({ success: false, message: "Business profile not found" });
         }
         const businessProfileId = businessProfile._id;
 
         const { id } = req.params;
-        const updateData = { ...req.body };
 
-        if ('productImage' in updateData) {
-            delete updateData.productImage;
-        }
+        // Only update fields present in body (and any file uploads)
+        const updates = {};
 
+        // Handle file upload if productImage is present in files
         if (req.files && req.files.productImage && req.files.productImage[0]?.path) {
             uploadedProductImagePath = req.files.productImage[0].path;
-            updateData.productImage = uploadedProductImagePath;
+            updates.productImage = uploadedProductImagePath;
         }
 
-        delete updateData.createdBy;
+        // Only consider fields that are present in req.body
+        Object.keys(req.body).forEach(key => {
+            if (key === "createdBy" || key === "user") return; // Never allow these fields
+            if (key === "dealType" && req.body[key]) {
+                updates.dealType = typeof req.body[key] === "string" ? req.body[key].trim() : req.body[key];
+            } else if (key === "description" && req.body[key] !== undefined) {
+                updates.description = typeof req.body[key] === "string" ? req.body[key].trim() : req.body[key];
+            } else if (key === "discountedPrice" && req.body[key] !== undefined) {
+                updates.discountedPrice = typeof req.body[key] === "string" ? Number(req.body[key]) : req.body[key];
+            } else if (key === "province" && req.body[key] !== undefined) {
+                updates.province = typeof req.body[key] === "string" ? req.body[key].trim() : req.body[key];
+            } else if (key === "dealEnabled" && req.body[key] !== undefined) {
+                updates.dealEnabled = (
+                    req.body[key] === true ||
+                    req.body[key] === "true" ||
+                    req.body[key] === 1 ||
+                    req.body[key] === "1"
+                );
+            } else if (key === "offerEndsOnDate" && req.body[key] !== undefined) {
+                updates.offerEndsOnDate = req.body[key] instanceof Date ? req.body[key] : new Date(req.body[key]);
+            } else if (key === "vehicleTypeId" && req.body[key] !== undefined) {
+                updates.vehicleTypeId = typeof req.body[key] === "string" ? req.body[key].trim() : req.body[key];
+            } else if (key === "serviceId" && req.body[key] !== undefined) {
+                updates.serviceId = typeof req.body[key] === "string" ? req.body[key].trim() : req.body[key];
+            } else if (key === "partName" && req.body[key] !== undefined) {
+                updates.partName = typeof req.body[key] === "string" ? req.body[key].trim() : req.body[key];
+            }
+        });
 
-        if ('productName' in updateData) {
-            if (typeof updateData.productName !== "string" || !updateData.productName.trim()) {
-                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-                return res.status(400).json({ success: false, message: "productName must be a non-empty string." });
-            }
-            updateData.productName = updateData.productName.trim();
-        }
-        if ('description' in updateData && typeof updateData.description !== "string") {
-            updateData.description = "";
-        }
-        if ('price' in updateData) {
-            updateData.price = typeof updateData.price === "string" ? Number(updateData.price) : updateData.price;
-            if (typeof updateData.price !== "number" || isNaN(updateData.price)) {
-                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-                return res.status(400).json({ success: false, message: "price must be a number." });
-            }
-            if (updateData.price < 0) {
-                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-                return res.status(400).json({ success: false, message: "price must not be negative." });
-            }
-        }
-        if ('discountedPrice' in updateData) {
-            updateData.discountedPrice = typeof updateData.discountedPrice === "string"
-                ? Number(updateData.discountedPrice) : updateData.discountedPrice;
-            if (typeof updateData.discountedPrice !== "number" || isNaN(updateData.discountedPrice)) {
-                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-                return res.status(400).json({ success: false, message: "discountedPrice must be a number." });
-            }
-            if (updateData.discountedPrice < 0) {
-                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-                return res.status(400).json({ success: false, message: "discountedPrice must not be negative." });
-            }
-        }
-        if ('offersEndOnDate' in updateData) {
-            let offersEndDate = updateData.offersEndOnDate instanceof Date 
-                ? updateData.offersEndOnDate 
-                : new Date(updateData.offersEndOnDate);
-            if (isNaN(offersEndDate.getTime())) {
-                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-                return res.status(400).json({ success: false, message: "offersEndOnDate must be a valid date." });
-            }
-            updateData.offersEndOnDate = offersEndDate;
-        }
-        if ('dealEnabled' in updateData) {
-            updateData.dealEnabled = (
-                updateData.dealEnabled === true ||
-                updateData.dealEnabled === "true"
-            );
+        // If nothing to update, exit early
+        if (
+            Object.keys(updates).length === 0
+        ) {
+            if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
+            return res.status(400).json({ success: false, message: "No update fields provided." });
         }
 
-        if ('serviceId' in updateData) {
-            if (typeof updateData.serviceId !== "string" || !updateData.serviceId.trim()) {
-                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-                return res.status(400).json({
-                    success: false,
-                    message: "serviceId must be a non-empty string."
-                });
+        // Validation only for fields being updated
+
+        // dealType validation
+        let dealType;
+        if ('dealType' in updates) {
+            if (
+                updates.dealType !== "Service" &&
+                updates.dealType !== "Parts"
+            ) {
+                if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "dealType must be 'Service' or 'Parts'." });
             }
-            updateData.serviceId = updateData.serviceId.trim();
-            if (!mongoose.Types.ObjectId.isValid(updateData.serviceId)) {
-                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-                return res.status(400).json({
-                    success: false,
-                    message: "serviceId must be a valid MongoDB ObjectId."
-                });
-            }
-            const service = await Services.findById(updateData.serviceId).lean();
-            if (!service) {
-                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-                return res.status(404).json({
-                    success: false,
-                    message: "The specified serviceId does not correspond to a valid service."
-                });
-            }
+            dealType = updates.dealType;
         }
 
-        if ('discountedPrice' in updateData && 'price' in updateData) {
-            if (updateData.discountedPrice > updateData.price) {
-                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-                return res.status(400).json({
-                    success: false,
-                    message: "discountedPrice cannot be greater than price."
-                });
+        // Fetch current deal for necessary context/merging/validation for duplication etc.
+        let deal = await DealModel.findOne({_id: id, createdBy: businessProfileId}).lean();
+        if (!deal) {
+            if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
+            return res.status(404).json({ success: false, message: "Deal not found or not permitted" });
+        }
+        // Effective dealType (new or old)
+        dealType = dealType || deal.dealType;
+
+        if ("description" in updates) {
+            if (typeof updates.description !== "string" || updates.description.trim() === "") {
+                if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "description is required and cannot be empty." });
+            }
+            updates.description = updates.description.trim();
+        }
+
+        if ("discountedPrice" in updates) {
+            if (
+                typeof updates.discountedPrice !== "number" ||
+                isNaN(updates.discountedPrice) ||
+                updates.discountedPrice < 0
+            ) {
+                if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "discountedPrice must be a positive number." });
             }
         }
 
-        // Prevent duplicate deal (uniqueness for businessProfileId, serviceId, productName)
-        if ('productName' in updateData && 'serviceId' in updateData) {
-            const otherDeal = await DealModel.findOne({
-                productName: updateData.productName,
-                serviceId: updateData.serviceId,
-                createdBy: businessProfileId,
-                _id: { $ne: id }
-            }).lean();
-            if (otherDeal) {
-                if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
-                return res.status(400).json({
-                    success: false,
-                    message: "A deal with the same product name already exists for this service in your business profile."
-                });
+        if ("province" in updates) {
+            if (typeof updates.province !== "string" || updates.province.trim() === "") {
+                if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "province is required and cannot be empty." });
             }
-        } else if ('productName' in updateData) {
-            const currentDeal = await DealModel.findOne({ _id: id, createdBy: businessProfileId }).lean();
-            if (currentDeal && currentDeal.serviceId) {
-                const otherDeal = await DealModel.findOne({
-                    productName: updateData.productName,
-                    serviceId: currentDeal.serviceId,
+            updates.province = updates.province.trim();
+        }
+
+        if ("offerEndsOnDate" in updates) {
+            if (isNaN(new Date(updates.offerEndsOnDate).getTime())) {
+                if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "offerEndsOnDate must be a valid date." });
+            }
+            updates.offerEndsOnDate = new Date(updates.offerEndsOnDate);
+        }
+
+        if ("vehicleTypeId" in updates) {
+            if (
+                !updates.vehicleTypeId ||
+                !mongoose.Types.ObjectId.isValid(updates.vehicleTypeId)
+            ) {
+                if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "vehicleTypeId must be a valid MongoDB ObjectId." });
+            }
+            const vehicleType = await VehicleTypeModel.findById(updates.vehicleTypeId).lean();
+            if (!vehicleType) {
+                if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
+                return res.status(400).json({ success: false, message: "vehicleTypeId does not correspond to a valid vehicle type." });
+            }
+        }
+
+        // Service/Parts fields only if provided
+        if (dealType === "Service") {
+            if ("serviceId" in updates) {
+                if (
+                    !updates.serviceId ||
+                    !mongoose.Types.ObjectId.isValid(updates.serviceId)
+                ) {
+                    if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
+                    return res.status(400).json({ success: false, message: "serviceId must be a valid MongoDB ObjectId." });
+                }
+                const service = await Services.findById(updates.serviceId).lean();
+                if (!service) {
+                    if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
+                    return res.status(404).json({ success: false, message: "The specified serviceId does not correspond to a valid service." });
+                }
+            }
+            // Prevent duplicate (for fields being updated)
+            if ("serviceId" in updates || "vehicleTypeId" in updates) {
+                const serviceIdCheck = ("serviceId" in updates) ? updates.serviceId : deal.serviceId;
+                const vehicleTypeCheck = ("vehicleTypeId" in updates) ? updates.vehicleTypeId : deal.vehicleTypeId;
+                const exists = await DealModel.findOne({
+                    _id: { $ne: id },
+                    dealType: "Service",
                     createdBy: businessProfileId,
-                    _id: { $ne: id }
+                    serviceId: serviceIdCheck,
+                    vehicleTypeId: vehicleTypeCheck
                 }).lean();
-                if (otherDeal) {
-                    if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                if (exists) {
+                    if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
                     return res.status(400).json({
                         success: false,
-                        message: "A deal with the same product name already exists for this service in your business profile."
+                        message: "A 'Service' deal with this serviceId and vehicleTypeId already exists for your business profile."
                     });
                 }
             }
-        } else if ('serviceId' in updateData) {
-            const currentDeal = await DealModel.findOne({ _id: id, createdBy: businessProfileId }).lean();
-            if (currentDeal && currentDeal.productName) {
-                const otherDeal = await DealModel.findOne({
-                    productName: currentDeal.productName,
-                    serviceId: updateData.serviceId,
+        } else if (dealType === "Parts") {
+            if ("partName" in updates) {
+                if (!updates.partName) {
+                    if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
+                    return res.status(400).json({ success: false, message: "partName is required for dealType 'Parts'." });
+                }
+            }
+            if ("partName" in updates || "vehicleTypeId" in updates) {
+                const partNameCheck = ("partName" in updates) ? updates.partName : deal.partName;
+                const vehicleTypeCheck = ("vehicleTypeId" in updates) ? updates.vehicleTypeId : deal.vehicleTypeId;
+                const exists = await DealModel.findOne({
+                    _id: { $ne: id },
+                    dealType: "Parts",
                     createdBy: businessProfileId,
-                    _id: { $ne: id }
+                    partName: partNameCheck,
+                    vehicleTypeId: vehicleTypeCheck
                 }).lean();
-                if (otherDeal) {
-                    if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
+                if (exists) {
+                    if (uploadedProductImagePath) deleteUploadedFiles([uploadedProductImagePath]);
                     return res.status(400).json({
                         success: false,
-                        message: "A deal with the same product name already exists for this service in your business profile."
+                        message: "A 'Parts' deal with this partName and vehicleTypeId already exists for your business profile."
                     });
                 }
             }
         }
 
-        const deal = await DealModel.findOneAndUpdate(
+        // Never allow editing these
+        delete updates.createdBy;
+        delete updates.user;
+
+        const updatedDeal = await DealModel.findOneAndUpdate(
             { _id: id, createdBy: businessProfileId },
-            updateData,
+            updates,
             { new: true }
         );
-        if (!deal) {
+
+        if (!updatedDeal) {
             if (uploadedProductImagePath !== undefined) deleteUploadedFiles([uploadedProductImagePath]);
             return res.status(404).json({ success: false, message: "Deal not found or not permitted" });
         }
-        return res.status(200).json({ success: true, message: "Deal updated", data: deal });
+
+        return res.status(200).json({ success: true, message: "Deal updated", data: updatedDeal });
+
     } catch (error) {
         if (uploadedProductImagePath !== undefined) {
             deleteUploadedFiles([uploadedProductImagePath]);
@@ -2520,7 +2622,9 @@ async deleteDeal(req, res) {
 
 /**
  * Fetch all deals for the current business profile (BusinessProfile.myDeals).
- * Returns full Deal documents as an array.
+ * Returns full Deal documents as an array, grouped by dealType ("Service" or "Parts").
+ * Service deals include service info, parts include partName, and all include vehicleType name.
+ * All deals include createdBy and user fields per schema.
  */
 async fetchMyDeals(req, res) {
     try {
@@ -2535,51 +2639,80 @@ async fetchMyDeals(req, res) {
             return res.status(404).json({ success: false, message: "Business profile not found" });
         }
 
-        // Fetch deals by business, then group by serviceId, attaching service name
-        const dealIds = (businessProfile.myDeals || []).map(id => 
+        // Prepare deals to fetch
+        const dealIds = (businessProfile.myDeals || []).map(id =>
             typeof id === "string" ? new mongoose.Types.ObjectId(id) : id
         );
 
-        // Populate service information for each deal
-        // 1. Find all deals for this business
+        // Fetch deals, populate fields as appropriate (including createdBy and user)
         const deals = await DealModel.find({
             _id: { $in: dealIds },
             createdBy: businessProfile._id
         })
-        .populate({ path: "serviceId", select: "name" })
+        .populate({ path: "serviceId", select: "name", strictPopulate: false })
+        .populate({ path: "vehicleTypeId", select: "name", strictPopulate: false })
+        .populate({ path: "createdBy", select: "name _id", strictPopulate: false })
+        .populate({ path: "user", select: "name _id", strictPopulate: false })
         .lean();
 
-        // 2. Group deals by serviceId, include service name in group
-        const groupMap = {};
+        // Group by dealType, and if Service, by serviceId, for Parts, by partName
+        let groupMap = {}; // { groupKey: { ... } }
         deals.forEach(deal => {
-            const serviceObj = deal.serviceId; // could be null or { _id, name }
-            const sid = serviceObj ? String(serviceObj._id) : "null";
-            if (!groupMap[sid]) {
-                groupMap[sid] = {
-                    serviceId: serviceObj ? serviceObj._id : null,
-                    serviceName: serviceObj ? serviceObj.name : null,
+            let groupKey;
+            let serviceName = null, partName = null;
+            if (deal.dealType === "Service") {
+                groupKey = `Service:${deal.serviceId && deal.serviceId._id ? String(deal.serviceId._id) : "null"}`;
+                serviceName = deal.serviceId && deal.serviceId.name ? deal.serviceId.name : null;
+            } else if (deal.dealType === "Parts") {
+                groupKey = `Parts:${deal.partName || "null"}`;
+                partName = deal.partName || null;
+            } else {
+                groupKey = "Other:null";
+            }
+            if (!groupMap[groupKey]) {
+                groupMap[groupKey] = {
+                    dealType: deal.dealType,
+                    serviceId: (deal.serviceId && deal.serviceId._id) ? deal.serviceId._id : null,
+                    serviceName: serviceName,
+                    partName: partName,
                     deals: []
                 };
             }
-            // Replace deal.serviceId with only its _id for clarity, optionally keep
-            deal.serviceId = serviceObj ? serviceObj._id : null;
-            groupMap[sid].deals.push(deal);
+            // Set serviceId, partName, vehicleTypeId info in each deal object (flatter for frontend use)
+            if (deal.dealType === "Service" && deal.serviceId && typeof deal.serviceId === "object") {
+                deal.serviceName = deal.serviceId.name;
+                deal.serviceId = deal.serviceId._id;
+            }
+            if (deal.dealType === "Parts") {
+                deal.partName = deal.partName || null;
+            }
+            deal.vehicleTypeName = deal.vehicleTypeId && typeof deal.vehicleTypeId === "object" ? deal.vehicleTypeId.name : null;
+            deal.vehicleTypeId = deal.vehicleTypeId && deal.vehicleTypeId._id ? deal.vehicleTypeId._id : deal.vehicleTypeId;
+            // Ensure createdBy and user fields are present per @deals.schema.js
+            if (deal.createdBy && typeof deal.createdBy === "object") {
+                deal.createdBy = deal.createdBy._id;
+            }
+            if (deal.user && typeof deal.user === "object") {
+                deal.user = deal.user._id;
+            }
+            groupMap[groupKey].deals.push(deal);
         });
 
-        // 3. Convert group map to array, sort by serviceName alphabetically or by serviceId if name missing
-        const groupedDeals = Object.values(groupMap)
-            .sort((a, b) => {
-                if (a.serviceName && b.serviceName) {
-                    return a.serviceName.localeCompare(b.serviceName);
-                }
+        // Convert to array, sort by dealType then name
+        let groupedDeals = Object.values(groupMap).sort((a, b) => {
+            if (a.dealType !== b.dealType) return a.dealType.localeCompare(b.dealType);
+            if (a.dealType === "Service" && b.dealType === "Service") {
+                if (a.serviceName && b.serviceName) return a.serviceName.localeCompare(b.serviceName);
                 if (a.serviceName) return -1;
                 if (b.serviceName) return 1;
-                // Fall back to serviceId string compare
-                if (a.serviceId && b.serviceId) {
-                    return String(a.serviceId).localeCompare(String(b.serviceId));
-                }
-                return 0;
-            });
+            }
+            if (a.dealType === "Parts" && b.dealType === "Parts") {
+                if (a.partName && b.partName) return a.partName.localeCompare(b.partName);
+                if (a.partName) return -1;
+                if (b.partName) return 1;
+            }
+            return 0;
+        });
 
         return res.status(200).json({
             success: true,

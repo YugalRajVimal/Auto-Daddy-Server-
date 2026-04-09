@@ -31,6 +31,13 @@ adminRouter.get("/carowners", (req, res) => adminController.getAllCarOwners(req,
 // Get all auto shop owners
 adminRouter.get("/autoshopowners", (req, res) => adminController.getAllAutoShopOwners(req, res));
 
+// Vehicle Type endpoints
+adminRouter.get("/vehicletypes", (req, res) => adminController.fetchVehicleTypes(req, res));
+adminRouter.post("/vehicletypes", (req, res) => adminController.addVehicleType(req, res));
+adminRouter.put("/vehicletypes/:id", (req, res) => adminController.updateVehicleType(req, res));
+adminRouter.delete("/vehicletypes/:id", (req, res) => adminController.deleteVehicleType(req, res));
+
+
 
 
 export default adminRouter;

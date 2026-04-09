@@ -1,52 +1,56 @@
 import mongoose from 'mongoose';
 
 const dealSchema = new mongoose.Schema({
-  productName: {
+  dealType: {
     type: String,
     required: true,
-    trim: true
+    enum: ['Service', 'Parts'],
   },
-  productImage: {
+  serviceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Services",
+    required: function() { return this.dealType === 'Service'; }
+  },
+  partName: {
     type: String,
-    required: false,
-    default: ''
+    required: function() { return this.dealType === 'Parts'; },
+    trim: true,
   },
   description: {
     type: String,
+    required: true,
+    trim: true,
     default: "",
   },
-  price: {
-    type: Number,
-    required: true,
-    min: 0
+  vehicleTypeId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "VehicleType",
+    required: false
   },
   discountedPrice: {
     type: Number,
     required: true,
     min: 0
   },
-  dealEnabled: {
-    type: Boolean,
-    default: false,
-  },
-  offersEndOnDate: {
+  offerEndsOnDate: {
     type: Date,
     required: true
   },
-  serviceId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "Services",
-    required: false
+  province: {
+    type: String,
+    required: true,
+    trim: true
   },
-  createdAt: {
-    type: Date,
-    default: Date.now
+  dealEnabled: {
+    type: Boolean,
+    required: true,
+    default: false,
   },
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "BusinessProfile",
-    required: false
-  },
+    required: true
+  }
 }, { timestamps: true });
 
 const DealModel = mongoose.model("Deal", dealSchema);

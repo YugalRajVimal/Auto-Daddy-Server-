@@ -180,6 +180,14 @@ autoShopRouter.put(
 
 // Deal routes for auto-shop business profile
 
+// Route to get all vehicle types and all services (for dropdowns etc)
+autoShopRouter.get(
+  "/vehicle-types-and-services",
+  jwtAuth,
+  (req, res) => autoShopController.getAllVehicleTypesAndServices(req, res)
+);
+
+
 // Create a new deal and link it to the business profile (accepts single file upload for productImage)
 autoShopRouter.post(
   "/my-deals",
