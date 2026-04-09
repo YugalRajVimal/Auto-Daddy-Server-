@@ -2,6 +2,7 @@ import DealModel from "../../Schema/deals.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
 import Services from "../../Schema/services.schema.js";
 import { User } from "../../Schema/user.schema.js";
+import VehicleType from "../../Schema/vehicle-type.schema.js";
 
 
 class AdminController {
@@ -162,7 +163,7 @@ async fetchServices(req, res) {
 
 async getAllCarOwners(req, res) {
   try {
-    // Find users with role 'carowner', select only specified fields, and populate references
+    console.log("[getAllCarOwners] Step 1: Fetching car owners from User collection...");
     let carOwners = await User.find(
       { role: "carowner" },
       {
@@ -190,15 +191,16 @@ async getAllCarOwners(req, res) {
       .populate({
         path: 'onboardedBy',
         model: 'User',
-        select: 'name email', // Optionally select name/email of who onboarded them
+        select: 'name email',
       })
       .lean();
 
-    // For each car owner, retrieve all JobCards where customerId matches the car owner's _id
+    console.log(`[getAllCarOwners] Step 1 result: Found ${carOwners.length} car owners`);
     // Gather all owner ids
     const ownerIds = carOwners.map(owner => owner._id);
+    console.log(`[getAllCarOwners] Step 2: Owner IDs -`, ownerIds);
 
-    // Bulk fetch all JobCards for these owners, and populate 'business', 'vehicleId', 'customerId', 'services'
+    console.log("[getAllCarOwners] Step 3: Fetching all JobCards for car owners...");
     const allJobCards = await JobCard.find({ customerId: { $in: ownerIds } })
       .populate({
         path: 'business',
@@ -211,52 +213,60 @@ async getAllCarOwners(req, res) {
       .populate({
         path: 'customerId',
         model: 'User',
-        select: 'name email' // or adjust as needed
+        select: 'name email'
       })
-      .populate({
-        path: 'services.id',
-        model: 'Services',
-      })
+     
       .lean();
 
-    // Debug - log each job card with required info
-    allJobCards.forEach((jobCard, idx) => {
-      console.log(`[JobCard ${idx}]`);
-      console.log('  _id:', jobCard._id);
-      console.log('  business:', jobCard.business?._id, jobCard.business?.businessName);
-      console.log('  vehicleId:', jobCard.vehicleId?._id);
-      console.log('  customerId:', jobCard.customerId?._id, jobCard.customerId?.name);
-      if (Array.isArray(jobCard.services)) {
-        jobCard.services.forEach((serviceObj, sidx) => {
-          console.log(`    Service[${sidx}]:`, serviceObj.id?._id, serviceObj.id?.serviceName);
-        });
-      }
-    });
+    console.log(`[getAllCarOwners] Step 3 result: Found ${allJobCards.length} job cards for given car owners`);
 
-    // Group JobCards by owner _id (customerId)
+    // Log job cards details for debugging at every step if not production
+    if (process.env.NODE_ENV !== 'production') {
+      allJobCards.forEach((jobCard, idx) => {
+        console.log(`[getAllCarOwners][JobCard ${idx}] _id:`, jobCard._id);
+        console.log('  business:', jobCard.business?._id, jobCard.business?.businessName);
+        console.log('  vehicleId:', jobCard.vehicleId?._id);
+        console.log('  customerId:', jobCard.customerId?._id, jobCard.customerId?.name);
+        if (Array.isArray(jobCard.services)) {
+          jobCard.services.forEach((serviceObj, sidx) => {
+            console.log(`    Service[${sidx}]:`, serviceObj.id?._id, serviceObj.id?.serviceName);
+          });
+        }
+      });
+    }
+
+    console.log("[getAllCarOwners] Step 4: Grouping job cards by owner");
     const jobCardsByOwner = {};
     for (const jobCard of allJobCards) {
       const ownerId = jobCard.customerId?._id
         ? jobCard.customerId._id.toString()
         : jobCard.customerId?.toString();
-      if (!ownerId) continue;
+      if (!ownerId) {
+        console.log("[getAllCarOwners][Warning] JobCard missing valid owner _id.", jobCard);
+        continue;
+      }
       if (!jobCardsByOwner[ownerId]) {
         jobCardsByOwner[ownerId] = [];
       }
       jobCardsByOwner[ownerId].push(jobCard);
     }
+    console.log("[getAllCarOwners] Step 4 result: Grouped JobCards by owner", Object.keys(jobCardsByOwner).length);
 
     // Attach jobCards for each owner
+    console.log("[getAllCarOwners] Step 5: Attaching jobs to respective owners...");
     carOwners = carOwners.map(owner => {
       const jobCards = jobCardsByOwner[owner._id.toString()] || [];
+      console.log(`[getAllCarOwners] Attaching ${jobCards.length} job cards to owner:`, owner._id);
       return {
         ...owner,
         jobCards
       };
     });
 
+    console.log("[getAllCarOwners] Step 6: Returning final data - carOwners with jobCards");
     res.status(200).json({ success: true, data: carOwners });
   } catch (err) {
+    console.log("[getAllCarOwners][Error]", err);
     res.status(500).json({ success: false, message: "Error fetching car owners", error: err.message });
   }
 }
@@ -389,6 +399,88 @@ async getAllAutoShopOwners(req, res) {
     res.status(500).json({ success: false, message: "Error fetching auto shop owners", error: err.message });
   }
 }
+
+
+
+// --- VEHICLE TYPE CONTROLLERS (CRUD) ---
+
+
+// Fetch all vehicle types
+async fetchVehicleTypes  (req, res) {
+  try {
+    const types = await VehicleType.find({});
+    res.status(200).json({ success: true, data: types });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error fetching vehicle types", error: err.message });
+  }
+};
+
+// Add a new vehicle type
+async addVehicleType  (req, res) {
+  try {
+    const { type } = req.body;
+    if (!type || typeof type !== "string" || !type.trim()) {
+      return res.status(400).json({ success: false, message: "Vehicle type is required and must be a non-empty string" });
+    }
+    // Prevent duplicate type (case-insensitive)
+    const exists = await VehicleType.findOne({ type: { $regex: new RegExp(`^${type.trim()}$`, 'i') } });
+    if (exists) {
+      return res.status(409).json({ success: false, message: "Vehicle type already exists" });
+    }
+    const vehicleType = new VehicleType({ type: type.trim() });
+    await vehicleType.save();
+    res.status(201).json({ success: true, data: vehicleType });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error adding vehicle type", error: err.message });
+  }
+};
+
+// Edit a vehicle type
+async updateVehicleType  (req, res) {
+  try {
+    const { id } = req.params;
+    const { type } = req.body;
+    if (!type || typeof type !== "string" || !type.trim()) {
+      return res.status(400).json({ success: false, message: "Vehicle type is required and must be a non-empty string" });
+    }
+    // Prevent updating to a duplicate type
+    const exists = await VehicleType.findOne({ 
+      _id: { $ne: id }, 
+      type: { $regex: new RegExp(`^${type.trim()}$`, 'i') } 
+    });
+    if (exists) {
+      return res.status(409).json({ success: false, message: "Another vehicle type with this name already exists" });
+    }
+
+    const updated = await VehicleType.findByIdAndUpdate(
+      id,
+      { type: type.trim() },
+      { new: true }
+    );
+    if (!updated) {
+      return res.status(404).json({ success: false, message: "Vehicle type not found" });
+    }
+    res.status(200).json({ success: true, data: updated });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error updating vehicle type", error: err.message });
+  }
+};
+
+// Delete a vehicle type
+async deleteVehicleType  (req, res) {
+  try {
+    const { id } = req.params;
+    const deleted = await VehicleType.findByIdAndDelete(id);
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: "Vehicle type not found" });
+    }
+    res.status(200).json({ success: true, message: "Vehicle type deleted", data: deleted });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error deleting vehicle type", error: err.message });
+  }
+};
+
+
 
 
 }
