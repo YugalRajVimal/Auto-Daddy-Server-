@@ -4214,119 +4214,9 @@ async editJobCard(req, res) {
  * Get all JobCards for the current AutoShop owner (business).
  * Returns job cards created by this user/business.
  */
+
+
 async getAllJobCards(req, res) {
-    try {
-        // Get the requesting user
-        const userId = req.user && req.user.id;
-        if (!userId) {
-            return res.status(401).json({ success: false, message: "Unauthorized" });
-        }
-
-        // Get the user's business profile
-        const user = await User.findById(userId).lean();
-        if (!user || !user.businessProfile) {
-            return res.status(404).json({ success: false, message: "AutoShop business profile not found" });
-        }
-
-        // --- Filter Handling (daily, weekly, monthly) ---
-        const {
-            dateType,
-            date,
-            week,
-            month,
-            year
-        } = req.query;
-
-        let createdAtMatch = {};
-        let _dateType = dateType || "daily";
-        let startDate, endDate;
-        const now = new Date();
-        if (_dateType === "daily") {
-            let localDate = date ? new Date(date) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            startDate = new Date(localDate.setHours(0, 0, 0, 0));
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + 1);
-        } else if (_dateType === "weekly") {
-            let current = week ? new Date(week) : new Date();
-            let day = current.getDay();
-            let diffToMonday = ((day + 6) % 7);
-            startDate = new Date(current);
-            startDate.setDate(current.getDate() - diffToMonday);
-            startDate.setHours(0, 0, 0, 0);
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + 7);
-        } else if (_dateType === "monthly") {
-            let _year = year ? Number(year) : now.getFullYear();
-            let _month;
-
-            if (typeof month !== "undefined" && month !== null) {
-                // Handle string month names, e.g. "february"
-                if (typeof month === "string" && isNaN(month)) {
-                    const monthNames = [
-                        "january", "february", "march", "april", "may", "june",
-                        "july", "august", "september", "october", "november", "december"
-                    ];
-                    _month = monthNames.findIndex(mn =>
-                        mn.startsWith(month.trim().toLowerCase())
-                    );
-                    if (_month === -1) _month = now.getMonth();
-                } else {
-                    // Allow month as integer, or zero-padded ("01", "02", etc)
-                    if (typeof month === "string" && month.match(/^\d{1,2}$/)) {
-                        let monthNum = Number(month);
-                        if (!isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
-                            _month = monthNum - 1; // Convert 1-12 to JS 0-indexed
-                        } else {
-                            _month = now.getMonth();
-                        }
-                    } else {
-                        // If month is already a number, use it directly (assume 0-based or 1-based)
-                        let monthNum = Number(month);
-                        if (!isNaN(monthNum)) {
-                            if (monthNum >= 1 && monthNum <= 12) {
-                                _month = monthNum - 1; // 1-based -> 0-based
-                            } else if (monthNum >= 0 && monthNum <= 11) {
-                                _month = monthNum;
-                            } else {
-                                _month = now.getMonth();
-                            }
-                        } else {
-                            _month = now.getMonth();
-                        }
-                    }
-                }
-            } else {
-                _month = now.getMonth();
-            }
-
-            startDate = new Date(_year, _month, 1, 0, 0, 0, 0);
-            endDate = new Date(_year, _month + 1, 1, 0, 0, 0, 0);
-        }
-
-        if (startDate && endDate) {
-            createdAtMatch.createdAt = { $gte: startDate, $lt: endDate };
-        }
-
-        // Find all job cards created by this business, within date filter if supplied
-        const jobCards = await JobCard.find({
-                business: user.businessProfile,
-                ...createdAtMatch
-            })
-            .populate([
-                { path: 'customerId', model: 'User', select: 'name phone email' },
-                { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' },
-            ])
-            .sort({ createdAt: -1 })
-            .lean();
-
-        return res.status(200).json({
-            success: true,
-            data: jobCards
-        });
-    } catch (err) {
-        console.error("[getAllJobCards] Error:", err);
-        return res.status(500).json({ success: false, message: "Failed to fetch JobCards", error: err.message });
-    }
 }
 
 /**
@@ -4646,7 +4536,6 @@ async getJobCardUsingJobCardId(req, res) {
         const businessId = user.businessProfile;
 
         let objectJobCardId, objectBusinessId;
-
         try {
             objectJobCardId = typeof jobCardId === "string" ? (Types.ObjectId.isValid(jobCardId) ? new Types.ObjectId(jobCardId) : null) : jobCardId;
             objectBusinessId = typeof businessId === "string" ? (Types.ObjectId.isValid(businessId) ? new Types.ObjectId(businessId) : null) : businessId;
@@ -4658,79 +4547,78 @@ async getJobCardUsingJobCardId(req, res) {
             return res.status(400).json({ success: false, message: "Invalid jobCardId or businessProfile ObjectId." });
         }
 
-        // Fetch the JobCard with deep population
-        const jobCardAggregatePipeline = [
+        // Fetch the JobCard and deeply populate required fields
+        const jobCard = await JobCard.findOne({
+            _id: objectJobCardId,
+            business: objectBusinessId
+        })
+        .populate([
             {
-                $match: {
-                    _id: objectJobCardId,
-                    business: objectBusinessId
-                }
+                path: 'customerId',
+                model: 'User',
+                select: 'name email phone pincode address'
             },
             {
-                $lookup: {
-                    from: "users",
-                    localField: "customerId",
-                    foreignField: "_id",
-                    as: "customer"
-                }
+                path: 'vehicleId',
+                model: 'Vehicle',
+                select: 'licensePlateNo make model'
             },
-            { $unwind: { path: "$customer", preserveNullAndEmptyArrays: true } },
             {
-                $lookup: {
-                    from: "vehicles",
-                    localField: "vehicleId",
-                    foreignField: "_id",
-                    as: "vehicle"
-                }
-            },
-            { $unwind: { path: "$vehicle", preserveNullAndEmptyArrays: true } },
-            {
-                $project: {
-                    _id: 1,
-                    jobNo: 1,
-                    status: 1,
-                    paymentStatus: 1,
-                    serviceType: 1,
-                    priorityLevel: 1,
-                    createdAt: 1,
-                    totalPayableAmount: 1,
-                    vehiclePhotos: 1,
-                    dealApplied: 1,
-                    odometerReading: 1,
-                    dueOdometerReading: 1,
-                    issueDescription: 1,
-                    services: 1,
-                    additionalNotes: 1,
-                    technicalRemarks: 1,
-                    labourCharge: 1,
-                    labourDuration: 1,
-                    customer: {
-                        _id: "$customer._id",
-                        name: "$customer.name",
-                        phoneNumber: "$customer.phoneNumber",
-                        email: "$customer.email"
-                    },
-                    vehicle: {
-                        _id: "$vehicle._id",
-                        brand: "$vehicle.brand",
-                        model: "$vehicle.model",
-                        regNo: "$vehicle.regNo",
-                        vin: "$vehicle.vin"
-                    }
-                }
+                path: 'business',
+                model: 'BusinessProfile',
+                select: 'businessName businessAddress pincode gst businessEmail businessPhone'
             }
-        ];
+        ]);
 
-        const [jobCardData] = await JobCard.aggregate(jobCardAggregatePipeline);
-
-        if (!jobCardData) {
+        if (!jobCard) {
             return res.status(404).json({ success: false, message: "JobCard not found for business or you do not have permission." });
         }
 
-        // Fetch business profile to get GST for GST aware totals
-        const businessProfile = await BusinessProfileModel.findById(businessId).lean();
-        let gstRate = businessProfile && typeof businessProfile.gst === "number" && !isNaN(businessProfile.gst) ? businessProfile.gst : 0;
-        let totalAmount = jobCardData.totalPayableAmount || 0;
+        // Prepare business object for response
+        const bp = jobCard.business || {};
+        const businessForResponse = {
+            _id: bp._id ? bp._id.toString() : "",
+            businessName: bp.businessName || "",
+            businessAddress: bp.businessAddress || "",
+            pincode: bp.pincode || "",
+            businessPhone: bp.businessPhone || "",
+            businessEmail: bp.businessEmail || "",
+            gst: (typeof bp.gst === "number" && !isNaN(bp.gst)) ? bp.gst : 0
+        };
+
+        // Prepare customer object for response
+        const cust = jobCard.customerId || {};
+        const customerForResponse = {
+            _id: cust._id ? cust._id.toString() : "",
+            name: cust.name || "",
+            email: cust.email || "",
+            phone: cust.phone || "",
+            pincode: cust.pincode || "",
+            address: cust.address || ""
+        };
+
+        // Prepare vehicle object for response
+        const veh = jobCard.vehicleId || {};
+        let makeObj = {};
+        // Accept "make" as { name, model } if present or try to extract if possible
+        if (veh.make && typeof veh.make === "object") {
+            makeObj.name = veh.make.name || "";
+            makeObj.model = veh.model || (veh.make.model || "");
+        } else {
+            makeObj = {
+                name: veh.make || "",
+                model: veh.model || ""
+            };
+        }
+        const vehicleForResponse = {
+            _id: veh._id ? veh._id.toString() : "",
+            licensePlateNo: veh.licensePlateNo || "",
+            make: makeObj
+        };
+
+        // GST and Payables calculation
+        let gstRate = (typeof bp.gst === "number" && !isNaN(bp.gst)) ? bp.gst : 0;
+        let totalAmount = jobCard.totalPayableAmount || 0;
         let gstAmount = 0;
         let totalPayableOnline = totalAmount;
         if (gstRate > 0) {
@@ -4738,21 +4626,58 @@ async getJobCardUsingJobCardId(req, res) {
             totalPayableOnline = Number((totalAmount + gstAmount).toFixed(2));
         }
 
-        // Add payable amounts to response
-        const responseData = {
-            ...jobCardData,
+        let invoiceTotal = Math.floor(totalPayableOnline);
+        let roundOff = Number((totalPayableOnline - invoiceTotal).toFixed(2));
+
+        // Compose main response object as required in format
+        const data = {
+            _id: jobCard._id ? jobCard._id.toString() : "",
+            business: businessForResponse,
+            customerId: customerForResponse,
+            vehicleId: vehicleForResponse,
+            odometerReading: jobCard.odometerReading,
+            dueOdometerReading: jobCard.dueOdometerReading,
+            issueDescription: jobCard.issueDescription,
+            serviceType: jobCard.serviceType,
+            priorityLevel: jobCard.priorityLevel,
+            services: Array.isArray(jobCard.services) ? jobCard.services.map(service => ({
+                service: service.service ? service.service.toString() : "",
+                subServices: Array.isArray(service.subServices)
+                    ? service.subServices.map(sub => ({
+                        name: sub.name,
+                        desc: sub.desc,
+                        price: sub.price
+                    }))
+                    : []
+            })) : [],
+            additionalNotes: jobCard.additionalNotes || "",
+            vehiclePhotos: Array.isArray(jobCard.vehiclePhotos) ? jobCard.vehiclePhotos : [],
+            totalPayableAmount: jobCard.totalPayableAmount || 0,
+            paymentStatus: jobCard.paymentStatus || "",
+            paymentMethod: jobCard.paymentMethod || "",
+            labourCharge: typeof jobCard.labourCharge === "number" ? jobCard.labourCharge : 0,
+            status: jobCard.status || "",
+            jobNo: jobCard.jobNo || "",
+            createdAt: jobCard.createdAt,
+            updatedAt: jobCard.updatedAt,
+            __v: typeof jobCard.__v === "number" ? jobCard.__v : 0,
+            unpaid: !!jobCard.unpaid,
+            invoiceNumber: jobCard.jobNo ? `INV-${jobCard.jobNo}` : "",
             payableAmounts: {
                 cash: totalAmount,
                 online: totalPayableOnline,
                 gstRate,
                 gstAmount,
+                invoiceTotal,
+                roundOff
             }
         };
 
         return res.status(200).json({
             success: true,
-            data: responseData
+            data
         });
+
     } catch (error) {
         console.error("[getJobCardUsingJobCardId] Error:", error);
         return res.status(500).json({
