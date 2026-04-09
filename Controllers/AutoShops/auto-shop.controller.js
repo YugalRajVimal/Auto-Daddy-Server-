@@ -4566,7 +4566,7 @@ async getJobCardUsingJobCardId(req, res) {
             {
                 path: 'business',
                 model: 'BusinessProfile',
-                select: 'businessName businessAddress pincode gst businessEmail businessPhone'
+                select: 'businessName businessAddress pincode gst businessHSTNumber businessEmail businessPhone'
             }
         ]);
 
@@ -4574,7 +4574,7 @@ async getJobCardUsingJobCardId(req, res) {
             return res.status(404).json({ success: false, message: "JobCard not found for business or you do not have permission." });
         }
 
-        // Prepare business object for response
+        // Prepare business object for response (added businessHSTNumber)
         const bp = jobCard.business || {};
         const businessForResponse = {
             _id: bp._id ? bp._id.toString() : "",
@@ -4583,7 +4583,8 @@ async getJobCardUsingJobCardId(req, res) {
             pincode: bp.pincode || "",
             businessPhone: bp.businessPhone || "",
             businessEmail: bp.businessEmail || "",
-            gst: (typeof bp.gst === "number" && !isNaN(bp.gst)) ? bp.gst : 0
+            gst: (typeof bp.gst === "number" && !isNaN(bp.gst)) ? bp.gst : 0,
+            businessHSTNumber: bp.businessHSTNumber || ""
         };
 
         // Prepare customer object for response
