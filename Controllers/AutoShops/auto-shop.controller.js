@@ -4217,6 +4217,118 @@ async editJobCard(req, res) {
 
 
 async getAllJobCards(req, res) {
+    try {
+        // Get the requesting user
+        const userId = req.user && req.user.id;
+        if (!userId) {
+            return res.status(401).json({ success: false, message: "Unauthorized" });
+        }
+
+        // Get the user's business profile
+        const user = await User.findById(userId).lean();
+        if (!user || !user.businessProfile) {
+            return res.status(404).json({ success: false, message: "AutoShop business profile not found" });
+        }
+
+        // --- Filter Handling (daily, weekly, monthly) ---
+        const {
+            dateType,
+            date,
+            week,
+            month,
+            year
+        } = req.query;
+
+        let createdAtMatch = {};
+        let _dateType = dateType || "daily";
+        let startDate, endDate;
+        const now = new Date();
+        if (_dateType === "daily") {
+            let localDate = date ? new Date(date) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            startDate = new Date(localDate.setHours(0, 0, 0, 0));
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 1);
+        } else if (_dateType === "weekly") {
+            let current = week ? new Date(week) : new Date();
+            let day = current.getDay();
+            let diffToMonday = ((day + 6) % 7);
+            startDate = new Date(current);
+            startDate.setDate(current.getDate() - diffToMonday);
+            startDate.setHours(0, 0, 0, 0);
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 7);
+        } else if (_dateType === "monthly") {
+            let _year = year ? Number(year) : now.getFullYear();
+            let _month;
+
+            if (typeof month !== "undefined" && month !== null) {
+                // Handle string month names, e.g. "february"
+                if (typeof month === "string" && isNaN(month)) {
+                    const monthNames = [
+                        "january", "february", "march", "april", "may", "june",
+                        "july", "august", "september", "october", "november", "december"
+                    ];
+                    _month = monthNames.findIndex(mn =>
+                        mn.startsWith(month.trim().toLowerCase())
+                    );
+                    if (_month === -1) _month = now.getMonth();
+                } else {
+                    // Allow month as integer, or zero-padded ("01", "02", etc)
+                    if (typeof month === "string" && month.match(/^\d{1,2}$/)) {
+                        let monthNum = Number(month);
+                        if (!isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
+                            _month = monthNum - 1; // Convert 1-12 to JS 0-indexed
+                        } else {
+                            _month = now.getMonth();
+                        }
+                    } else {
+                        // If month is already a number, use it directly (assume 0-based or 1-based)
+                        let monthNum = Number(month);
+                        if (!isNaN(monthNum)) {
+                            if (monthNum >= 1 && monthNum <= 12) {
+                                _month = monthNum - 1; // 1-based -> 0-based
+                            } else if (monthNum >= 0 && monthNum <= 11) {
+                                _month = monthNum;
+                            } else {
+                                _month = now.getMonth();
+                            }
+                        } else {
+                            _month = now.getMonth();
+                        }
+                    }
+                }
+            } else {
+                _month = now.getMonth();
+            }
+
+            startDate = new Date(_year, _month, 1, 0, 0, 0, 0);
+            endDate = new Date(_year, _month + 1, 1, 0, 0, 0, 0);
+        }
+
+        if (startDate && endDate) {
+            createdAtMatch.createdAt = { $gte: startDate, $lt: endDate };
+        }
+
+        // Find all job cards created by this business, within date filter if supplied
+        const jobCards = await JobCard.find({
+                business: user.businessProfile,
+                ...createdAtMatch
+            })
+            .populate([
+                { path: 'customerId', model: 'User', select: 'name phone email' },
+                { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' },
+            ])
+            .sort({ createdAt: -1 })
+            .lean();
+
+        return res.status(200).json({
+            success: true,
+            data: jobCards
+        });
+    } catch (err) {
+        console.error("[getAllJobCards] Error:", err);
+        return res.status(500).json({ success: false, message: "Failed to fetch JobCards", error: err.message });
+    }
 }
 
 /**
