@@ -2655,30 +2655,12 @@ async fetchMyDeals(req, res) {
         .populate({ path: "user", select: "name _id", strictPopulate: false })
         .lean();
 
-        // Group by dealType, and if Service, by serviceId, for Parts, by partName
-        let groupMap = {}; // { groupKey: { ... } }
+        // Separate Service and Parts deals
+        let serviceDeals = [];
+        let partsDeals = [];
+
         deals.forEach(deal => {
-            let groupKey;
-            let serviceName = null, partName = null;
-            if (deal.dealType === "Service") {
-                groupKey = `Service:${deal.serviceId && deal.serviceId._id ? String(deal.serviceId._id) : "null"}`;
-                serviceName = deal.serviceId && deal.serviceId.name ? deal.serviceId.name : null;
-            } else if (deal.dealType === "Parts") {
-                groupKey = `Parts:${deal.partName || "null"}`;
-                partName = deal.partName || null;
-            } else {
-                groupKey = "Other:null";
-            }
-            if (!groupMap[groupKey]) {
-                groupMap[groupKey] = {
-                    dealType: deal.dealType,
-                    serviceId: (deal.serviceId && deal.serviceId._id) ? deal.serviceId._id : null,
-                    serviceName: serviceName,
-                    partName: partName,
-                    deals: []
-                };
-            }
-            // Set serviceId, partName, vehicleTypeId info in each deal object (flatter for frontend use)
+            // flatten populated fields for frontend use
             if (deal.dealType === "Service" && deal.serviceId && typeof deal.serviceId === "object") {
                 deal.serviceName = deal.serviceId.name;
                 deal.serviceId = deal.serviceId._id;
@@ -2688,35 +2670,40 @@ async fetchMyDeals(req, res) {
             }
             deal.vehicleTypeName = deal.vehicleTypeId && typeof deal.vehicleTypeId === "object" ? deal.vehicleTypeId.name : null;
             deal.vehicleTypeId = deal.vehicleTypeId && deal.vehicleTypeId._id ? deal.vehicleTypeId._id : deal.vehicleTypeId;
-            // Ensure createdBy and user fields are present per @deals.schema.js
             if (deal.createdBy && typeof deal.createdBy === "object") {
                 deal.createdBy = deal.createdBy._id;
             }
             if (deal.user && typeof deal.user === "object") {
                 deal.user = deal.user._id;
             }
-            groupMap[groupKey].deals.push(deal);
+
+            if (deal.dealType === "Service") {
+                serviceDeals.push(deal);
+            } else if (deal.dealType === "Parts") {
+                partsDeals.push(deal);
+            }
         });
 
-        // Convert to array, sort by dealType then name
-        let groupedDeals = Object.values(groupMap).sort((a, b) => {
-            if (a.dealType !== b.dealType) return a.dealType.localeCompare(b.dealType);
-            if (a.dealType === "Service" && b.dealType === "Service") {
-                if (a.serviceName && b.serviceName) return a.serviceName.localeCompare(b.serviceName);
-                if (a.serviceName) return -1;
-                if (b.serviceName) return 1;
-            }
-            if (a.dealType === "Parts" && b.dealType === "Parts") {
-                if (a.partName && b.partName) return a.partName.localeCompare(b.partName);
-                if (a.partName) return -1;
-                if (b.partName) return 1;
-            }
+        // Sort serviceDeals by serviceName
+        serviceDeals.sort((a, b) => {
+            if (a.serviceName && b.serviceName) return String(a.serviceName).localeCompare(String(b.serviceName));
+            if (a.serviceName) return -1;
+            if (b.serviceName) return 1;
+            return 0;
+        });
+
+        // Sort partsDeals by partName
+        partsDeals.sort((a, b) => {
+            if (a.partName && b.partName) return String(a.partName).localeCompare(String(b.partName));
+            if (a.partName) return -1;
+            if (b.partName) return 1;
             return 0;
         });
 
         return res.status(200).json({
             success: true,
-            data: groupedDeals
+            serviceDeals,
+            partsDeals
         });
 
     } catch (error) {
