@@ -1845,17 +1845,47 @@ async addToMyServices(req, res) {
 
             // See if this service is already present for this business
             const msIdx = presentServiceIdx[serviceId];
+
+            // If service is present, get list of currently existing sub service names
+            let existingSubServiceNames = new Set();
+            if (msIdx !== undefined) {
+                const exSubServices = businessProfile.myServices[msIdx].subServices || [];
+                for (const sub of exSubServices) {
+                    if (typeof sub.name === "string") {
+                        existingSubServiceNames.add(sub.name.trim().toLowerCase());
+                    }
+                }
+            }
+
             if (msIdx === undefined) {
-                // Not present at all: Add it
+                // Not present at all: Add it (but check for duplicate subservice names in new list)
+                const seenNames = new Set();
+                for (const sub of incomingSubServices) {
+                    if (typeof sub.name === "string") {
+                        const lower = sub.name.trim().toLowerCase();
+                        if (seenNames.has(lower)) {
+                            return res.status(400).json({ message: `Duplicate subService name "${sub.name}" in submitted list for service "${serviceBlock.id}".` });
+                        }
+                        seenNames.add(lower);
+                    }
+                }
                 businessProfile.myServices.push({
                     service: serviceBlock.id,
                     subServices: incomingSubServices
                 });
             } else {
-                // Already present: append only those subservices with unique name/desc/price
-                const exSubServices = businessProfile.myServices[msIdx].subServices || [];
+                // Already present: For any incoming subService, check if the name already exists 
+                for (const sub of incomingSubServices) {
+                    if (typeof sub.name === "string") {
+                        const lower = sub.name.trim().toLowerCase();
+                        if (existingSubServiceNames.has(lower)) {
+                            return res.status(400).json({ message: `SubService with name "${sub.name}" already exists for service "${serviceBlock.id}".` });
+                        }
+                    }
+                }
 
                 // We'll use (name+desc+price) as uniqueness for custom subServices
+                const exSubServices = businessProfile.myServices[msIdx].subServices || [];
                 const exSet = new Set(
                     exSubServices.map(s =>
                         `${s.name?.trim()}|${(s.desc||"").trim()}|${typeof s.price === "number" ? s.price : ""}`
