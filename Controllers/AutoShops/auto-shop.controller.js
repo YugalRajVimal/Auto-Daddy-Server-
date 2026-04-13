@@ -2188,6 +2188,7 @@ async editMyServices(req, res) {
           }
           carDetailsGrouped.push({
             company: company.companyName,
+            id:company._id,
             models: modelsList
           });
         }
