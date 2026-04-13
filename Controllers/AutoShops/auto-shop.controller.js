@@ -1703,9 +1703,6 @@ async getAllMyServices(req, res) {
             return res.status(404).json({ message: "Business profile not found." });
         }
 
-        // Get all master services directly (for send-all behavior)
-        const allMasterServices = await servicesSchema.find({}).lean();
-
         // Find business profile (use .lean() for perf)
         const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
         if (!businessProfile) {
@@ -1715,30 +1712,58 @@ async getAllMyServices(req, res) {
         const myServices = Array.isArray(businessProfile.myServices)
             ? businessProfile.myServices : [];
 
-        // Get set of service string IDs the user actually owns
-        const ownedServiceIds = new Set(
-            myServices.map(ms => ms.service && ms.service.toString())
-        );
+        // Gather service IDs from myServices
+        const myServiceIds = myServices.map(ms => ms.service && ms.service.toString()).filter(Boolean);
 
-        // Prepare the response: 
-        // - If in myServices, send the subServices as stored.
-        // - If NOT in myServices, send with empty subServices
-        const result = allMasterServices.map(serviceDoc => {
-            const owned = myServices.find(ms => ms.service && ms.service.toString() === serviceDoc._id.toString());
-            return {
-                service: {
-                    id: serviceDoc._id,
-                    name: serviceDoc.name,
-                    desc: serviceDoc.desc
-                },
-                selectedSubServices: owned && Array.isArray(owned.subServices)
-                    ? owned.subServices.map(sub => ({
-                        name: sub.name,
-                        desc: sub.desc,
-                        price: sub.price
-                    }))
-                    : []
-            };
+        // Fetch all master services
+        const allMasterServices = await servicesSchema.find({}).lean();
+
+        // Map for quick lookup by _id.toString()
+        const masterServicesMap = {};
+        for (const svc of allMasterServices) {
+            masterServicesMap[svc._id.toString()] = svc;
+        }
+
+        // Map myServices to response format (with selected subservices)
+        const result = [];
+
+        // Track the IDs in myServices we found
+        const foundMyServiceIdsSet = new Set();
+
+        myServices.forEach(ms => {
+            const serviceIdStr = ms.service && ms.service.toString();
+            if (serviceIdStr && masterServicesMap[serviceIdStr]) {
+                foundMyServiceIdsSet.add(serviceIdStr);
+                result.push({
+                    service: {
+                        id: masterServicesMap[serviceIdStr]._id,
+                        name: masterServicesMap[serviceIdStr].name,
+                        desc: masterServicesMap[serviceIdStr].desc,
+                    },
+                    selectedSubServices: Array.isArray(ms.subServices)
+                        ? ms.subServices.map(sub => ({
+                            name: sub.name,
+                            desc: sub.desc,
+                            price: sub.price
+                        }))
+                        : []
+                });
+            }
+        });
+
+        // Add services NOT in myServices, with empty subservices
+        allMasterServices.forEach(masterSvc => {
+            const svcIdString = masterSvc._id.toString();
+            if (!foundMyServiceIdsSet.has(svcIdString)) {
+                result.push({
+                    service: {
+                        id: masterSvc._id,
+                        name: masterSvc.name,
+                        desc: masterSvc.desc,
+                    },
+                    selectedSubServices: []
+                });
+            }
         });
 
         return res.status(200).json({
