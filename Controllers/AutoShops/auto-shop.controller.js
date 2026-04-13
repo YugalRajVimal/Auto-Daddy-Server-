@@ -2169,7 +2169,7 @@ async editMyServices(req, res) {
       ]);
 
       // Group car details by company, then for each company 
-      // generate objects of {model, year}
+      // generate objects of {id, model, year}
       const carDetailsGrouped = [];
       for (const company of carDetails) {
         if (company?.companyName && Array.isArray(company.models)) {
@@ -2178,6 +2178,8 @@ async editMyServices(req, res) {
             if (model?.modelName && Array.isArray(model.years)) {
               for (const year of model.years) {
                 modelsList.push({
+                  id: company._id?.toString?.() ?? undefined,
+                  name:company.companyName,
                   model: model.modelName,
                   year: year
                 });
