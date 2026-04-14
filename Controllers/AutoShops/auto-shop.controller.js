@@ -95,6 +95,287 @@ class AutoShopController {
         }
     }
 
+
+    /**
+     * Dashboard API: Returns summarized business profile and sales/income overview,
+     * as well as sample values for other dashboard widgets.
+     * - Real business info: businessName, businessContactNo, idBusinessActive (profile active), 
+     *   incomeOverview {totalSale, received, pending} for daily, weekly, monthly
+     * - Sample/placeholder data: subscriptionDaysLeftCount, thoughtOfTheDay, aboutUs, privacyPolicy, FAQs, Documents, Disclaimer
+     */
+    /**
+     * Dashboard API: Returns summarized business profile and sales/income overview,
+     * as well as sample values for other dashboard widgets.
+     * Calculates jobCard income correctly (including GST for online payments) similar to getAllPaidJobCards.
+     */
+    async getDashboardDataNew(req, res) {
+        try {
+            const userId = req.user && req.user.id;
+            if (!userId) {
+                return res.status(401).json({ message: "Unauthorized. User ID missing." });
+            }
+
+            // Fetch user with businessProfile
+            const user = await User.findById(userId).lean();
+            if (!user || !user.businessProfile) {
+                return res.status(404).json({ message: "Business profile not found." });
+            }
+
+            // Fetch business profile (with GST)
+            const businessProfile = await BusinessProfileModel.findById(
+                user.businessProfile,
+                "businessName businessPhone isBusinessActive gst"
+            ).lean();
+            if (!businessProfile) {
+                return res.status(404).json({ message: "Business profile not found." });
+            }
+
+            const businessName = businessProfile.businessName || null;
+            const businessContactNo = businessProfile.businessPhone || null;
+            const idBusinessActive = businessProfile.isBusinessActive || null;
+
+            // Get the GST rate if exists and is numeric, else 0
+            let businessGst = 0;
+            if (typeof businessProfile.gst === "number" && !isNaN(businessProfile.gst)) {
+                businessGst = businessProfile.gst;
+            }
+
+            // Parse query params for dateType and date range calculation
+            let { dateType, date, month, year } = req.query;
+            dateType = (dateType || 'daily').toLowerCase();
+
+            const now = new Date();
+            let start, end;
+
+            // Helper to get start and end of selected period
+            const MONTH_NAME_TO_INDEX = {
+                'january': 0, 'february': 1, 'march': 2, 'april': 3,
+                'may': 4, 'june': 5, 'july': 6, 'august': 7,
+                'september': 8, 'october': 9, 'november': 10, 'december': 11
+            };
+
+            if (dateType === 'daily') {
+                let targetDate;
+                if (date) {
+                    targetDate = new Date(date);
+                    if (isNaN(targetDate.getTime())) {
+                        return res.status(400).json({ message: "Invalid date format for daily data." });
+                    }
+                } else {
+                    targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                }
+                start = new Date(targetDate.setHours(0, 0, 0, 0));
+                end = new Date(start);
+                end.setDate(start.getDate() + 1);
+            } else if (dateType === 'weekly') {
+                let baseDate = now;
+                if (date) {
+                    baseDate = new Date(date);
+                    if (isNaN(baseDate.getTime())) {
+                        return res.status(400).json({ message: "Invalid date format for weekly data." });
+                    }
+                } else {
+                    baseDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                }
+                // Week starts on Monday
+                const weekday = baseDate.getDay() || 7;
+                start = new Date(baseDate);
+                start.setDate(baseDate.getDate() - (weekday - 1));
+                start.setHours(0,0,0,0);
+                end = new Date(start);
+                end.setDate(start.getDate() + 7);
+            } else if (dateType === 'monthly') {
+                let m, y;
+                if (month && year) {
+                    let monthRaw = month.toString().trim().toLowerCase();
+                    if (!isNaN(monthRaw)) {
+                        m = parseInt(monthRaw, 10) - 1; // 0-based
+                        if (isNaN(m) || m < 0 || m > 11) {
+                            return res.status(400).json({ message: "Invalid month for monthly data." });
+                        }
+                    } else if (MONTH_NAME_TO_INDEX.hasOwnProperty(monthRaw)) {
+                        m = MONTH_NAME_TO_INDEX[monthRaw];
+                    } else {
+                        return res.status(400).json({ message: "Invalid month name for monthly data." });
+                    }
+                    y = parseInt(year, 10);
+                    if (isNaN(y)) {
+                        return res.status(400).json({ message: "Invalid year for monthly data." });
+                    }
+                } else {
+                    m = now.getMonth();
+                    y = now.getFullYear();
+                }
+                start = new Date(y, m, 1, 0, 0, 0, 0);
+                end = new Date(y, m + 1, 1, 0, 0, 0, 0);
+            } else {
+                return res.status(400).json({ message: "Invalid 'dateType'. Must be one of 'daily', 'weekly', 'monthly'." });
+            }
+
+            // Fetch all jobCards in this business and date window, fetch required fields only
+            const jobCards = await JobCard.find(
+                {
+                    business: user.businessProfile,
+                    createdAt: { $gte: start, $lt: end }
+                },
+                "totalPayableAmount amountPaid paymentStatus paymentMethod"
+            ).lean();
+
+            // Calculate correctly: 
+            // - For paid cards: 
+            //    - If Online, sum amountPaid + GST on paid
+            //    - If Cash, sum as is
+            // - For pending: totalPayableAmount - amountPaid
+            // - For total sale: totalPayableAmount sum (not amountPaid)
+            let totalSale = 0;
+            let received = 0;
+            let pending = 0;
+
+            for (const card of jobCards) {
+                const total = typeof card.totalPayableAmount === "number" ? card.totalPayableAmount : 0;
+                const paid = typeof card.amountPaid === "number" ? card.amountPaid : 0;
+
+                totalSale += total;
+
+                if (card.paymentStatus === "Paid") {
+                    if (card.paymentMethod === "Online") {
+                        const gstExtra = businessGst ? (paid * businessGst) / 100 : 0;
+                        received += paid + gstExtra;
+                    } else {
+                        // Cash
+                        received += paid;
+                    }
+                }
+                // Pending calculation (total minus paid if not already paid)
+                pending += total - paid;
+            }
+
+            // Round off
+            totalSale = Math.round(totalSale * 100) / 100;
+            received = Math.round(received * 100) / 100;
+            pending = Math.round(pending * 100) / 100;
+
+            // Income overview object based on dateType
+            let incomeOverview = {};
+            if (dateType === 'daily') {
+                incomeOverview.daily = {
+                    date: start.toISOString().slice(0, 10),
+                    totalSale,
+                    received,
+                    pending
+                };
+            } else if (dateType === 'weekly') {
+                incomeOverview.weekly = {
+                    weekStart: start.toISOString().slice(0, 10),
+                    weekEnd: (new Date(end - 1)).toISOString().slice(0, 10),
+                    totalSale,
+                    received,
+                    pending
+                };
+            } else if (dateType === 'monthly') {
+                incomeOverview.monthly = {
+                    month: (start.getMonth() + 1).toString().padStart(2, '0'),
+                    year: start.getFullYear(),
+                    totalSale,
+                    received,
+                    pending
+                };
+            }
+
+            // --- Sample & static data
+            const subscriptionDaysLeftCount = 13;
+            const thoughtOfTheDay = "Push yourself, because no one else is going to do it for you.";
+            const aboutUs = {
+                heading: "About Our Auto Shop",
+                desc: "We are committed to providing top-notch automobile services for all makes and models. Customer satisfaction is our priority."
+            };
+            const privacyPolicy = {
+                heading: "Privacy Policy",
+                desc: "Your privacy is important to us. All your data is handled securely and never shared with third parties without consent."
+            };
+            const FAQs = {
+                heading: "Frequently Asked Questions",
+                desc: "1. What services do you provide?\n2. What payment methods are accepted?\n3. How do I book a service?"
+            };
+            const Documents = {
+                heading: "Important Documents",
+                desc: "Here you'll find warranty, registration, and insurance documents required for various services."
+            };
+            const Disclaimer = {
+                heading: "Disclaimer",
+                desc: "All repairs are subject to part availability. Pricing may vary based on model and condition."
+            };
+
+            return res.status(200).json({
+                success: true,
+                businessName,
+                businessContactNo,
+                idBusinessActive,
+                incomeOverview,
+                subscriptionDaysLeftCount,
+                thoughtOfTheDay,
+                aboutUs,
+                privacyPolicy,
+                FAQs,
+                Documents,
+                Disclaimer
+            });
+
+        } catch (error) {
+            console.error("[getDashboardDataNew] - Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    }
+
+    /**
+     * Update the active status (`isBusinessActive`) for the current user's business profile.
+     * Expects: { isBusinessActive: Boolean } in body.
+     * Accessible to autoshopowner users only.
+     */
+    async updateBusinessActiveStatus(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
+            }
+
+            // Only allow autoshopowner
+            const user = await User.findById(userId)
+                .select("role businessProfile")
+                .lean();
+            if (!user || user.role !== "autoshopowner") {
+                return res.status(404).json({ message: "Autoshopowner user not found." });
+            }
+            if (!user.businessProfile) {
+                return res.status(404).json({ message: "Business profile not found for user." });
+            }
+
+            const { isBusinessActive } = req.body;
+            if (typeof isBusinessActive !== "boolean") {
+                return res.status(400).json({ message: "`isBusinessActive` must be a boolean value." });
+            }
+
+            const updatedBusinessProfile = await BusinessProfileModel.findByIdAndUpdate(
+                user.businessProfile,
+                { isBusinessActive },
+                { new: true }
+            ).lean();
+
+            if (!updatedBusinessProfile) {
+                return res.status(404).json({ message: "Business profile not found." });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "Business active status updated successfully.",
+                businessProfile: updatedBusinessProfile
+            });
+        } catch (error) {
+            console.error("[updateBusinessActiveStatus]", error);
+            return res.status(500).json({ message: "Failed to update business active status.", error: error.message });
+        }
+    }
+
     //Profile
 /**
  * Get current user's business profile.

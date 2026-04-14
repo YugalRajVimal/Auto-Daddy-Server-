@@ -47,6 +47,9 @@ const businessProfileSchema = new Schema({
   teamMembers: [teamMemberSchema],
   businessLogo: { type: String },      // URL or file path to the logo
 
+  // Business active status
+  isBusinessActive: { type: Boolean, default: true },
+
   // Nested myServices array, each containing a reference to a main service and selected subservices (nested like services schema)
   myServices: [myServiceSchema],
 

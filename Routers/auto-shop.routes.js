@@ -24,6 +24,21 @@ autoShopRouter.get(
   (req, res) => autoShopController.getDashboardDetails(req, res)
 );
 
+// Route to get the NEW dashboard details for the autoshopowner (protected, requires JWT)
+autoShopRouter.get(
+  "/dashboard-details-new",
+  jwtAuth,
+  (req, res) => autoShopController.getDashboardDataNew(req, res)
+);
+
+// Route to update the active status (isBusinessActive) for the current user's business profile
+autoShopRouter.put(
+  "/update-business-active-status",
+  jwtAuth,
+  (req, res) => autoShopController.updateBusinessActiveStatus(req, res)
+);
+
+
 //Profiles APIS
 // Route to get the current autoshopowner's business profile (protected, requires JWT)
 autoShopRouter.get(
