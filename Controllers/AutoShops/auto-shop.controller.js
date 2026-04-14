@@ -2616,27 +2616,33 @@ async fetchMyDeals(req, res) {
             typeof id === "string" ? new mongoose.Types.ObjectId(id) : id
         );
 
-        // Fetch deals, populate servicesId for Service deals (just for name display)
+        // Fetch all deals for this business, along with service details if dealType Service
         const deals = await DealModel.find({
             _id: { $in: dealIds },
             createdBy: businessProfile._id
         })
-            .populate({ path: "servicesId", select: "name", strictPopulate: false })
+            .populate({ path: "serviceId", select: "name desc", strictPopulate: false })
             .populate({ path: "createdBy", select: "name _id", strictPopulate: false })
             .lean();
 
-        // Separate Service and Parts deals
         let serviceDeals = [];
         let partsDeals = [];
 
         deals.forEach(deal => {
             if (deal.dealType === "Service") {
-                deal.servicesName = deal.servicesId && deal.servicesId.name;
-                deal.servicesId = deal.servicesId && deal.servicesId._id ? deal.servicesId._id : deal.servicesId;
+                // Attach full service details from serviceId
+                let serviceObj = null;
+                if (deal.serviceId && (deal.serviceId.name || deal.serviceId.desc)) {
+                    serviceObj = {
+                        _id: deal.serviceId._id,
+                        name: deal.serviceId.name,
+                        desc: deal.serviceId.desc
+                    };
+                }
                 serviceDeals.push({
                     dealType: deal.dealType,
-                    servicesId: deal.servicesId,
-                    servicesName: deal.servicesName,
+                    service: serviceObj,
+                    serviceId: serviceObj ? serviceObj._id : (deal.serviceId && deal.serviceId._id ? deal.serviceId._id : deal.serviceId),
                     description: deal.description,
                     discountedPrice: deal.discountedPrice,
                     offerEndsOnDate: deal.offerEndsOnDate,
@@ -2656,7 +2662,7 @@ async fetchMyDeals(req, res) {
                     selectedVehicle = {
                         id: deal.selectedVehicle.id,
                         name: deal.selectedVehicle.name,
-                        modelName: deal.selectedVehicle.modelName,
+                        model: deal.selectedVehicle.model, // Use 'model' as per deals.schema.js
                         year: deal.selectedVehicle.year
                     };
                 }
@@ -2673,12 +2679,11 @@ async fetchMyDeals(req, res) {
             }
         });
 
-        // Sort services deals by servicesName, parts by partName
+        // Sort services deals by service name, parts by partName
         serviceDeals.sort((a, b) => {
-            if (a.servicesName && b.servicesName) return String(a.servicesName).localeCompare(String(b.servicesName));
-            if (a.servicesName) return -1;
-            if (b.servicesName) return 1;
-            return 0;
+            const nameA = a.service && a.service.name ? String(a.service.name) : "";
+            const nameB = b.service && b.service.name ? String(b.service.name) : "";
+            return nameA.localeCompare(nameB);
         });
         partsDeals.sort((a, b) => {
             if (a.partName && b.partName) return String(a.partName).localeCompare(String(b.partName));
