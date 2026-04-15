@@ -390,6 +390,16 @@ autoShopRouter.get(
 );
 
 
+// Website Template Management Routes
+
+
+
+// Fetch all website templates
+autoShopRouter.get(
+  "/website-templates",
+  jwtAuth,
+  (req, res) => autoShopController.fetchWebsiteTemplates(req, res)
+);
 
 
 

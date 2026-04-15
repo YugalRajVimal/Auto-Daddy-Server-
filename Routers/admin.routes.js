@@ -38,6 +38,30 @@ adminRouter.put("/vehicletypes/:id", (req, res) => adminController.updateVehicle
 adminRouter.delete("/vehicletypes/:id", (req, res) => adminController.deleteVehicleType(req, res));
 
 
+// Create a new website template
+adminRouter.post(
+  "/website-templates",
+  (req, res) => adminController.createWebsiteTemplate(req, res)
+);
+
+// Edit an existing website template by ID
+adminRouter.put(
+  "/website-templates/:id",
+  (req, res) => adminController.editWebsiteTemplate(req, res)
+);
+
+// Delete a website template by ID
+adminRouter.delete(
+  "/website-templates/:id",
+  (req, res) => adminController.deleteWebsiteTemplate(req, res)
+);
+
+// Fetch all website templates
+adminRouter.get(
+  "/website-templates",
+  (req, res) => adminController.fetchWebsiteTemplates(req, res)
+);
+
 
 
 export default adminRouter;

@@ -10,6 +10,7 @@ import Services from "../../Schema/services.schema.js";
 import counterSchema from "../../Schema/counter.schema.js";
 import VehicleType from "../../Schema/vehicle-type.schema.js";
 import CarDetailsModel from "../../Schema/CarDetails.schema.js";
+import WebsiteTemplateSchema from "../../Schema/WebsiteTemplateSchema.js";
 
 
 class AutoShopController {
@@ -5370,6 +5371,22 @@ async collectPayment(req, res) {
         }
     }
 
+
+
+  /**
+   * Fetch all website templates.
+   * GET /api/autoshop/website-templates
+   */
+  async fetchWebsiteTemplates(req, res) {
+    try {
+        
+        const templates = await WebsiteTemplateSchema.find({}).lean();
+        return res.status(200).json({ success: true, data: templates });
+    } catch (err) {
+        console.error("[fetchWebsiteTemplates] Error:", err);
+        return res.status(500).json({ message: "Failed to fetch website templates", error: err.message });
+    }
+}
 
 
 

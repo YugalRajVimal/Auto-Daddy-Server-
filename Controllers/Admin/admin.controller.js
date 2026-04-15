@@ -3,6 +3,7 @@ import JobCard from "../../Schema/jobCard.schema.js";
 import Services from "../../Schema/services.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import VehicleType from "../../Schema/vehicle-type.schema.js";
+import WebsiteTemplateSchema from "../../Schema/WebsiteTemplateSchema.js";
 
 
 class AdminController {
@@ -479,6 +480,106 @@ async deleteVehicleType  (req, res) {
     res.status(500).json({ success: false, message: "Error deleting vehicle type", error: err.message });
   }
 };
+
+
+    /**
+     * Create a new website template.
+     * POST /api/autoshop/website-templates
+     */
+    async createWebsiteTemplate(req, res) {
+      try {
+          const { name, desc, templateLink } = req.body;
+          if (!name || !desc || !templateLink) {
+              return res.status(400).json({ message: "name, desc, and templateLink are required." });
+          }
+
+          // Check for duplicate name
+          const existing = await WebsiteTemplateSchema.findOne({ name });
+          if (existing) {
+              return res.status(409).json({ message: "A template with this name already exists." });
+          }
+
+          const newTemplate = await WebsiteTemplateSchema.create({ name, desc, templateLink });
+          return res.status(201).json({ success: true, data: newTemplate });
+      } catch (err) {
+          console.error("[createWebsiteTemplate] Error:", err);
+          return res.status(500).json({ message: "Failed to create website template", error: err.message });
+      }
+  }
+
+  /**
+   * Edit an existing website template.
+   * PUT /api/autoshop/website-templates/:id
+   */
+  async editWebsiteTemplate(req, res) {
+      try {
+          const { id } = req.params;
+          const { name, desc, templateLink } = req.body;
+          if (!id) {
+              return res.status(400).json({ message: "id parameter is required." });
+          }
+
+          // If updating name, check for duplicate (excluding current template)
+          if (name) {
+              const exists = await WebsiteTemplateSchema.findOne({ name, _id: { $ne: id } });
+              if (exists) {
+                  return res.status(409).json({ message: "A template with this name already exists." });
+              }
+          }
+          
+          const updateFields = {};
+          if (name !== undefined) updateFields.name = name;
+          if (desc !== undefined) updateFields.desc = desc;
+          if (templateLink !== undefined) updateFields.templateLink = templateLink;
+
+          const updated = await WebsiteTemplateSchema.findByIdAndUpdate(id, updateFields, { new: true });
+          if (!updated) {
+              return res.status(404).json({ message: "Website template not found" });
+          }
+          return res.status(200).json({ success: true, data: updated });
+      } catch (err) {
+          console.error("[editWebsiteTemplate] Error:", err);
+          return res.status(500).json({ message: "Failed to edit website template", error: err.message });
+      }
+  }
+
+  /**
+   * Delete a website template by ID.
+   * DELETE /api/autoshop/website-templates/:id
+   */
+  async deleteWebsiteTemplate(req, res) {
+      try {
+          const { id } = req.params;
+          if (!id) {
+              return res.status(400).json({ message: "id parameter is required." });
+          }
+          
+          const deleted = await WebsiteTemplateSchema.findByIdAndDelete(id);
+          if (!deleted) {
+              return res.status(404).json({ message: "Website template not found." });
+          }
+          return res.status(200).json({ success: true, message: "Website template deleted." });
+      } catch (err) {
+          console.error("[deleteWebsiteTemplate] Error:", err);
+          return res.status(500).json({ message: "Failed to delete website template", error: err.message });
+      }
+  }
+
+  /**
+   * Fetch all website templates.
+   * GET /api/autoshop/website-templates
+   */
+  async fetchWebsiteTemplates(req, res) {
+      try {
+          
+          const templates = await WebsiteTemplateSchema.find({}).lean();
+          return res.status(200).json({ success: true, data: templates });
+      } catch (err) {
+          console.error("[fetchWebsiteTemplates] Error:", err);
+          return res.status(500).json({ message: "Failed to fetch website templates", error: err.message });
+      }
+  }
+
 
 
 
