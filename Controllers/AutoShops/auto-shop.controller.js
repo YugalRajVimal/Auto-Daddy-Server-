@@ -116,11 +116,30 @@ class AutoShopController {
                 return res.status(401).json({ message: "Unauthorized. User ID missing." });
             }
 
-            // Fetch user with businessProfile
-            const user = await User.findById(userId).lean();
+            // Fetch user with businessProfile and user details for business user
+            const user = await User.findById(userId)
+                .select(
+                    "name email countryCode phone pincode address profilePhoto isDisabled isProfileComplete businessProfile"
+                )
+                .lean();
             if (!user || !user.businessProfile) {
                 return res.status(404).json({ message: "Business profile not found." });
             }
+
+            // Prepare business user details according to schema/user.schema.js (1-70)
+            // Including: name, email, countryCode, phone, pincode, address, profilePhoto, isDisabled, isProfileComplete
+            const businessUserDetails = {
+                name: user.name || null,
+                email: user.email || null,
+                countryCode: user.countryCode || null,
+                phone: user.phone || null,
+                pincode: user.pincode || null,
+                address: user.address || null,
+                profilePhoto: user.profilePhoto || null,
+                isDisabled: typeof user.isDisabled === "boolean" ? user.isDisabled : false,
+                isProfileComplete: typeof user.isProfileComplete === "boolean" ? user.isProfileComplete : false,
+                // Optionally add any other "business user" fields needed here from user.schema.js
+            };
 
             // Fetch business profile (with GST)
             const businessProfile = await BusinessProfileModel.findById(
@@ -319,7 +338,8 @@ class AutoShopController {
                 privacyPolicy,
                 FAQs,
                 Documents,
-                Disclaimer
+                Disclaimer,
+                businessUserDetails // <-- Added to output
             });
 
         } catch (error) {
