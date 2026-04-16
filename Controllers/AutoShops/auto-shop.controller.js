@@ -5394,19 +5394,56 @@ async collectPayment(req, res) {
 
 
   /**
-   * Fetch all website templates.
+   * Fetch website templates and check if the business has a purchased template.
    * GET /api/autoshop/website-templates
+   * If business has a purchased template, send only that template as selected.
+   * If not, send all templates to select from.
+   * For now, use sample data for purchased template status.
    */
   async fetchWebsiteTemplates(req, res) {
     try {
-        
-        const templates = await WebsiteTemplateSchema.find({}).lean();
-        return res.status(200).json({ success: true, data: templates });
+      // Fetch all templates
+      const templates = await WebsiteTemplateSchema.find({}).lean();
+
+      // Simulate fetching user's business profile and template purchase info
+      // In real use, replace the following lines with actual logic to get the business and its template
+      // e.g. const businessId = req.user.businessProfile;
+      // const business = await BusinessProfileModel.findById(businessId).lean();
+      // let purchasedTemplateId = business?.purchasedTemplateId || null;
+
+      // --- Begin Sample Data ---
+      // For now, simulate: hasPurchasedTemplate = true/false
+      // When true, set a sample template as "purchased"
+      const hasPurchasedTemplate = true; // set to true to simulate purchased
+
+      let purchasedTemplateId = null;
+      if (hasPurchasedTemplate && templates.length > 0) {
+        // Just for demo: select first template as purchased
+        purchasedTemplateId = templates[0]._id;
+      }
+      // --- End Sample Data ---
+
+      if (purchasedTemplateId) {
+        // If user purchased a template, send only the selected template
+        const selectedTemplate = templates.find(t => t._id.toString() === purchasedTemplateId.toString());
+        return res.status(200).json({ 
+          success: true, 
+          hasPurchasedTemplate: true,
+          selectedTemplate 
+        });
+      } else {
+        // Else, send all templates for selection
+        return res.status(200).json({ 
+          success: true, 
+          hasPurchasedTemplate: false,
+          data: templates 
+        });
+      }
     } catch (err) {
-        console.error("[fetchWebsiteTemplates] Error:", err);
-        return res.status(500).json({ message: "Failed to fetch website templates", error: err.message });
+      console.error("[fetchWebsiteTemplates] Error:", err);
+      return res.status(500).json({ message: "Failed to fetch website templates", error: err.message });
     }
-}
+  }
 
 
 
