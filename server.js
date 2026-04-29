@@ -13,6 +13,8 @@ const allowedOrigins = [
   "http://localhost:3000", // optional
   "https://auto-daddy-admin.onrender.com",
   "https://www.auto-daddy-admin.onrender.com",
+  "https://admin.autodaddy.ca",
+  "https://www.admin.autodaddy.ca",
   process.env.FRONTEND_URL
 ];
 
@@ -38,7 +40,7 @@ app.use(
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-const port = process.env.PORT || 8822;
+const port = process.env.PORT || 6020;
 
 app.use("/Uploads", express.static("Uploads"));
 
