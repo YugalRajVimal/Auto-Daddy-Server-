@@ -1,3 +1,4 @@
+import DashboardDataModel from "../../Schema/dashboardData.schema.js";
 import DealModel from "../../Schema/deals.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
 import Services from "../../Schema/services.schema.js";
@@ -581,6 +582,157 @@ async deleteVehicleType  (req, res) {
   }
 
 
+
+/**
+ * Create or update the global DashboardData config.
+ * POST /admin/dashboard-data
+ * Request body: { thoughtOfTheDay, aboutUs, privacyPolicy, FAQs, Documents, Disclaimer }
+ * If no row exists, create one. If exists, update the single document.
+ */
+async upsertDashboardData(req, res) {
+    try {
+        // Do strong defaulting and shaped update to avoid overwriting unintendedly
+        const {
+            thoughtOfTheDay,
+            aboutUs,
+            privacyPolicy,
+            FAQs,
+            Documents,
+            Disclaimer
+        } = req.body;
+
+        const updateFields = {};
+        if (typeof thoughtOfTheDay !== "undefined") updateFields.thoughtOfTheDay = thoughtOfTheDay;
+        if (typeof aboutUs !== "undefined") updateFields.aboutUs = aboutUs;
+        if (typeof privacyPolicy !== "undefined") updateFields.privacyPolicy = privacyPolicy;
+        if (typeof FAQs !== "undefined") updateFields.FAQs = FAQs;
+        if (typeof Documents !== "undefined") updateFields.Documents = Documents;
+        if (typeof Disclaimer !== "undefined") updateFields.Disclaimer = Disclaimer;
+
+        // Only one dashboardData config in system
+
+        console.log("[upsertDashboardData] updateFields:", updateFields);
+
+        const config = await DashboardDataModel.findOne({});
+        let result;
+        if (config) {
+            result = await DashboardDataModel.findOneAndUpdate({}, updateFields, { new: true });
+            console.log("[upsertDashboardData] Updated existing DashboardData:", result);
+        } else {
+            result = await DashboardDataModel.create(updateFields);
+            console.log("[upsertDashboardData] Created new DashboardData:", result);
+        }
+        return res.status(200).json({ success: true, data: result });
+    } catch (err) {
+        console.error("[upsertDashboardData] Error:", err);
+        return res.status(500).json({ message: "Failed to upsert dashboard data", error: err.message });
+    }
+}
+
+/**
+ * Get the global DashboardData config for widgets (thoughtOfTheDay, aboutUs, etc.)
+ * GET /admin/dashboard-data
+ * If not found, send sample data (from @auto-shop.controller.js lines 307-327)
+ */
+async fetchDashboardData(req, res) {
+    try {
+        const data = await DashboardDataModel.findOne({}).lean();
+        console.log("[fetchDashboardData] Queried DashboardData:", data);
+
+        if (!data) {
+            // Sample data as fallback (from auto-shop.controller.js lines 307-327)
+            // Updated sample data with new content
+            const sampleData = {
+                thoughtOfTheDay: "Success is not the key to happiness. Happiness is the key to success.",
+                aboutUs: {
+                    heading: "Welcome to Our Trusted Garage",
+                    desc: "At our garage, excellence in vehicle maintenance and repair is our passion. With certified technicians and modern equipment, your car is always in the best hands."
+                },
+                privacyPolicy: {
+                    heading: "User Privacy Assurance",
+                    desc: "We are dedicated to protecting your privacy. All customer records and information are kept completely confidential as per our robust privacy policies."
+                },
+                FAQs: {
+                    heading: "Common Queries Answered",
+                    desc: "1. How can I schedule a service appointment?\n2. Are original parts used for repairs?\n3. What is your warranty policy on repairs?"
+                },
+                Documents: {
+                    heading: "Customer Care Documents",
+                    desc: "Access your service history, insurance policies, and warranty certificates in this section for your convenience."
+                },
+                Disclaimer: {
+                    heading: "Repair and Service Disclaimer",
+                    desc: "Services are performed per manufacturer recommendations. Actual results may vary based on vehicle usage and prior maintenance."
+                }
+            };
+    
+            console.log("[fetchDashboardData] No DashboardData found. Sending sample data.");
+            return res.status(200).json({ 
+                success: true, 
+                data: sampleData, 
+                sample: true, 
+                message: "DashboardData not found; providing sample data." 
+            });
+        }
+        return res.status(200).json({ success: true, data });
+    } catch (err) {
+        console.error("[fetchDashboardData] Error:", err);
+        return res.status(500).json({ message: "Failed to fetch dashboard data", error: err?.message || err.toString() });
+    }
+}
+
+/**
+ * Edit dashboard data fields.
+ * PATCH /admin/dashboard-data
+ * Fields to update provided in req.body (partial update supported)
+ */
+async editDashboardData(req, res) {
+    try {
+        const updateFields = {};
+        const allowed = [
+            "thoughtOfTheDay", "aboutUs", "privacyPolicy",
+            "FAQs", "Documents", "Disclaimer"
+        ];
+        for (const key of allowed) {
+            if (typeof req.body[key] !== "undefined") {
+                updateFields[key] = req.body[key];
+            }
+        }
+        if (Object.keys(updateFields).length === 0) {
+            return res.status(400).json({ message: "No valid fields provided to update" });
+        }
+
+        console.log("[editDashboardData] updateFields:", updateFields);
+
+        const updated = await DashboardDataModel.findOneAndUpdate({}, updateFields, { new: true });
+        if (!updated) {
+            return res.status(404).json({ message: "DashboardData not found" });
+        }
+        console.log("[editDashboardData] Updated DashboardData:", updated);
+        return res.status(200).json({ success: true, data: updated });
+    } catch (err) {
+        console.error("[editDashboardData] Error:", err);
+        return res.status(500).json({ message: "Failed to edit dashboard data", error: err.message });
+    }
+}
+
+/**
+ * Delete the dashboard data record.
+ * DELETE /admin/dashboard-data
+ */
+async deleteDashboardData(req, res) {
+    try {
+        const deleted = await DashboardDataModel.findOneAndDelete({});
+        if (!deleted) {
+            return res.status(404).json({ message: "DashboardData not found." });
+        }
+        console.log("[deleteDashboardData] Deleted DashboardData:", deleted);
+        return res.status(200).json({ success: true, message: "DashboardData deleted." });
+    } catch (err) {
+        console.error("[deleteDashboardData] Error:", err);
+        return res.status(500).json({ message: "Failed to delete dashboard data", error: err.message });
+    }
+}
 
 
 
