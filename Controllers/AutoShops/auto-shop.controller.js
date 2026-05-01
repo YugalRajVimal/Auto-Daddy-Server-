@@ -11,6 +11,7 @@ import counterSchema from "../../Schema/counter.schema.js";
 import VehicleType from "../../Schema/vehicle-type.schema.js";
 import CarDetailsModel from "../../Schema/CarDetails.schema.js";
 import WebsiteTemplateSchema from "../../Schema/WebsiteTemplateSchema.js";
+import DashboardDataModel from "../../Schema/dashboardData.schema.js";
 
 
 class AutoShopController {
@@ -304,27 +305,25 @@ class AutoShopController {
 
             // --- Sample & static data
             const subscriptionDaysLeftCount = 13;
-            const thoughtOfTheDay = "Push yourself, because no one else is going to do it for you.";
-            const aboutUs = {
-                heading: "About Our Auto Shop",
-                desc: "We are committed to providing top-notch automobile services for all makes and models. Customer satisfaction is our priority."
-            };
-            const privacyPolicy = {
-                heading: "Privacy Policy",
-                desc: "Your privacy is important to us. All your data is handled securely and never shared with third parties without consent."
-            };
-            const FAQs = {
-                heading: "Frequently Asked Questions",
-                desc: "1. What services do you provide?\n2. What payment methods are accepted?\n3. How do I book a service?"
-            };
-            const Documents = {
-                heading: "Important Documents",
-                desc: "Here you'll find warranty, registration, and insurance documents required for various services."
-            };
-            const Disclaimer = {
-                heading: "Disclaimer",
-                desc: "All repairs are subject to part availability. Pricing may vary based on model and condition."
-            };
+            // Fetch dashboard data from DB and use defaults if not found (from dashboardData.schema.js)
+            let thoughtOfTheDay, aboutUs, privacyPolicy, FAQs, Documents, Disclaimer;
+
+            try {
+                const dashboardData = await DashboardDataModel.findOne({}).lean();
+                if (!dashboardData) {
+                    return res.status(404).json({ message: "Dashboard data not found." });
+                }
+                thoughtOfTheDay = dashboardData.thoughtOfTheDay;
+                aboutUs = dashboardData.aboutUs;
+                privacyPolicy = dashboardData.privacyPolicy;
+                FAQs = dashboardData.FAQs;
+                Documents = dashboardData.documents;
+                Disclaimer = dashboardData.disclaimer;
+            } catch (err) {
+                return res.status(500).json({ message: "Failed to fetch dashboard data.", error: err?.message || err.toString() });
+            }
+       
+ 
 
             return res.status(200).json({
                 success: true,

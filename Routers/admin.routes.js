@@ -62,6 +62,33 @@ adminRouter.get(
   (req, res) => adminController.fetchWebsiteTemplates(req, res)
 );
 
+// Dashboard Data endpoints
+
+// Upsert dashboard data (create or update)
+adminRouter.post(
+  "/dashboard-data",
+  (req, res) => adminController.upsertDashboardData(req, res)
+);
+
+// Fetch dashboard data
+adminRouter.get(
+  "/dashboard-data",
+  (req, res) => adminController.fetchDashboardData(req, res)
+);
+
+// Edit dashboard data (partial update)
+adminRouter.patch(
+  "/dashboard-data",
+  (req, res) => adminController.editDashboardData(req, res)
+);
+
+// Delete dashboard data
+adminRouter.delete(
+  "/dashboard-data",
+  (req, res) => adminController.deleteDashboardData(req, res)
+);
+
+
 
 
 export default adminRouter;
