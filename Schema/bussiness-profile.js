@@ -53,6 +53,8 @@ const businessProfileSchema = new Schema({
   // Nested myServices array, each containing a reference to a main service and selected subservices (nested like services schema)
   myServices: [myServiceSchema],
 
+  //vehicles  (  )
+
   // Add support for linking deals to this business profile
   myDeals: [{ type: Types.ObjectId, ref: "Deal" }],
 
