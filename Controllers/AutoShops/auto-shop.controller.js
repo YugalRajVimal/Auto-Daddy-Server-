@@ -1345,68 +1345,70 @@ fetchMyCustomers = async (req, res) => {
             vehicleIdsForPlate = vehicleDocs.map(v => v._id.toString());
         }
 
-        // === Prepare myCustomersMeta 'addedAt' filter ===
-        let startDate, endDate;
-        let _dateType = dateType || "daily";
-        const now = new Date();
+        let filteredCustomerIds = [];
 
-        if (_dateType === "daily") {
-            let localDate = date ? new Date(date) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            startDate = new Date(localDate.setHours(0, 0, 0, 0));
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + 1);
-        } else if (_dateType === "weekly") {
-            let current = week ? new Date(week) : new Date();
-            let day = current.getDay();
-            let diffToMonday = ((day + 6) % 7);
-            startDate = new Date(current);
-            startDate.setDate(current.getDate() - diffToMonday);
-            startDate.setHours(0, 0, 0, 0);
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + 7);
-        } else if (_dateType === "monthly") {
-            let _year = year ? Number(year) : now.getFullYear();
-            let _month;
+        // If no dateType is provided, send all customers from myCustomers
+        if (!dateType) {
+            filteredCustomerIds = Array.isArray(autoshopOwner.myCustomers)
+                ? autoshopOwner.myCustomers.map(id => id && id.toString()).filter(Boolean)
+                : [];
+        } else {
+            // Prepare date range filters for myCustomersMeta
+            let startDate, endDate;
+            let _dateType = dateType;
+            const now = new Date();
 
-            // Handle both string and number; allow "2" or 2 for February, "Feb", "February", etc.
-            if (typeof month !== "undefined" && month !== null) {
-                if (typeof month === "string" && isNaN(month)) {
-                    // String name
-                    const monthNames = [
-                        "january", "february", "march", "april", "may", "june",
-                        "july", "august", "september", "october", "november", "december"
-                    ];
-                    let monthLower = month.trim().toLowerCase();
-                    _month = monthNames.findIndex(mn => mn.startsWith(monthLower));
-                    if (_month === -1) _month = now.getMonth(); // fallback to current month
-                } else {
-                    // Number (from query or numeric string)
-                    // Accept 1 for Jan, 12 for Dec (convert to 0-based)
-                    let parsedNum = Number(month);
-                    if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) {
-                        _month = parsedNum - 1;
+            if (_dateType === "daily") {
+                let localDate = date ? new Date(date) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                startDate = new Date(localDate.setHours(0, 0, 0, 0));
+                endDate = new Date(startDate);
+                endDate.setDate(startDate.getDate() + 1);
+            } else if (_dateType === "weekly") {
+                let current = week ? new Date(week) : new Date();
+                let day = current.getDay();
+                let diffToMonday = ((day + 6) % 7);
+                startDate = new Date(current);
+                startDate.setDate(current.getDate() - diffToMonday);
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(startDate);
+                endDate.setDate(startDate.getDate() + 7);
+            } else if (_dateType === "monthly") {
+                let _year = year ? Number(year) : now.getFullYear();
+                let _month;
+                if (typeof month !== "undefined" && month !== null) {
+                    if (typeof month === "string" && isNaN(month)) {
+                        const monthNames = [
+                            "january", "february", "march", "april", "may", "june",
+                            "july", "august", "september", "october", "november", "december"
+                        ];
+                        let monthLower = month.trim().toLowerCase();
+                        _month = monthNames.findIndex(mn => mn.startsWith(monthLower));
+                        if (_month === -1) _month = now.getMonth();
                     } else {
-                        _month = now.getMonth();
+                        let parsedNum = Number(month);
+                        if (!isNaN(parsedNum) && parsedNum >= 1 && parsedNum <= 12) {
+                            _month = parsedNum - 1;
+                        } else {
+                            _month = now.getMonth();
+                        }
                     }
+                } else {
+                    _month = now.getMonth();
                 }
-            } else {
-                _month = now.getMonth();
+                startDate = new Date(_year, _month, 1, 0, 0, 0, 0);
+                endDate = new Date(_year, _month + 1, 1, 0, 0, 0, 0);
             }
 
-            startDate = new Date(_year, _month, 1, 0, 0, 0, 0);
-            endDate = new Date(_year, _month + 1, 1, 0, 0, 0, 0);
+            // --- Filter the customer's IDs by addedAt (myCustomersMeta) ---
+            const relevantMyCustomersMeta = Array.isArray(autoshopOwner.myCustomersMeta)
+                ? autoshopOwner.myCustomersMeta.filter(meta => {
+                    if (!meta.customer || !meta.addedAt) return false;
+                    const added = new Date(meta.addedAt);
+                    return (!startDate || added >= startDate) && (!endDate || added < endDate);
+                })
+                : [];
+            filteredCustomerIds = relevantMyCustomersMeta.map(meta => meta.customer && meta.customer.toString()).filter(Boolean);
         }
-
-        // --- Filter the customer's IDs by addedAt (myCustomersMeta) ---
-        const relevantMyCustomersMeta = Array.isArray(autoshopOwner.myCustomersMeta)
-            ? autoshopOwner.myCustomersMeta.filter(meta => {
-                if (!meta.customer || !meta.addedAt) return false;
-                const added = new Date(meta.addedAt);
-                return (!startDate || added >= startDate) && (!endDate || added < endDate);
-            })
-            : [];
-        // Only proceed with those customers added during the filtered period.
-        const filteredCustomerIds = relevantMyCustomersMeta.map(meta => meta.customer && meta.customer.toString()).filter(Boolean);
 
         if (filteredCustomerIds.length === 0) {
             return res.status(200).json({ myCustomers: [] });
@@ -1416,12 +1418,12 @@ fetchMyCustomers = async (req, res) => {
         let customersQuery = User.find({
             _id: { $in: filteredCustomerIds }
         })
-        .select("name email phone countryCode status isDisabled myVehicles address pincode")
-        .populate({
-            path: "myVehicles",
-            model: "Vehicle",
-            select: "-carImages -licensePlateFrontImagePath -licensePlateBackImagePath"
-        });
+            .select("name email phone countryCode status isDisabled myVehicles address pincode")
+            .populate({
+                path: "myVehicles",
+                model: "Vehicle",
+                select: "-carImages -licensePlateFrontImagePath -licensePlateBackImagePath"
+            });
 
         // Build filtering conditions
         let andConditions = [];
@@ -1443,8 +1445,74 @@ fetchMyCustomers = async (req, res) => {
 
         const myCustomers = await customersQuery.lean();
 
+        // Helper to format date/time
+        const formatDate = (d) => {
+            if (!d) return { date: null, time: null };
+            const dateObj = new Date(d);
+            const yyyy = dateObj.getFullYear();
+            const mm = ('0' + (dateObj.getMonth() + 1)).slice(-2);
+            const dd = ('0' + dateObj.getDate()).slice(-2);
+            const hh = ('0' + dateObj.getHours()).slice(-2);
+            const mi = ('0' + dateObj.getMinutes()).slice(-2);
+            return {
+                date: `${yyyy}-${mm}-${dd}`,
+                time: `${hh}:${mi}`
+            };
+        };
+
+        // For all customers, fetch recent job card
+        const result = [];
+        for (const cust of myCustomers) {
+            let recentJobCard = await JobCard.findOne({
+                customerId: cust._id,
+                business: autoshopOwner.businessProfile ? autoshopOwner.businessProfile : undefined
+            })
+                .sort({ createdAt: -1 }) // most recent
+                .lean();
+
+            let jobCardSummary = null;
+            if (recentJobCard) {
+                // Only send subServices name list (flattened) -- not service names!
+                let subServiceNames = [];
+                if (Array.isArray(recentJobCard.services) && recentJobCard.services.length) {
+                    for (const svc of recentJobCard.services) {
+                        if (Array.isArray(svc.subServices)) {
+                            for (const ss of svc.subServices) {
+                                if (ss && ss.name) {
+                                    subServiceNames.push(ss.name);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Fetch vehicle number plate
+                let vehicleNumberPlate = null;
+                if (recentJobCard.vehicleId) {
+                    try {
+                        const vehicleDoc = await VehicleModel.findById(recentJobCard.vehicleId).select("licensePlateNo").lean();
+                        vehicleNumberPlate = vehicleDoc ? vehicleDoc.licensePlateNo : null;
+                    } catch (e) { }
+                }
+
+                const formatted = formatDate(recentJobCard.createdAt);
+
+                jobCardSummary = {
+                    subServices: subServiceNames,
+                    date: formatted.date,
+                    time: formatted.time,
+                    vehicleNumberPlate
+                };
+            }
+
+            result.push({
+                ...cust,
+                recentJobCard: jobCardSummary
+            });
+        }
+
         return res.status(200).json({
-            myCustomers: myCustomers || [],
+            myCustomers: result,
         });
     } catch (error) {
         console.error("[fetchMyCustomers] Error:", error);

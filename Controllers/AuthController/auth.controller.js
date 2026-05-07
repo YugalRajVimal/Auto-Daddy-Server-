@@ -331,6 +331,8 @@ class AuthController {
   verifyAccount = async (req, res) => {
     try {
       let { countryCode, phone, otp } = req.body;
+      console.log("[verifyAccount] Incoming params:", req.body);
+
       console.log("[verifyAccount] Incoming params:", { countryCode, phone, otp });
 
       if (!countryCode || !phone || !otp) {
