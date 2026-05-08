@@ -508,20 +508,6 @@ async editProfile(req, res) {
 }
 
 
-
-// async getAllAutoShops(req, res) {
-//     try {
-//         const autoShops = await AutoShopModel.find({});
-//         res.status(200).json({ success: true, data: autoShops });
-//     } catch (error) {
-//         res.status(500).json({ success: false, message: 'Failed to fetch auto shops', error: error.message });
-//     }
-// }
-
-// Complete business profile for autoshopowner
-
-
-
 async completeBusinessProfile(req, res) {
     let filesToDelete = [];
     let session = null;
@@ -2297,105 +2283,6 @@ async addToMyServices(req, res) {
     }
 }
 
-/**
- * Remove services (and/or subservices) from current auto shop's business profile.
- * Expects req.user to be authenticated autoshopowner and req.body.services as described.
- */
-
-// async removeFromMyServices(req, res) {
-//     try {
-//         const userId = req.user?.id;
-//         if (!userId) {
-//             return res.status(401).json({ message: "Unauthorized. User ID missing." });
-//         }
-
-//         // Find the autoshopowner with their businessProfile populated
-//         const user = await User.findById(userId).select("businessProfile role").lean();
-//         if (!user || user.role !== "autoshopowner") {
-//             return res.status(404).json({ message: "AutoShop owner not found." });
-//         }
-//         if (!user.businessProfile) {
-//             return res.status(404).json({ message: "Business profile not found." });
-//         }
-
-//         const { services } = req.body;
-//         if (!Array.isArray(services) || services.length === 0) {
-//             return res.status(400).json({ message: "services (array) is required in request body." });
-//         }
-
-//         /**
-//          * Expect request body like:
-//          *   services: [
-//          *     {
-//          *       id: "serviceId",
-//          *       subServices: [
-//          *          { name, desc, price } // MATCH BY these fields
-//          *       ]
-//          *     },
-//          *     ...
-//          *   ]
-//          * 
-//          * If subServices array is empty or omitted, remove whole service entry.
-//          */
-
-//         // Build removal map: serviceId -> Set of subService keys (name|desc|price). If set empty: remove whole service.
-//         const toRemove = {};
-//         for (const s of services) {
-//             const serviceId = s.id?.toString();
-//             if (!serviceId) continue;
-//             if (!Array.isArray(s.subServices) || s.subServices.length === 0) {
-//                 // Remove whole service
-//                 toRemove[serviceId] = null;
-//             } else {
-//                 // Remove only matching subservices by composite key
-//                 const subServiceKeys = new Set(
-//                     s.subServices.map(sub => {
-//                         return `${sub.name?.trim()}|${(sub.desc||"").trim()}|${typeof sub.price === "number" ? sub.price : ""}`;
-//                     })
-//                 );
-//                 toRemove[serviceId] = subServiceKeys;
-//             }
-//         }
-
-//         // Edit business profile
-//         const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
-//         if (!businessProfile) {
-//             return res.status(404).json({ message: "Business profile not found." });
-//         }
-
-//         // Filter myServices according to removal plan
-//         businessProfile.myServices = businessProfile.myServices.filter(ms => {
-//             const svcId = ms.service.toString();
-//             if (!(svcId in toRemove)) return true; // Not targeted for removal
-
-//             const removeSubKeys = toRemove[svcId];
-//             if (removeSubKeys === null) {
-//                 // Remove whole service
-//                 return false;
-//             }
-
-//             // Remove specific subServices by composite key match (name|desc|price)
-//             ms.subServices = (ms.subServices || []).filter(ss => {
-//                 const key = `${ss.name?.trim()}|${(ss.desc||"").trim()}|${typeof ss.price === "number" ? ss.price : ""}`;
-//                 return !removeSubKeys.has(key);
-//             });
-
-//             // If after removal this service has no subServices left, remove service entirely
-//             return ms.subServices.length > 0;
-//         });
-
-//         await businessProfile.save();
-
-//         return res.status(200).json({ success: true, message: "Services removed successfully.", myServices: businessProfile.myServices });
-//     } catch (error) {
-//         console.error("[removeFromMyServices] Error:", error);
-//         return res.status(500).json({ message: "Internal Server Error" });
-//     }
-// }
-
-// DEALS HANDLING SECTION
-
-
 async editMyServices(req, res) {
     try {
       const userId = req.user?.id;
@@ -2519,6 +2406,107 @@ async editMyServices(req, res) {
       return res.status(500).json({ message: "Internal Server Error" });
     }
   }
+
+/**
+ * Remove services (and/or subservices) from current auto shop's business profile.
+ * Expects req.user to be authenticated autoshopowner and req.body.services as described.
+ */
+
+// async removeFromMyServices(req, res) {
+//     try {
+//         const userId = req.user?.id;
+//         if (!userId) {
+//             return res.status(401).json({ message: "Unauthorized. User ID missing." });
+//         }
+
+//         // Find the autoshopowner with their businessProfile populated
+//         const user = await User.findById(userId).select("businessProfile role").lean();
+//         if (!user || user.role !== "autoshopowner") {
+//             return res.status(404).json({ message: "AutoShop owner not found." });
+//         }
+//         if (!user.businessProfile) {
+//             return res.status(404).json({ message: "Business profile not found." });
+//         }
+
+//         const { services } = req.body;
+//         if (!Array.isArray(services) || services.length === 0) {
+//             return res.status(400).json({ message: "services (array) is required in request body." });
+//         }
+
+//         /**
+//          * Expect request body like:
+//          *   services: [
+//          *     {
+//          *       id: "serviceId",
+//          *       subServices: [
+//          *          { name, desc, price } // MATCH BY these fields
+//          *       ]
+//          *     },
+//          *     ...
+//          *   ]
+//          * 
+//          * If subServices array is empty or omitted, remove whole service entry.
+//          */
+
+//         // Build removal map: serviceId -> Set of subService keys (name|desc|price). If set empty: remove whole service.
+//         const toRemove = {};
+//         for (const s of services) {
+//             const serviceId = s.id?.toString();
+//             if (!serviceId) continue;
+//             if (!Array.isArray(s.subServices) || s.subServices.length === 0) {
+//                 // Remove whole service
+//                 toRemove[serviceId] = null;
+//             } else {
+//                 // Remove only matching subservices by composite key
+//                 const subServiceKeys = new Set(
+//                     s.subServices.map(sub => {
+//                         return `${sub.name?.trim()}|${(sub.desc||"").trim()}|${typeof sub.price === "number" ? sub.price : ""}`;
+//                     })
+//                 );
+//                 toRemove[serviceId] = subServiceKeys;
+//             }
+//         }
+
+//         // Edit business profile
+//         const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
+//         if (!businessProfile) {
+//             return res.status(404).json({ message: "Business profile not found." });
+//         }
+
+//         // Filter myServices according to removal plan
+//         businessProfile.myServices = businessProfile.myServices.filter(ms => {
+//             const svcId = ms.service.toString();
+//             if (!(svcId in toRemove)) return true; // Not targeted for removal
+
+//             const removeSubKeys = toRemove[svcId];
+//             if (removeSubKeys === null) {
+//                 // Remove whole service
+//                 return false;
+//             }
+
+//             // Remove specific subServices by composite key match (name|desc|price)
+//             ms.subServices = (ms.subServices || []).filter(ss => {
+//                 const key = `${ss.name?.trim()}|${(ss.desc||"").trim()}|${typeof ss.price === "number" ? ss.price : ""}`;
+//                 return !removeSubKeys.has(key);
+//             });
+
+//             // If after removal this service has no subServices left, remove service entirely
+//             return ms.subServices.length > 0;
+//         });
+
+//         await businessProfile.save();
+
+//         return res.status(200).json({ success: true, message: "Services removed successfully.", myServices: businessProfile.myServices });
+//     } catch (error) {
+//         console.error("[removeFromMyServices] Error:", error);
+//         return res.status(500).json({ message: "Internal Server Error" });
+//     }
+// }
+
+// DEALS HANDLING SECTION
+
+
+
 
   /**
    * Get all vehicle types and all services in one response.
@@ -3076,7 +3064,6 @@ async fetchMyDeals(req, res) {
  * Fetch Job Card Page for the current business, including:
  * - MyCustomers with their vehicle details,
  * - My Services,
- * - My Deals.
  *
  * Expects the current authenticated user (`req.user`) to have a `businessProfile`.
  */
@@ -4314,6 +4301,21 @@ async markJobStatus(req, res) {
  * Accepts vehiclePhotos - optional; if not sent, keeps existing. If sent, replaces.
  * If new files are uploaded, cleans up old photos (from FS/S3 accordingly).
  */
+/**
+ * Edit a job card. Allows autoshop owner to update specific fields on their own job card.
+ * Only Pending status job cards can be edited.
+ * All validations similar to createJobCard will be performed.
+ *
+ * Only updates the following fields: odometerReading, dueOdometerReading,
+ * issueDescription, services, additionalNotes, technicalRemarks, vehiclePhotos,
+ * and also allows updating `labourCharge` and `labourDuration`.
+ * Will overwrite ALL those fields.
+ * Accepts vehiclePhotos - optional; if not sent, keeps existing. If sent, replaces.
+ * If new files are uploaded, cleans up old photos (from FS/S3 accordingly).
+ *
+ * @jobCard.schema.js (78-79): labourCharge: { type: Number }, // Labour charge for the job
+ *                             labourDuration: { type: String }, // Labour duration for the job
+ */
 async editJobCard(req, res) {
     // Accept vehiclePhotos from file uploads (multer) via req.files["vehiclePhotos"]
 
@@ -4332,6 +4334,19 @@ async editJobCard(req, res) {
             }
         }
 
+        // Parse labourCharge if it's a string (should be number or undefined)
+        let labourCharge = req.body.labourCharge;
+        if (typeof labourCharge === "string") {
+            labourCharge = parseFloat(labourCharge);
+            if (isNaN(labourCharge)) labourCharge = undefined;
+        }
+
+        // Parse labourDuration (should be string or undefined, but just ensure it's string)
+        let labourDuration = req.body.labourDuration;
+        if (typeof labourDuration !== "undefined" && labourDuration !== null) {
+            labourDuration = String(labourDuration);
+        }
+
         const {
             odometerReading,
             dueOdometerReading,
@@ -4346,7 +4361,6 @@ async editJobCard(req, res) {
         // Find requesting user
         const user = await User.findById(req.user.id);
         if (!user) {
-            // delete any uploaded new photos
             if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
             return res.status(404).json({ success: false, message: "AutoShop owner user not found" });
         }
@@ -4508,9 +4522,14 @@ async editJobCard(req, res) {
             };
         });
 
+        // Add labourCharge (from request or fall back to existing jobCard)
+        if (typeof labourCharge === "number" && !isNaN(labourCharge)) {
+            totalAmount += labourCharge;
+        } else if (typeof jobCard.labourCharge === "number" && !isNaN(jobCard.labourCharge)) {
+            totalAmount += jobCard.labourCharge;
+        }
         // If new vehicle photos are uploaded, remove old ones
         if (uploadedPhotos.length && Array.isArray(jobCard.vehiclePhotos) && jobCard.vehiclePhotos.length) {
-            // Remove old vehicle photos (deleteUploadedFiles expects File[] or array of filename/paths)
             try {
                 await deleteUploadedFiles(jobCard.vehiclePhotos);
             } catch(err) {
@@ -4528,6 +4547,13 @@ async editJobCard(req, res) {
         jobCard.technicalRemarks = technicalRemarks;
         jobCard.vehiclePhotos = Array.isArray(vehiclePhotos) ? vehiclePhotos : [];
         jobCard.totalPayableAmount = Number(totalAmount.toFixed(2));
+        // set labourCharge and labourDuration if provided
+        if (typeof labourCharge === "number" && !isNaN(labourCharge)) {
+            jobCard.labourCharge = labourCharge;
+        }
+        if (typeof labourDuration === "string" && labourDuration.length > 0) {
+            jobCard.labourDuration = labourDuration;
+        }
 
         await jobCard.save();
 
@@ -4577,7 +4603,6 @@ async getAllJobCards(req, res) {
             return res.status(404).json({ success: false, message: "AutoShop business profile not found" });
         }
 
-        // --- Filter Handling (daily, weekly, monthly) ---
         const {
             dateType,
             date,
@@ -4587,74 +4612,79 @@ async getAllJobCards(req, res) {
         } = req.query;
 
         let createdAtMatch = {};
-        let _dateType = dateType || "daily";
-        let startDate, endDate;
-        const now = new Date();
-        if (_dateType === "daily") {
-            let localDate = date ? new Date(date) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
-            startDate = new Date(localDate.setHours(0, 0, 0, 0));
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + 1);
-        } else if (_dateType === "weekly") {
-            let current = week ? new Date(week) : new Date();
-            let day = current.getDay();
-            let diffToMonday = ((day + 6) % 7);
-            startDate = new Date(current);
-            startDate.setDate(current.getDate() - diffToMonday);
-            startDate.setHours(0, 0, 0, 0);
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + 7);
-        } else if (_dateType === "monthly") {
-            let _year = year ? Number(year) : now.getFullYear();
-            let _month;
 
-            if (typeof month !== "undefined" && month !== null) {
-                // Handle string month names, e.g. "february"
-                if (typeof month === "string" && isNaN(month)) {
-                    const monthNames = [
-                        "january", "february", "march", "april", "may", "june",
-                        "july", "august", "september", "october", "november", "december"
-                    ];
-                    _month = monthNames.findIndex(mn =>
-                        mn.startsWith(month.trim().toLowerCase())
-                    );
-                    if (_month === -1) _month = now.getMonth();
-                } else {
-                    // Allow month as integer, or zero-padded ("01", "02", etc)
-                    if (typeof month === "string" && month.match(/^\d{1,2}$/)) {
-                        let monthNum = Number(month);
-                        if (!isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
-                            _month = monthNum - 1; // Convert 1-12 to JS 0-indexed
-                        } else {
-                            _month = now.getMonth();
-                        }
+        // If no dateType is provided, return all job cards (no date filtering)
+        if (typeof dateType !== "undefined" && dateType !== null && dateType !== "") {
+            let _dateType = dateType;
+            let startDate, endDate;
+            const now = new Date();
+            if (_dateType === "daily") {
+                let localDate = date ? new Date(date) : new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                startDate = new Date(localDate.setHours(0, 0, 0, 0));
+                endDate = new Date(startDate);
+                endDate.setDate(startDate.getDate() + 1);
+            } else if (_dateType === "weekly") {
+                let current = week ? new Date(week) : new Date();
+                let day = current.getDay();
+                let diffToMonday = ((day + 6) % 7);
+                startDate = new Date(current);
+                startDate.setDate(current.getDate() - diffToMonday);
+                startDate.setHours(0, 0, 0, 0);
+                endDate = new Date(startDate);
+                endDate.setDate(startDate.getDate() + 7);
+            } else if (_dateType === "monthly") {
+                let _year = year ? Number(year) : now.getFullYear();
+                let _month;
+
+                if (typeof month !== "undefined" && month !== null) {
+                    // Handle string month names, e.g. "february"
+                    if (typeof month === "string" && isNaN(month)) {
+                        const monthNames = [
+                            "january", "february", "march", "april", "may", "june",
+                            "july", "august", "september", "october", "november", "december"
+                        ];
+                        _month = monthNames.findIndex(mn =>
+                            mn.startsWith(month.trim().toLowerCase())
+                        );
+                        if (_month === -1) _month = now.getMonth();
                     } else {
-                        // If month is already a number, use it directly (assume 0-based or 1-based)
-                        let monthNum = Number(month);
-                        if (!isNaN(monthNum)) {
-                            if (monthNum >= 1 && monthNum <= 12) {
-                                _month = monthNum - 1; // 1-based -> 0-based
-                            } else if (monthNum >= 0 && monthNum <= 11) {
-                                _month = monthNum;
+                        // Allow month as integer, or zero-padded ("01", "02", etc)
+                        if (typeof month === "string" && month.match(/^\d{1,2}$/)) {
+                            let monthNum = Number(month);
+                            if (!isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
+                                _month = monthNum - 1; // Convert 1-12 to JS 0-indexed
                             } else {
                                 _month = now.getMonth();
                             }
                         } else {
-                            _month = now.getMonth();
+                            // If month is already a number, use it directly (assume 0-based or 1-based)
+                            let monthNum = Number(month);
+                            if (!isNaN(monthNum)) {
+                                if (monthNum >= 1 && monthNum <= 12) {
+                                    _month = monthNum - 1; // 1-based -> 0-based
+                                } else if (monthNum >= 0 && monthNum <= 11) {
+                                    _month = monthNum;
+                                } else {
+                                    _month = now.getMonth();
+                                }
+                            } else {
+                                _month = now.getMonth();
+                            }
                         }
                     }
+                } else {
+                    _month = now.getMonth();
                 }
-            } else {
-                _month = now.getMonth();
+
+                startDate = new Date(_year, _month, 1, 0, 0, 0, 0);
+                endDate = new Date(_year, _month + 1, 1, 0, 0, 0, 0);
             }
 
-            startDate = new Date(_year, _month, 1, 0, 0, 0, 0);
-            endDate = new Date(_year, _month + 1, 1, 0, 0, 0, 0);
+            if (startDate && endDate) {
+                createdAtMatch.createdAt = { $gte: startDate, $lt: endDate };
+            }
         }
-
-        if (startDate && endDate) {
-            createdAtMatch.createdAt = { $gte: startDate, $lt: endDate };
-        }
+        // else: no dateType in request, createdAtMatch remains empty, fetch all.
 
         // Find all job cards created by this business, within date filter if supplied
         const jobCards = await JobCard.find({
