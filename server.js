@@ -15,6 +15,8 @@ const allowedOrigins = [
   "https://www.auto-daddy-admin.onrender.com",
   "https://admin.autodaddy.ca",
   "https://www.admin.autodaddy.ca",
+  "https://auto-daddy-panel.onrender.com",
+  "https://www.auto-daddy-panel.onrender.com",
   process.env.FRONTEND_URL
 ];
 
