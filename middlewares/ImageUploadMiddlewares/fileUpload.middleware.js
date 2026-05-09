@@ -24,7 +24,7 @@ const storage = multer.diskStorage({
       )
     ) {
       uploadPath = "./Uploads/Therapist";
-    } 
+    }
     else if (file.fieldname === "excelFile") {
       uploadPath = "./Uploads/ExcelFiles";
     }
@@ -46,6 +46,15 @@ const storage = multer.diskStorage({
       uploadPath = "./Uploads/UserProfiles";
     }
 
+    console.log("[MULTER] Storing file:", {
+      destination: uploadPath,
+      fieldname: file.fieldname,
+      originalname: file.originalname,
+      mimetype: file.mimetype,
+      method: req.method,
+      url: req.originalUrl
+    });
+
     fs.mkdirSync(uploadPath, { recursive: true });
     cb(null, uploadPath);
   },
@@ -53,22 +62,21 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     const timestamp = Date.now();
     const cleanName = file.originalname.replace(/\s+/g, "_");
-    cb(null, `${timestamp}-${cleanName}`);
+    const filename = `${timestamp}-${cleanName}`;
+    console.log("[MULTER] Generated filename:", filename);
+    cb(null, filename);
   },
 });
 
-
-// ✅ CLEAN & STANDARDIZED FILE FILTER
 const fileFilter = (req, file, cb) => {
-  // Excel validation
   if (
     file.fieldname === "excelFile" &&
     !/\.(xls|xlsx)$/i.test(file.originalname)
   ) {
+    console.log("[MULTER] Excel file filter failed:", file.originalname);
     return cb(new Error("Only Excel files are allowed"), false);
   }
 
-  // Image validation
   const imageFields = [
     "licensePlateFrontImage",
     "licensePlateBackImage",
@@ -77,18 +85,24 @@ const fileFilter = (req, file, cb) => {
     "businessLogo",
     "teamMemberPhoto",
     "profilePhoto",
+    "carOwnerDocuments",  // kept here so memoryUpload also benefits from filter
   ];
 
   if (imageFields.includes(file.fieldname)) {
     if (!file.mimetype.startsWith("image/")) {
+      console.log("[MULTER] Image file filter failed:", file.originalname, file.mimetype);
       return cb(new Error("Only image files are allowed"), false);
     }
   }
 
+  console.log("[MULTER] File accepted by filter:", file.originalname);
   cb(null, true);
 };
 
-export const upload = multer({
-  storage,
-  fileFilter,
-});
+// Disk storage — for all regular file uploads
+const upload = multer({ storage, fileFilter });
+
+// Memory storage — for fields that need file.buffer (e.g. carOwnerDocuments saved as base64)
+const uploadMemory = multer({ storage: multer.memoryStorage(), fileFilter });
+
+export { upload, uploadMemory };
