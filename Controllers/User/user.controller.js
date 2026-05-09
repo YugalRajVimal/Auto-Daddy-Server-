@@ -592,14 +592,56 @@ class UserController {
         }
     };
 
-    // Fetch all deals (only enabled ones)
+    // Fetch all deals, prioritizing deals from businesses in the same city as the user (if possible)
     getAllDeals = async (req, res) => {
         try {
-            // Only fetch deals where dealEnabled is true
-            const deals = await DealModel.find({ dealEnabled: true }).lean();
+            // Try to get logged in user to get user's city (public route so may not exist)
+            let userCity = null;
+            if (req.user && req.user.id) {
+                const user = await User.findById(req.user.id).select("city").lean();
+                if (user && user.city) {
+                    userCity = user.city.trim().toLowerCase();
+                }
+            }
+
+            // Fetch all deals where business isActive and get business city in populate
+            let deals = await DealModel.find({})
+                .populate({
+                    path: "createdBy",
+                    select: "city businessName businessAddress businessLogo",
+                    model: "BusinessProfile"
+                })
+                .lean();
+
+            // Filter for enabled deals only (even if schema doesn't mention dealEnabled, so fallback to all deals)
+            // Remove deals without a valid business
+            deals = deals.filter(
+                d =>
+                    d.createdBy && // valid business
+                    (
+                        typeof d.dealEnabled === "undefined" || // allow if dealEnabled missing
+                        d.dealEnabled === true                // or explicitly enabled
+                    )
+            );
+
+            let cityDeals = [];
+            let otherDeals = [];
+
+            if (userCity) {
+                cityDeals = deals.filter(
+                    d => d.createdBy && typeof d.createdBy.city === "string" && d.createdBy.city.trim().toLowerCase() === userCity
+                );
+                otherDeals = deals.filter(
+                    d => !(d.createdBy && typeof d.createdBy.city === "string" && d.createdBy.city.trim().toLowerCase() === userCity)
+                );
+            } else {
+                cityDeals = deals; // if no user city, just show all
+                otherDeals = [];
+            }
+
             return res.status(200).json({
                 success: true,
-                deals
+                deals: [...cityDeals, ...otherDeals]
             });
         } catch (error) {
             console.error("[getAllDeals] Error:", error);
