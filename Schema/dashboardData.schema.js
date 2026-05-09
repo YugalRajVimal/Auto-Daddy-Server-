@@ -5,6 +5,10 @@ const dashboardDataSchema = new mongoose.Schema({
     type: String,
     default: 'Push yourself, because no one else is going to do it for you.'
   },
+  thoughtOfTheDayLike: {
+    type: Number,
+    default: 0
+  },
   aboutUs: {
     heading: {
       type: String,

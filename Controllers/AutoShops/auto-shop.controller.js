@@ -13,6 +13,7 @@ import CarDetailsModel from "../../Schema/CarDetails.schema.js";
 import WebsiteTemplateSchema from "../../Schema/WebsiteTemplateSchema.js";
 import DashboardDataModel from "../../Schema/dashboardData.schema.js";
 import canadianMunicipalities from "../cityData.js";
+import CarCompany from "../../Schema/car-company-schema.js";
 
 
 class AutoShopController {
@@ -1701,6 +1702,36 @@ removeFromMyCustomers = async (req, res) => {
 }
 
 
+
+/**
+ * Fetch all car companies, or filter by companyName if query provided.
+ * GET /api/autoshop/car-companies?companyName=Honda
+ */
+async fetchCarCompanies(req, res) {
+    try {
+      // Lazy require to avoid circular or unused import at top level
+  
+      const { companyName } = req.query;
+      let companies;
+      if (companyName) {
+        companies = await CarCompany.find({
+          companyName: { $regex: companyName, $options: "i" }
+        });
+      } else {
+        companies = await CarCompany.find({});
+      }
+      return res.status(200).json({ success: true, data: companies });
+    } catch (err) {
+      console.error("[fetchCarCompanies] Error:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch car companies",
+        error: err.message
+      });
+    }
+  }
+  
+
 /**
  * Onboard a car owner with name, email, phone, pincode, role, address, and optionally multiple vehicles.
  * After successful creation, send OTP (default: 000000).
@@ -1740,6 +1771,15 @@ onboardCarOwner = async (req, res) => {
         ) {
             return res.status(400).json({
                 message: "All owner fields (name, email, phone, countryCode, pincode, role, address) are required.",
+            });
+        }
+
+        // Only allow the specified country codes
+        const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
+        if (!allowedCountryCodes.includes(countryCode)) {
+            return res.status(400).json({
+                message:
+                    "Invalid country code. Allowed: +1 (Canada/United States), +61 (Australia), +44 (United Kingdom), +91 (India).",
             });
         }
 

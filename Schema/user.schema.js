@@ -57,6 +57,11 @@ const UserSchema = new mongoose.Schema(
     otpGeneratedAt: { type: Date }, // When was the OTP generated
     otpAttempts: { type: Number, default: 0 }, // Attempts for the current OTP
 
+    deviceId: { type: String, default: null },
+
+
+    thoughtOfTheDayLiked: { type: Boolean, default: false },
+
     phoneVerified: { type: Boolean, default: false },
     emailVerified: { type: Boolean, default: false },
     status: {

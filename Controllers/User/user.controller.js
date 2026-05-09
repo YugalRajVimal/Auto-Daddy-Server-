@@ -1,9 +1,11 @@
 import { deleteUploadedFile, deleteUploadedFiles } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
 
 import BusinessProfileModel from "../../Schema/bussiness-profile.js";
+import CarCompany from "../../Schema/car-company-schema.js";
 import DashboardDataModel from "../../Schema/dashboardData.schema.js";
 import DealModel from "../../Schema/deals.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
+import servicesSchema from "../../Schema/services.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
 import canadianMunicipalities from "../cityData.js";
@@ -27,9 +29,9 @@ class UserController {
             if (!userId) {
                 return res.status(401).json({ success: false, message: "Unauthorized" });
             }
-            // Only select safe fields
+            // Only select safe fields + thoughtOfTheDayLiked
             const user = await User.findById(userId)
-                .select("name email phone profilePhoto isProfileComplete myVehicles createdAt role")
+                .select("name email phone profilePhoto city isProfileComplete myVehicles createdAt role thoughtOfTheDayLiked")
                 .populate({
                     path: "myVehicles",
                     model: "Vehicle",
@@ -97,12 +99,13 @@ class UserController {
                 }
             }
 
-            // Respond
+            // Respond. Additionally, expose if the user has liked the thought of the day.
             return res.status(200).json({
                 success: true,
                 dashboard: dashboardDoc || {},
                 userProfile: user,
                 nextService: nextService,
+                thoughtOfTheDayLiked: !!user.thoughtOfTheDayLiked
             });
         } catch (err) {
             console.error("[getDashboardsDetails] Error:", err);
@@ -411,8 +414,34 @@ class UserController {
         }
     }
 
+
+    async fetchCarCompanies(req, res) {
+        try {
+          // Lazy require to avoid circular or unused import at top level
+      
+          const { companyName } = req.query;
+          let companies;
+          if (companyName) {
+            companies = await CarCompany.find({
+              companyName: { $regex: companyName, $options: "i" }
+            });
+          } else {
+            companies = await CarCompany.find({});
+          }
+          return res.status(200).json({ success: true, data: companies });
+        } catch (err) {
+          console.error("[fetchCarCompanies] Error:", err);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to fetch car companies",
+            error: err.message
+          });
+        }
+      }
+
     // ---------- VEHICLE CRUD Operations ----------
     // Add a new vehicle for the authenticated user (car owner)
+    // @vehicles.schema.js (8-9): Add carOwnershipCertificate and insuranceCertificate file handling
     addVehicle = async (req, res) => {
         const session = await VehicleModel.startSession();
         session.startTransaction();
@@ -421,15 +450,14 @@ class UserController {
             if (!userId) {
                 await session.abortTransaction();
                 session.endSession();
-                // Clean up uploaded files if user not authorized
                 deleteUploadedFiles(req.files);
                 return res.status(401).json({ message: "Unauthorized" });
             }
 
-            // Fetch vehicle fields directly (not wrapped in make)
+            // Vehicle fields (licensePlateFront/BackImagePath are not mandatory)
             const { licensePlateNo, vinNo, name, model, year, odometerReading } = req.body;
 
-            // Get uploaded image paths from req.files (multer's upload.fields)
+            // Get uploaded image paths (not mandatory for vehicle creation)
             const licensePlateFrontImagePath =
                 req.files?.licensePlateFrontImage?.[0]?.path || null;
             const licensePlateBackImagePath =
@@ -437,7 +465,13 @@ class UserController {
             const carImages =
                 req.files?.carImages?.map(file => file.path) || [];
 
-            // Validate required fields directly
+            // Optional vehicle documents (not mandatory)
+            const carOwnershipCertificate =
+                req.files?.carOwnershipCertificate?.[0]?.path || null;
+            const insuranceCertificate =
+                req.files?.insuranceCertificate?.[0]?.path || null;
+
+            // Mandatory vehicle info only
             if (
                 !licensePlateNo ||
                 !vinNo ||
@@ -447,38 +481,38 @@ class UserController {
             ) {
                 await session.abortTransaction();
                 session.endSession();
-                // Delete all uploaded files for this request if validation fails
                 deleteUploadedFiles(req.files);
                 return res.status(400).json({ message: "Required vehicle fields missing." });
             }
 
-            // Build new vehicle payload with name/model structured in make
+            // Prepare new vehicle payload
             const vehicleData = {
                 licensePlateNo,
-                licensePlateFrontImagePath,
-                licensePlateBackImagePath,
                 vinNo,
                 make: { name, model },
                 year,
                 odometerReading: odometerReading || 0,
-                carImages
             };
+
+            // Add non-mandatory image fields if present
+            if (licensePlateFrontImagePath) vehicleData.licensePlateFrontImagePath = licensePlateFrontImagePath;
+            if (licensePlateBackImagePath) vehicleData.licensePlateBackImagePath = licensePlateBackImagePath;
+            if (carImages.length) vehicleData.carImages = carImages;
+            if (carOwnershipCertificate) vehicleData.carOwnershipCertificate = carOwnershipCertificate;
+            if (insuranceCertificate) vehicleData.insuranceCertificate = insuranceCertificate;
 
             let newVehicle;
             try {
-                // Create the new vehicle inside the transaction
                 const created = await VehicleModel.create([vehicleData], { session });
                 newVehicle = created[0];
             } catch (creationError) {
                 await session.abortTransaction();
                 session.endSession();
-                // Clean up uploaded files on error
                 deleteUploadedFiles(req.files);
                 throw creationError;
             }
 
             try {
-                // Add the new vehicle's _id to the user's myVehicles array
                 await User.findByIdAndUpdate(
                     userId,
                     { $push: { myVehicles: newVehicle._id } },
@@ -489,12 +523,10 @@ class UserController {
             } catch (linkError) {
                 await session.abortTransaction();
                 session.endSession();
-                // If DB error, delete newly uploaded images we just created
                 deleteUploadedFiles(req.files);
                 throw linkError;
             }
 
-            // Now fetch the updated user with vehicles populated via myVehicles
             const updatedUser = await User.findById(userId)
                 .populate("myVehicles")
                 .lean();
@@ -508,7 +540,6 @@ class UserController {
         } catch (error) {
             await session.abortTransaction();
             session.endSession();
-            // Clean up uploaded files if there was an unhandled error
             deleteUploadedFiles(req.files);
             console.error("[addVehicle] Error:", error);
             return res.status(500).json({ message: "Internal Server Error" });
@@ -663,14 +694,19 @@ class UserController {
             const userId = req.user?.id;
             let userCity = null;
             if (userId) {
-                // Find user and their city (if available)
                 const user = await User.findById(userId).lean();
                 userCity = user?.city?.trim().toLowerCase() || null;
             }
 
+            // Combine search for both serviceName and subServiceName into one param: `search`
+            // Use: ?search=theNameToSearch (case-insensitive, matches service or subservice)
+            const { search } = req.query;
+            let filterSearch = typeof search === "string" && search.trim().length > 0 ? search.trim().toLowerCase() : null;
+
+            // Get all services from db
+            const allServices = await servicesSchema.find({}, { _id: 1, name: 1, desc: 1 }).lean();
+
             // Only select required fields from the business profile model
-            // Fields: businessName, openHours, openDays, closedDays, businessAddress, city, businessPhone, businessEmail,
-            // businessLogo (businessProfileImage), businessMapLocation
             let autoShops = await BusinessProfileModel.find({}, {
                     businessName: 1,
                     openHours: 1,
@@ -680,23 +716,81 @@ class UserController {
                     city: 1,
                     businessPhone: 1,
                     businessEmail: 1,
-                    businessLogo: 1, // will be named as businessProfileImage below
+                    businessLogo: 1,
                     businessMapLocation: 1,
+                    myServices: 1,
+                    ratings: 1,
                     _id: 1
                 })
                 .populate({
                     path: 'myServices.service',
                     model: 'Services',
-                    select: 'name desc',
-                })
-                .populate({
-                    path: 'myDeals',
-                    model: 'Deal'
+                    select: 'name desc'
                 })
                 .lean();
 
-            // Map/rename businessLogo -> businessProfileImage in the result
+            // Compose myServices so ALL services are present,
+            // even if a shop does not have that service, returning with empty subServices array
             autoShops = autoShops.map(shop => {
+                // Build a map of myServices per shop by service _id
+                const existingServicesMap = {};
+                if (Array.isArray(shop.myServices)) {
+                    for (const ms of shop.myServices) {
+                        if (ms.service && (ms.service._id || ms.service)) {
+                            // Normalize ms.service to string id
+                            const serviceId = typeof ms.service === 'object' && ms.service._id ? String(ms.service._id) : String(ms.service);
+                            existingServicesMap[serviceId] = ms;
+                        }
+                    }
+                }
+                // For each service, construct entry, always sending all services
+                const allMyServices = allServices.map(svc => {
+                    const serviceId = String(svc._id);
+                    // If shop has this service in myServices
+                    if (existingServicesMap[serviceId]) {
+                        // Remove price from subServices if present
+                        const ms = JSON.parse(JSON.stringify(existingServicesMap[serviceId]));
+                        if (Array.isArray(ms.subServices)) {
+                            ms.subServices = ms.subServices.map(subSvc => {
+                                if ('price' in subSvc) {
+                                    const { price, ...rest } = subSvc;
+                                    return rest;
+                                }
+                                return subSvc;
+                            });
+                        } else {
+                            ms.subServices = [];
+                        }
+                        return {
+                            service: {
+                                _id: svc._id,
+                                name: svc.name,
+                                desc: svc.desc
+                            },
+                            subServices: ms.subServices
+                        };
+                    } else {
+                        // Shop does NOT have this service; return empty subServices
+                        return {
+                            service: {
+                                _id: svc._id,
+                                name: svc.name,
+                                desc: svc.desc
+                            },
+                            subServices: []
+                        };
+                    }
+                });
+
+                // Compute avgRating
+                let avgRating = null;
+                if (Array.isArray(shop.ratings) && shop.ratings.length > 0) {
+                    const ratingsArr = shop.ratings.map(r => typeof r.rating === 'number' ? r.rating : null).filter(r => r !== null);
+                    if (ratingsArr.length > 0) {
+                        avgRating = ratingsArr.reduce((a, b) => a + b, 0) / ratingsArr.length;
+                        avgRating = Number(avgRating.toFixed(2));
+                    }
+                }
                 return {
                     _id: shop._id,
                     businessName: shop.businessName,
@@ -711,12 +805,48 @@ class UserController {
                     },
                     businessProfileImage: shop.businessLogo,
                     businessMapLocation: shop.businessMapLocation,
-                    myServices: shop.myServices,
-                    myDeals: shop.myDeals
+                    myServices: allMyServices,
+                    avgRating: avgRating
                 };
             });
 
-            // If userCity is available, sort so that matching city shops come first
+            // ----- FILTERING LOGIC BY search (serviceName or subServiceName, case-insensitive) -----
+            if (filterSearch) {
+                autoShops = autoShops.filter(shop => {
+                    let matched = false;
+                    for (const ms of (shop.myServices || [])) {
+                        // Check if service name matches
+                        if (
+                            ms.service &&
+                            typeof ms.service.name === 'string' &&
+                            ms.service.name.trim().toLowerCase().includes(filterSearch) &&
+                            ms.subServices &&
+                            Array.isArray(ms.subServices) &&
+                            ms.subServices.length > 0
+                        ) {
+                            matched = true;
+                            break;
+                        }
+                        // Check if ANY sub-service matches
+                        if (ms.subServices && Array.isArray(ms.subServices) && ms.subServices.length > 0) {
+                            for (const subSvc of ms.subServices) {
+                                if (
+                                    subSvc &&
+                                    typeof subSvc.name === 'string' &&
+                                    subSvc.name.trim().toLowerCase().includes(filterSearch)
+                                ) {
+                                    matched = true;
+                                    break;
+                                }
+                            }
+                            if (matched) break;
+                        }
+                    }
+                    return matched;
+                });
+            }
+
+            // Sort: matching city shops first if userCity available
             if (userCity) {
                 const matching = [];
                 const others = [];
@@ -735,6 +865,75 @@ class UserController {
         } catch (error) {
             console.error("[getAllAutoShops] Error:", error);
             return res.status(500).json({ success: false, message: 'Failed to fetch auto shops', error: error.message });
+        }
+    };
+
+    /**
+     * Rate an auto shop (BusinessProfile) as a logged-in user.
+     * If the user has already rated this shop, update the existing rating.
+     * Otherwise, add a new rating entry.
+     * 
+     * Request body: { autoShopId: string, rating: number }
+     */
+    rateAutoShop = async (req, res) => {
+        try {
+            const userId = req.user && req.user.id;
+            console.log("[rateAutoShop] userId:", userId);
+            if (!userId) {
+                return res.status(401).json({ success: false, message: "Unauthorized" });
+            }
+
+            const { autoShopId, rating } = req.body;
+            console.log("[rateAutoShop] Request Body:", req.body);
+
+            if (!autoShopId || typeof rating !== "number" || rating < 1 || rating > 5) {
+                console.log("[rateAutoShop] Invalid input - autoShopId or rating:", autoShopId, rating);
+                return res.status(400).json({ success: false, message: "Invalid autoShopId or rating (must be 1-5)" });
+            }
+
+            // Find the business profile
+            const autoShop = await BusinessProfileModel.findById(autoShopId);
+            console.log("[rateAutoShop] Fetched autoShop:", autoShop ? autoShop._id : null);
+            if (!autoShop) {
+                return res.status(404).json({ success: false, message: "Auto shop not found." });
+            }
+
+            // Check if the user already rated
+            let updated = false;
+            if (Array.isArray(autoShop.ratings)) {
+                for (let i = 0; i < autoShop.ratings.length; i++) {
+                    if (autoShop.ratings[i].userId.toString() === userId.toString()) {
+                        console.log("[rateAutoShop] User already rated. Updating rating.");
+                        autoShop.ratings[i].rating = rating; // Update rating
+                        autoShop.ratings[i].updatedAt = new Date(); // update timestamp (if timestamps is true on schema)
+                        updated = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!updated) {
+                // Push new rating
+                console.log("[rateAutoShop] Pushing new rating for user.");
+                autoShop.ratings.push({
+                    userId: userId,
+                    rating: rating,
+                    createdAt: new Date(),
+                    updatedAt: new Date()
+                });
+            }
+
+            await autoShop.save();
+            console.log("[rateAutoShop] Saved ratings:", autoShop.ratings);
+
+            return res.status(200).json({
+                success: true,
+                message: updated ? "Rating updated successfully." : "Rating added successfully.",
+                ratings: autoShop.ratings
+            });
+        } catch (error) {
+            console.error("[rateAutoShop] Error:", error);
+            return res.status(500).json({ success: false, message: "Internal Server Error" });
         }
     };
 
@@ -1095,6 +1294,61 @@ async getCarOwnerDocuments(req, res) {
     return res.status(500).json({ success: false, message: "Failed to fetch documents", error: error.message });
   }
 }
+
+/**
+ * Toggle the user's liked state for Thought of the Day.
+ * If liked, unlikes it and decrements ThoughtOfTheDayLike in DashboardData.
+ * If not liked, likes it and increments ThoughtOfTheDayLike.
+ * Returns: { thoughtOfTheDayLiked: Boolean }
+ */
+async toggleThoughtOfTheDayLiked(req, res) {
+  try {
+    const userId = req.user.id;
+
+    // Get current user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    // Import DashboardDataModel dynamically, since it isn't statically imported here
+
+
+    // There should only be one dashboardData doc
+    let dashboardData = await DashboardDataModel.findOne();
+    if (!dashboardData) {
+      // Create default record if not present
+      dashboardData = await DashboardDataModel.create({});
+    }
+
+    // Determine increment
+    let increment = 0;
+    if (user.thoughtOfTheDayLiked) {
+      // If already liked, unlike (decrement like count, but not below 0)
+      increment = -1;
+      user.thoughtOfTheDayLiked = false;
+      dashboardData.thoughtOfTheDayLike = Math.max(0, dashboardData.thoughtOfTheDayLike - 1);
+    } else {
+      // If not liked, like (increment like count)
+      increment = 1;
+      user.thoughtOfTheDayLiked = true;
+      dashboardData.thoughtOfTheDayLike += 1;
+    }
+
+    await user.save();
+    await dashboardData.save();
+
+    return res.status(200).json({
+      success: true,
+      thoughtOfTheDayLiked: user.thoughtOfTheDayLiked,
+      thoughtOfTheDayLike: dashboardData.thoughtOfTheDayLike
+    });
+  } catch (error) {
+    console.error("toggleThoughtOfTheDayLiked error:", error);
+    return res.status(500).json({ success: false, message: "Failed to toggle like", error: error.message });
+  }
+}
+
 
 }
 

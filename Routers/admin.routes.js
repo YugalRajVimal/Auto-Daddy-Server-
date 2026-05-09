@@ -88,6 +88,33 @@ adminRouter.delete(
   (req, res) => adminController.deleteDashboardData(req, res)
 );
 
+// Car Company CRUD endpoints
+
+// Add a new car company
+adminRouter.post(
+  "/car-company",
+  (req, res) => adminController.addCarCompany(req, res)
+);
+
+// Fetch all car companies, or filter by companyName
+adminRouter.get(
+  "/car-company",
+  (req, res) => adminController.fetchCarCompanies(req, res)
+);
+
+// Edit a car company by ID
+adminRouter.patch(
+  "/car-company/:id",
+  (req, res) => adminController.editCarCompany(req, res)
+);
+
+// Delete a car company by ID
+adminRouter.delete(
+  "/car-company/:id",
+  (req, res) => adminController.deleteCarCompany(req, res)
+);
+
+
 
 
 

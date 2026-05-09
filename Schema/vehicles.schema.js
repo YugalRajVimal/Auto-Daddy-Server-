@@ -5,6 +5,8 @@ const VehicleSchema = new mongoose.Schema(
     licensePlateNo: { type: String, required: true }, // Vehicle license plate number
     licensePlateFrontImagePath: { type: String, default: null }, // Path or URL to license plate image
     licensePlateBackImagePath: { type: String, default: null }, // Path or URL to license plate image
+    carOwnershipCertificate: { type: String, default: null }, // Path or URL to car ownership certificate image
+    insuranceCertificate: { type: String, default: null }, // Path or URL to insurance certificate image
 
     vinNo: { type: String, required: true }, // Vehicle Identification Number (VIN)
     make: {
