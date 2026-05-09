@@ -58,6 +58,16 @@ userRouter.get("/auto-shops", (req, res) => { userController.getAllAutoShops(req
 userRouter.get("/job-cards", jwtAuth, (req, res) => { userController.getAllJobCards(req, res) });
 
 
+// Approve a job card (customer approves it)
+userRouter.post("/job-cards/:jobCardId/approve", jwtAuth, (req, res) => { 
+  userController.approveJobCard(req, res); 
+});
+
+// Reject a job card (customer rejects it)
+userRouter.post("/job-cards/:jobCardId/reject", jwtAuth, (req, res) => { 
+  userController.rejectJobCard(req, res); 
+});
+
 
 
 

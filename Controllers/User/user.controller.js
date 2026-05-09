@@ -743,6 +743,74 @@ class UserController {
         }
     };
 
+    /**
+     * Approve a job card by ID (customer approves the card - status set to Approved)
+     * 
+     * Expected params:
+     *   - jobCardId (in req.params)
+     * Auth: Must be the customer of the job card
+     */
+    approveJobCard = async (req, res) => {
+        try {
+            const userId = req.user && req.user.id;
+            const { jobCardId } = req.params;
+            if (!userId) {
+                return res.status(401).json({ success: false, message: "Unauthorized" });
+            }
+            if (!jobCardId) {
+                return res.status(400).json({ success: false, message: "JobCard ID is required." });
+            }
+            // Find the job card and ensure it belongs to this user
+            const jobCard = await JobCard.findOne({ _id: jobCardId, customerId: userId });
+            if (!jobCard) {
+                return res.status(404).json({ success: false, message: "JobCard not found." });
+            }
+            if (jobCard.status === "Approved") {
+                return res.status(400).json({ success: false, message: "JobCard is already approved." });
+            }
+            jobCard.status = "Approved";
+            await jobCard.save();
+            return res.status(200).json({ success: true, message: "JobCard approved successfully.", data: jobCard });
+        } catch (error) {
+            console.error("[approveJobCard] Error:", error);
+            return res.status(500).json({ success: false, message: "Failed to approve JobCard", error: error.message });
+        }
+    }
+
+    /**
+     * Reject a job card by ID (customer rejects the card - status set to Rejected)
+     * 
+     * Expected params:
+     *   - jobCardId (in req.params)
+     * Auth: Must be the customer of the job card
+     */
+    rejectJobCard = async (req, res) => {
+        try {
+            const userId = req.user && req.user.id;
+            const { jobCardId } = req.params;
+            if (!userId) {
+                return res.status(401).json({ success: false, message: "Unauthorized" });
+            }
+            if (!jobCardId) {
+                return res.status(400).json({ success: false, message: "JobCard ID is required." });
+            }
+            // Find the job card and ensure it belongs to this user
+            const jobCard = await JobCard.findOne({ _id: jobCardId, customerId: userId });
+            if (!jobCard) {
+                return res.status(404).json({ success: false, message: "JobCard not found." });
+            }
+            if (jobCard.status === "Rejected") {
+                return res.status(400).json({ success: false, message: "JobCard is already rejected." });
+            }
+            jobCard.status = "Rejected";
+            await jobCard.save();
+            return res.status(200).json({ success: true, message: "JobCard rejected successfully.", data: jobCard });
+        } catch (error) {
+            console.error("[rejectJobCard] Error:", error);
+            return res.status(500).json({ success: false, message: "Failed to reject JobCard", error: error.message });
+        }
+    }
+
 
 }
 
