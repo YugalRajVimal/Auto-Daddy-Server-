@@ -1,4 +1,4 @@
-import { deleteUploadedFiles } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
+import { deleteUploadedFile, deleteUploadedFiles } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
 
 import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 import DashboardDataModel from "../../Schema/dashboardData.schema.js";
@@ -899,6 +899,202 @@ async fetchCities(req, res) {
     }
   }
 
+/**
+ * Upload one or more car owner documents (images as base64 text, not path), saving them to the User's documents array (up to 5 allowed total).
+ * Uses field: 'carOwnerDocuments' with "fileUpload" middleware.
+ * Expects:
+ *   - files: req.files["carOwnerDocuments"] (array of images, buffered by multer)
+ *   - body: { names: string[] } or names as part of fields for each file (see below)
+ *   - Each document must have a name value. Names may be provided as:
+ *        1. names[] array in req.body
+ *        2. name property on each file object (req.files[i].originalname can be fallback)
+ */
+async addCarOwnerDocument(req, res) {
+    try {
+      const userId = req.user.id;
+  
+      // upload.fields puts files under req.files[fieldname]
+      let files = req.files && (req.files.carOwnerDocuments || req.files["carOwnerDocuments"]);
+      if (!files && req.file) files = [req.file];
+      if (!Array.isArray(files)) files = files ? [files] : [];
+  
+      console.log("[addCarOwnerDocument] Received files:", files.map(f => f.originalname));
+  
+      // Parse names — accept JSON array string, CSV string, or real array
+      let namesRaw = req.body.names || req.body["names"];
+      let names;
+      if (typeof namesRaw === "string") {
+        const trimmed = namesRaw.trim();
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+          try {
+            names = JSON.parse(trimmed);
+          } catch {
+            names = trimmed.slice(1, -1).split(",").map(s => s.trim().replace(/^"|"$/g, ""));
+          }
+        } else {
+          names = trimmed.split(",").map(s => s.trim());
+        }
+      } else if (Array.isArray(namesRaw)) {
+        names = namesRaw;
+      } else {
+        names = [];
+      }
+  
+      console.log("[addCarOwnerDocument] Provided names (parsed):", names);
+  
+      if (!files.length) {
+        return res.status(400).json({ success: false, message: "No document files uploaded." });
+      }
+  
+      const user = await User.findById(userId).lean();
+      if (!user) {
+        return res.status(404).json({ success: false, message: "User not found." });
+      }
+  
+      const currentCount = (user.documents || []).length;
+      if (currentCount >= 5) {
+        return res.status(400).json({ success: false, message: "Maximum of 5 documents allowed." });
+      }
+  
+      const allowedCount = Math.min(5 - currentCount, files.length);
+  
+      const docsToAdd = [];
+      for (let i = 0; i < allowedCount; i++) {
+        const file = files[i];
+  
+        // With memory storage, buffer is always populated — if missing, something is misconfigured
+        if (!file || !file.buffer) {
+          console.log(`[addCarOwnerDocument] Skipping file (missing buffer):`, file?.originalname);
+          continue;
+        }
+        if (!file.mimetype || !file.mimetype.startsWith("image/")) {
+          console.log(`[addCarOwnerDocument] Skipping file (invalid mimetype):`, file?.originalname);
+          continue;
+        }
+  
+        let name;
+        if (Array.isArray(names) && typeof names[i] === "string" && names[i].trim()) {
+          name = names[i].trim();
+        } else if (file.originalname?.trim()) {
+          name = file.originalname.trim();
+        } else {
+          name = `Document ${currentCount + i + 1}`;
+        }
+  
+        docsToAdd.push({
+          name,
+          imageData: file.buffer.toString("base64"),
+        });
+        console.log(`[addCarOwnerDocument] Prepared document:`, name);
+      }
+  
+      if (docsToAdd.length === 0) {
+        return res.status(400).json({ success: false, message: "No valid image files were uploaded." });
+      }
+  
+      await User.findByIdAndUpdate(userId, {
+        $push: { documents: { $each: docsToAdd } }
+      });
+  
+      console.log(`[addCarOwnerDocument] Uploaded ${docsToAdd.length} document(s) for user:`, userId);
+      return res.status(200).json({
+        success: true,
+        message: `${docsToAdd.length} document(s) uploaded successfully.`
+      });
+  
+    } catch (error) {
+      console.error("addCarOwnerDocument error:", error);
+      return res.status(500).json({ success: false, message: "Failed to add document(s)", error: error.message });
+    }
+  }
+
+/**
+ * Edit an uploaded car owner document name.
+ * Expects: { name: string } in body; :docIdx as index in documents array.
+ */
+async editCarOwnerDocument(req, res) {
+  try {
+    const userId = req.user._id;
+    const { docIdx } = req.params;
+    const { name } = req.body;
+
+    const idx = parseInt(docIdx, 10);
+    if (isNaN(idx) || idx < 0) {
+      return res.status(400).json({ success: false, message: "Invalid document index." });
+    }
+    if (!name || typeof name !== "string") {
+      return res.status(400).json({ success: false, message: "Document name required." });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+    if (!user.documents || !user.documents[idx]) {
+      return res.status(404).json({ success: false, message: "Document not found." });
+    }
+
+    user.documents[idx].name = name;
+    await user.save();
+
+    return res.status(200).json({ success: true, message: "Document updated successfully." });
+  } catch (error) {
+    console.error("editCarOwnerDocument error:", error);
+    return res.status(500).json({ success: false, message: "Failed to edit document", error: error.message });
+  }
+}
+
+/**
+ * Delete a car owner document by index.
+ * Params: :docIdx (index in documents array)
+ * No need to delete image file on disk (image is saved as base64 text).
+ */
+async deleteCarOwnerDocument(req, res) {
+  try {
+    const userId = req.user.id;
+    const { docIdx } = req.params;
+
+    const idx = parseInt(docIdx, 10);
+    if (isNaN(idx) || idx < 0) {
+      return res.status(400).json({ success: false, message: "Invalid document index." });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+    if (!user.documents || !user.documents[idx]) {
+      return res.status(404).json({ success: false, message: "Document not found." });
+    }
+
+    user.documents.splice(idx, 1);
+    await user.save();
+
+    return res.status(200).json({ success: true, message: "Document deleted successfully." });
+  } catch (error) {
+    console.error("deleteCarOwnerDocument error:", error);
+    return res.status(500).json({ success: false, message: "Failed to delete document", error: error.message });
+  }
+}
+
+/**
+ * Get (list) all car owner documents (name and image base64).
+ * Returns: [{ name, imageData }]
+ */
+async getCarOwnerDocuments(req, res) {
+  try {
+    const userId = req.user.id;
+    const user = await User.findById(userId, "documents");
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+    // Documents: [{ name, imageData }]
+    return res.status(200).json({ success: true, data: user.documents || [] });
+  } catch (error) {
+    console.error("getCarOwnerDocuments error:", error);
+    return res.status(500).json({ success: false, message: "Failed to fetch documents", error: error.message });
+  }
+}
 
 }
 

@@ -41,7 +41,14 @@ const UserSchema = new mongoose.Schema(
         addedAt: { type: Date, default: Date.now }
       }
     ],
-    
+
+    documents: [
+      {
+        name: { type: String, required: true },
+        // Save image directly as base64 string text format (instead of file path)
+        imageData: { type: String, required: true }, // base64-encoded image string
+      }
+    ].slice(0, 5), // max 5 documents
 
 
     // OTP fields are available for all users.

@@ -3,6 +3,7 @@ import UserController from "../Controllers/User/user.controller.js";
 import jwtAuth from "../middlewares/Auth/auth.middleware.js";
 import { vehicleUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/vehicleUpload.middleware.js";
 import { upload } from "../middlewares/ImageUploadMiddlewares/fileUpload.middleware.js";
+import { carOwnerUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/carOwnerUploadMiddleware.js";
 
 
 
@@ -74,6 +75,40 @@ userRouter.get("/cities", (req, res) => {
 });
 
 
+// ---- CAR OWNER DOCUMENTS ROUTES ----
+
+// Upto 5 documents per user - Managed by addCarOwnerDocument controller
+
+// Upload/add a car owner document (image as base64, name in body)
+// Upload/add one or more car owner document(s) (images as base64, name(s) in body)
+// Accepts up to 5 files per user, via .array middleware
+userRouter.post(
+  "/documents",
+  jwtAuth,
+  carOwnerUploadMiddleware ,
+  (req, res) => userController.addCarOwnerDocument(req, res)
+);
+
+// Edit a car owner document's name by its index in the documents array
+userRouter.put(
+  "/documents/:docIdx",
+  jwtAuth,
+  (req, res) => userController.editCarOwnerDocument(req, res)
+);
+
+// Delete a car owner document by index
+userRouter.delete(
+  "/documents/:docIdx",
+  jwtAuth,
+  (req, res) => userController.deleteCarOwnerDocument(req, res)
+);
+
+// Get all car owner documents (names and base64 image) for the authenticated user
+userRouter.get(
+  "/documents",
+  jwtAuth,
+  (req, res) => userController.getCarOwnerDocuments(req, res)
+);
 
 
 
