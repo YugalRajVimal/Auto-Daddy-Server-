@@ -12,6 +12,10 @@ const userRouter = express.Router();
 
 const userController = new UserController();
 
+// Route to get dashboard details (dashboard content + user profile + upcoming service)
+userRouter.get("/dashboard", jwtAuth, (req, res) => { userController.getDashboardsDetails(req, res) });
+
+
 // Route to complete user profile (for car owners)
 userRouter.put("/complete-profile",jwtAuth,(req,res)=>{ userController.completeProfile(req,res)});
 userRouter.get("/profile",jwtAuth,(req,res)=>{ userController.getProfileDetails(req,res)});

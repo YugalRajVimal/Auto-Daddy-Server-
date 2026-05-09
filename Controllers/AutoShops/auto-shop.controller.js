@@ -397,440 +397,217 @@ class AutoShopController {
     }
 
     //Profile
-/**
- * Get current user's business profile.
- * Accessible to autoshopowner users. Assumes authentication middleware runs before this.
- */
-async getProfile(req, res) {
-    try {
-        const userId = req.user?.id;
-        if (!userId) {
-            return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
-        }
-
-        // Find user and populate businessProfile if it exists
-        // Only fetch necessary fields for AutoShop owner
-        const user = await User.findById(userId)
-            .select("role businessProfile name email phone countryCode pincode address isAutoShopBusinessProfileComplete isProfileComplete isDisabled status createdAt updatedAt")
-            .lean();
-        if (!user || user.role !== "autoshopowner") {
-            return res.status(404).json({ message: "Autoshopowner user not found." });
-        }
-
-        if (!user.businessProfile) {
-            return res.status(404).json({ message: "Business profile not found." });
-        }
-
-        const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
-
-        if (!businessProfile) {
-            return res.status(404).json({ message: "Business profile not found." });
-        }
-
-        // Send both the businessProfile and user profile (excluding sensitive info like password)
-        // Remove sensitive info if present
-        const { password, ...userSafeProfile } = user;
-
-        return res.status(200).json({ 
-            success: true, 
-            data: {
-                businessProfile,
-                userProfile: userSafeProfile
+    /**
+     * Get current user's business profile.
+     * Accessible to autoshopowner users. Assumes authentication middleware runs before this.
+     */
+    async getProfile(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
             }
-        });
-    } catch (error) {
-        return res.status(500).json({ message: "Failed to get business profile", error: error.message });
-    }
-}
 
-/**
- * Edit/update the current autoshopowner user's profile.
- * Only editable fields: name, email, countryCode, pincode, address
- * Does not allow editing phone or role.
- */
-async editProfile(req, res) {
-    try {
-        const userId = req.user?.id;
-        if (!userId) {
-            return res.status(401).json({ message: "Unauthorized" });
-        }
-
-        // Define which fields the autoshopowner can update
-        const allowedFields = [
-            "name", "email", "countryCode", "pincode", "address"
-        ];
-
-        // Collect the fields provided in the request body
-        const updateFields = {};
-        for (const key of allowedFields) {
-            if (req.body[key] !== undefined) {
-                updateFields[key] = req.body[key];
+            // Find user and populate businessProfile if it exists
+            // Only fetch necessary fields for AutoShop owner
+            const user = await User.findById(userId)
+                .select("role businessProfile name email phone countryCode pincode address isAutoShopBusinessProfileComplete isProfileComplete isDisabled status createdAt updatedAt")
+                .lean();
+            if (!user || user.role !== "autoshopowner") {
+                return res.status(404).json({ message: "Autoshopowner user not found." });
             }
-        }
 
-        if (Object.keys(updateFields).length === 0) {
-            return res.status(400).json({ message: "No profile fields provided to update." });
-        }
-
-        // Ensure user is autoshopowner before updating
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ message: "User not found." });
-        }
-        if (user.role !== "autoshopowner") {
-            return res.status(403).json({ message: "Forbidden. Only autoshopowner can edit this profile." });
-        }
-
-        const updatedUser = await User.findByIdAndUpdate(
-            userId,
-            { $set: updateFields },
-            { new: true, runValidators: true }
-        ).lean();
-
-        if (!updatedUser) {
-            return res.status(404).json({ message: "User not found after update." });
-        }
-
-        // Return updated profile info (exclude confidential/sensitive data)
-        const {
-            name, email, phone, countryCode, pincode, address
-        } = updatedUser;
-
-        return res.status(200).json({
-            success: true,
-            message: "Profile updated successfully.",
-            data: { name, email, phone, countryCode, pincode, address }
-        });
-    } catch (error) {
-        console.error("[editProfile - AutoShopController] Error:", error);
-        return res.status(500).json({ message: "Internal Server Error" });
-    }
-}
-
-
-async completeBusinessProfile(req, res) {
-    let filesToDelete = [];
-    let session = null;
-    try {
-        const userId = req.user?.id;
-        console.log("[completeBusinessProfile] userId:", userId);
-
-        // Validate user authentication
-        if (!userId) {
-            console.log("[completeBusinessProfile] No userId present in auth context");
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
-        }
-
-        // Lookup user
-        const user = await User.findById(userId);
-        console.log("[completeBusinessProfile] User lookup result:", user ? "FOUND" : "NOT FOUND", user?._id || "");
-        if (!user) {
-            console.log("[completeBusinessProfile] No user found for userId:", userId);
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(404).json({ message: "User not found." });
-        }
-
-        console.log("[completeBusinessProfile] User role:", user.role);
-        if (user.role !== "autoshopowner") {
-            console.log(`[completeBusinessProfile] User role not autoshopowner: ${user.role}`);
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(403).json({ message: "Only users with role 'autoshopowner' can complete a business profile." });
-        }
-
-        // Check if business profile is already complete
-        if (user.isAutoShopBusinessProfileComplete && user.businessProfile) {
-            console.log("[completeBusinessProfile] Business profile already completed for user:", userId);
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(400).json({ message: "Business profile already completed." });
-        }
-
-        // Extract business profile details (include gst field)
-        let {
-            businessName,
-            businessAddress,
-            pincode,
-            businessPhone,
-            businessEmail,
-            businessHSTNumber,
-            openHours,
-            openDays,
-            lat,
-            lng,
-            gst, // new gst field
-        } = req.body;
-
-        // Fallback for lat/lng as stringified JSON
-        if (typeof lat === "string") {
-            try {
-                lat = parseFloat(lat);
-            } catch {
-                lat = undefined;
+            if (!user.businessProfile) {
+                return res.status(404).json({ message: "Business profile not found." });
             }
-        }
-        if (typeof lng === "string") {
-            try {
-                lng = parseFloat(lng);
-            } catch {
-                lng = undefined;
+
+            const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
+
+            if (!businessProfile) {
+                return res.status(404).json({ message: "Business profile not found." });
             }
-        }
 
-        // Parse gst as number
-        if (typeof gst === "string" && gst !== "") {
-            const parsedGst = Number(gst);
-            gst = isNaN(parsedGst) ? undefined : parsedGst;
-        }
-        if (gst !== undefined && typeof gst !== "number") {
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(400).json({ message: "gst must be a number." });
-        }
+            // Send both the businessProfile and user profile (excluding sensitive info like password)
+            // Remove sensitive info if present
+            const { password, ...userSafeProfile } = user;
 
-        // Days of the week reference
-        const VALID_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-        // If openDays is a string that looks like an array, try to parse it
-        if (typeof openDays === "string") {
-            try {
-                // Try JSON parse
-                const tmp = JSON.parse(openDays);
-                if (Array.isArray(tmp)) openDays = tmp;
-            } catch (e) {
-                // fallback: split by comma if not valid JSON array
-                openDays = openDays.split(",").map(s => s.trim()).filter(Boolean);
-            }
-        }
-
-        // Validate openDays as array of strings
-        if (!Array.isArray(openDays)) {
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(400).json({ message: "openDays must be an array of day names." });
-        }
-
-        // Validate each value is a valid day name
-        for (const day of openDays) {
-            if (!VALID_DAYS.includes(day)) {
-                if (req.files) deleteUploadedFiles(req.files);
-                return res.status(400).json({
-                    message: `openDays can only contain any of [${VALID_DAYS.join(", ")}]. Invalid value: "${day}"`
-                });
-            }
-        }
-
-        // Compute closedDays by excluding openDays from all valid days (Monday-Saturday)
-        const closedDays = VALID_DAYS.filter(day => !openDays.includes(day));
-
-        console.log("[completeBusinessProfile] Received business profile details: ", {
-            businessName,
-            businessAddress,
-            pincode,
-            lat,
-            lng,
-            businessPhone,
-            businessEmail,
-            businessHSTNumber,
-            openHours,
-            openDays,
-            closedDays,
-            gst,
-        });
-
-        // Required checks
-        if (!businessName || !businessAddress || !pincode || !businessPhone || !businessEmail) {
-            console.log("[completeBusinessProfile] Missing required fields", { businessName, businessAddress, pincode, businessPhone, businessEmail });
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(400).json({
-                message: "Missing required fields: businessName, businessAddress, pincode, businessPhone, businessEmail"
+            return res.status(200).json({ 
+                success: true, 
+                data: {
+                    businessProfile,
+                    userProfile: userSafeProfile
+                }
             });
+        } catch (error) {
+            return res.status(500).json({ message: "Failed to get business profile", error: error.message });
         }
-
-        // Handle businessLogo (image upload via multer)
-        let businessLogo = req.body.businessLogo;
-        if (
-            req.files &&
-            req.files.businessLogo &&
-            Array.isArray(req.files.businessLogo) &&
-            req.files.businessLogo.length > 0
-        ) {
-            businessLogo = req.files.businessLogo[0].path;
-            filesToDelete.push(req.files.businessLogo[0]);
-            console.log("[completeBusinessProfile] Received new businessLogo:", businessLogo);
-        } else {
-            console.log("[completeBusinessProfile] No businessLogo uploaded via multer, using value from req.body");
-        }
-
-        // Prepare map location object using lat/lng
-        let businessMapLocation = undefined;
-        if ((lat !== undefined && lat !== null && lat !== "") || (lng !== undefined && lng !== null && lng !== "")) {
-            businessMapLocation = {};
-            if (lat !== undefined && lat !== null && lat !== "") businessMapLocation.lat = lat;
-            if (lng !== undefined && lng !== null && lng !== "") businessMapLocation.lng = lng;
-            // Remove if empty object
-            if (Object.keys(businessMapLocation).length === 0) businessMapLocation = undefined;
-        }
-
-        // Prepare business profile data shaped according to businessProfileSchema, including gst field
-        const businessProfileDoc = {
-            businessName,
-            businessAddress,
-            pincode,
-            businessMapLocation,
-            businessPhone,
-            businessEmail,
-            businessHSTNumber,
-            openHours,
-            openDays,
-            closedDays,
-            businessLogo,
-            gst, // ensure gst is a number or undefined
-        };
-
-        console.log("[completeBusinessProfile] Prepared businessProfileDoc for DB:", businessProfileDoc);
-
-        // Start a MongoDB transaction
-        session = await mongoose.startSession();
-        session.startTransaction();
-
-        let businessProfile;
-        if (user.businessProfile) {
-            console.log("[completeBusinessProfile] Updating existing businessProfile:", user.businessProfile);
-            // Update existing
-            businessProfile = await BusinessProfileModel.findByIdAndUpdate(
-                user.businessProfile,
-                { $set: businessProfileDoc },
-                { new: true, session }
-            );
-        } else {
-            // New business profile
-            console.log("[completeBusinessProfile] Creating new businessProfile");
-            businessProfile = new BusinessProfileModel(businessProfileDoc);
-            await businessProfile.save({ session });
-            user.businessProfile = businessProfile._id;
-        }
-
-        user.isAutoShopBusinessProfileComplete = true;
-        await user.save({ session });
-
-        await session.commitTransaction();
-        session.endSession();
-
-        console.log("[completeBusinessProfile] Business profile completed successfully for user:", user._id);
-
-        return res.status(200).json({
-            success: true,
-            message: "Business profile completed successfully.",
-            businessProfile
-        });
-
-    } catch (error) {
-        if (session) {
-            try {
-                await session.abortTransaction();
-                session.endSession();
-            } catch {}
-        }
-        // On error, clean up uploaded files if any (e.g. in multer upload)
-        if (req.files) deleteUploadedFiles(req.files);
-
-        console.error("[completeBusinessProfile] Error:", error);
-        return res.status(500).json({ message: "Internal Server Error" });
     }
-}
 
-/**
- * Edit (update) business profile for autoshopowner.
- * Only allows editing of certain fields: (cannot edit name or HST number)
- */
-async editBusinessProfile(req, res) {
-    let filesToDelete = [];
-    let session = null;
-    try {
-        const userId = req.user?.id;
-        console.log("[editBusinessProfile] userId:", userId);
-
-        // Validate user authentication
-        if (!userId) {
-            console.log("[editBusinessProfile] No userId present in auth context");
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
-        }
-
-        // Lookup user
-        const user = await User.findById(userId);
-        console.log("[editBusinessProfile] User lookup result:", user ? "FOUND" : "NOT FOUND", user?._id || "");
-        if (!user) {
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(404).json({ message: "User not found." });
-        }
-
-        if (user.role !== "autoshopowner") {
-            console.log(`[editBusinessProfile] User role not autoshopowner: ${user.role}`);
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(403).json({ message: "Only users with role 'autoshopowner' can edit a business profile." });
-        }
-
-        // Must have an existing business profile
-        if (!user.businessProfile) {
-            console.log("[editBusinessProfile] No businessProfile field in user document");
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(404).json({ message: "Business profile not found." });
-        }
-
-        // Fetch existing business profile
-        let businessProfile = await BusinessProfileModel.findById(user.businessProfile);
-        if (!businessProfile) {
-            console.log("[editBusinessProfile] Business profile document not found for id:", user.businessProfile);
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(404).json({ message: "Business profile not found." });
-        }
-
-        // Only allow editing allowed fields (do not allow editing businessName or businessHSTNumber)
-        let {
-            businessAddress,
-            pincode,
-            businessPhone,
-            businessEmail,
-            openHours,
-            openDays,
-            lat,
-            lng,
-            gst, // add gst
-        } = req.body;
-
-        // Parse lat/lng if sent as strings
-        if (typeof lat === "string") {
-            try { lat = parseFloat(lat); } catch { lat = undefined; }
-        }
-        if (typeof lng === "string") {
-            try { lng = parseFloat(lng); } catch { lng = undefined; }
-        }
-
-        // Parse gst as number
-        if (typeof gst === "string" && gst !== "") {
-            const parsedGst = Number(gst);
-            gst = isNaN(parsedGst) ? undefined : parsedGst;
-        }
-        if (gst !== undefined && typeof gst !== "number") {
-            if (req.files) deleteUploadedFiles(req.files);
-            return res.status(400).json({ message: "gst must be a number." });
-        }
-
-        // If openDays is a stringified array, parse
-        if (typeof openDays === "string") {
-            try {
-                const tmp = JSON.parse(openDays);
-                if (Array.isArray(tmp)) openDays = tmp;
-            } catch (e) {
-                openDays = openDays.split(",").map(s => s.trim()).filter(Boolean);
+    /**
+     * Edit/update the current autoshopowner user's profile.
+     * Only editable fields: name, email, countryCode, pincode, address
+     * Does not allow editing phone or role.
+     */
+    async editProfile(req, res) {
+        try {
+            const userId = req.user?.id;
+            if (!userId) {
+                return res.status(401).json({ message: "Unauthorized" });
             }
-        }
 
-        // Validate openDays if present
-        const VALID_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-        if (openDays !== undefined) {
+            // Define which fields the autoshopowner can update
+            const allowedFields = [
+                "name", "email", "countryCode", "pincode", "address"
+            ];
+
+            // Collect the fields provided in the request body
+            const updateFields = {};
+            for (const key of allowedFields) {
+                if (req.body[key] !== undefined) {
+                    updateFields[key] = req.body[key];
+                }
+            }
+
+            if (Object.keys(updateFields).length === 0) {
+                return res.status(400).json({ message: "No profile fields provided to update." });
+            }
+
+            // Ensure user is autoshopowner before updating
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ message: "User not found." });
+            }
+            if (user.role !== "autoshopowner") {
+                return res.status(403).json({ message: "Forbidden. Only autoshopowner can edit this profile." });
+            }
+
+            const updatedUser = await User.findByIdAndUpdate(
+                userId,
+                { $set: updateFields },
+                { new: true, runValidators: true }
+            ).lean();
+
+            if (!updatedUser) {
+                return res.status(404).json({ message: "User not found after update." });
+            }
+
+            // Return updated profile info (exclude confidential/sensitive data)
+            const {
+                name, email, phone, countryCode, pincode, address
+            } = updatedUser;
+
+            return res.status(200).json({
+                success: true,
+                message: "Profile updated successfully.",
+                data: { name, email, phone, countryCode, pincode, address }
+            });
+        } catch (error) {
+            console.error("[editProfile - AutoShopController] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    }
+
+
+    async completeBusinessProfile(req, res) {
+        let filesToDelete = [];
+        let session = null;
+        try {
+            const userId = req.user?.id;
+            console.log("[completeBusinessProfile] userId:", userId);
+
+            // Validate user authentication
+            if (!userId) {
+                console.log("[completeBusinessProfile] No userId present in auth context");
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
+            }
+
+            // Lookup user
+            const user = await User.findById(userId);
+            console.log("[completeBusinessProfile] User lookup result:", user ? "FOUND" : "NOT FOUND", user?._id || "");
+            if (!user) {
+                console.log("[completeBusinessProfile] No user found for userId:", userId);
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(404).json({ message: "User not found." });
+            }
+
+            console.log("[completeBusinessProfile] User role:", user.role);
+            if (user.role !== "autoshopowner") {
+                console.log(`[completeBusinessProfile] User role not autoshopowner: ${user.role}`);
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(403).json({ message: "Only users with role 'autoshopowner' can complete a business profile." });
+            }
+
+            // Check if business profile is already complete
+            if (user.isAutoShopBusinessProfileComplete && user.businessProfile) {
+                console.log("[completeBusinessProfile] Business profile already completed for user:", userId);
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(400).json({ message: "Business profile already completed." });
+            }
+
+            // Extract business profile details (include gst and city fields)
+            let {
+                businessName,
+                businessAddress,
+                city,
+                pincode,
+                businessPhone,
+                businessEmail,
+                businessHSTNumber,
+                openHours,
+                openDays,
+                lat,
+                lng,
+                gst, // new gst field
+            } = req.body;
+
+            // Fallback for lat/lng as stringified JSON
+            if (typeof lat === "string") {
+                try {
+                    lat = parseFloat(lat);
+                } catch {
+                    lat = undefined;
+                }
+            }
+            if (typeof lng === "string") {
+                try {
+                    lng = parseFloat(lng);
+                } catch {
+                    lng = undefined;
+                }
+            }
+
+            // Parse gst as number
+            if (typeof gst === "string" && gst !== "") {
+                const parsedGst = Number(gst);
+                gst = isNaN(parsedGst) ? undefined : parsedGst;
+            }
+            if (gst !== undefined && typeof gst !== "number") {
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(400).json({ message: "gst must be a number." });
+            }
+
+            // Days of the week reference
+            const VALID_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+            // If openDays is a string that looks like an array, try to parse it
+            if (typeof openDays === "string") {
+                try {
+                    // Try JSON parse
+                    const tmp = JSON.parse(openDays);
+                    if (Array.isArray(tmp)) openDays = tmp;
+                } catch (e) {
+                    // fallback: split by comma if not valid JSON array
+                    openDays = openDays.split(",").map(s => s.trim()).filter(Boolean);
+                }
+            }
+
+            // Validate openDays as array of strings
             if (!Array.isArray(openDays)) {
                 if (req.files) deleteUploadedFiles(req.files);
                 return res.status(400).json({ message: "openDays must be an array of day names." });
             }
+
+            // Validate each value is a valid day name
             for (const day of openDays) {
                 if (!VALID_DAYS.includes(day)) {
                     if (req.files) deleteUploadedFiles(req.files);
@@ -839,90 +616,319 @@ async editBusinessProfile(req, res) {
                     });
                 }
             }
+
+            // Compute closedDays by excluding openDays from all valid days (Monday-Saturday)
+            const closedDays = VALID_DAYS.filter(day => !openDays.includes(day));
+
+            console.log("[completeBusinessProfile] Received business profile details: ", {
+                businessName,
+                businessAddress,
+                city,
+                pincode,
+                lat,
+                lng,
+                businessPhone,
+                businessEmail,
+                businessHSTNumber,
+                openHours,
+                openDays,
+                closedDays,
+                gst,
+            });
+
+            // Required checks
+            if (!businessName || !businessAddress || !pincode || !businessPhone || !businessEmail) {
+                console.log("[completeBusinessProfile] Missing required fields", { businessName, businessAddress, pincode, businessPhone, businessEmail });
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(400).json({
+                    message: "Missing required fields: businessName, businessAddress, pincode, businessPhone, businessEmail"
+                });
+            }
+
+            // Handle businessLogo (image upload via multer)
+            let businessLogo = req.body.businessLogo;
+            if (
+                req.files &&
+                req.files.businessLogo &&
+                Array.isArray(req.files.businessLogo) &&
+                req.files.businessLogo.length > 0
+            ) {
+                businessLogo = req.files.businessLogo[0].path;
+                filesToDelete.push(req.files.businessLogo[0]);
+                console.log("[completeBusinessProfile] Received new businessLogo:", businessLogo);
+            } else {
+                console.log("[completeBusinessProfile] No businessLogo uploaded via multer, using value from req.body");
+            }
+
+            // Prepare map location object using lat/lng
+            let businessMapLocation = undefined;
+            if ((lat !== undefined && lat !== null && lat !== "") || (lng !== undefined && lng !== null && lng !== "")) {
+                businessMapLocation = {};
+                if (lat !== undefined && lat !== null && lat !== "") businessMapLocation.lat = lat;
+                if (lng !== undefined && lng !== null && lng !== "") businessMapLocation.lng = lng;
+                // Remove if empty object
+                if (Object.keys(businessMapLocation).length === 0) businessMapLocation = undefined;
+            }
+
+            // Prepare business profile data shaped according to businessProfileSchema, including gst and city fields
+            const businessProfileDoc = {
+                businessName,
+                businessAddress,
+                city: city !== undefined ? city : null,
+                pincode,
+                businessMapLocation,
+                businessPhone,
+                businessEmail,
+                businessHSTNumber,
+                openHours,
+                openDays,
+                closedDays,
+                businessLogo,
+                gst, // ensure gst is a number or undefined
+            };
+
+            console.log("[completeBusinessProfile] Prepared businessProfileDoc for DB:", businessProfileDoc);
+
+            // Start a MongoDB transaction
+            session = await mongoose.startSession();
+            session.startTransaction();
+
+            let businessProfile;
+            if (user.businessProfile) {
+                console.log("[completeBusinessProfile] Updating existing businessProfile:", user.businessProfile);
+                // Update existing
+                businessProfile = await BusinessProfileModel.findByIdAndUpdate(
+                    user.businessProfile,
+                    { $set: businessProfileDoc },
+                    { new: true, session }
+                );
+            } else {
+                // New business profile
+                console.log("[completeBusinessProfile] Creating new businessProfile");
+                businessProfile = new BusinessProfileModel(businessProfileDoc);
+                await businessProfile.save({ session });
+                user.businessProfile = businessProfile._id;
+            }
+
+            user.isAutoShopBusinessProfileComplete = true;
+            await user.save({ session });
+
+            await session.commitTransaction();
+            session.endSession();
+
+            console.log("[completeBusinessProfile] Business profile completed successfully for user:", user._id);
+
+            return res.status(200).json({
+                success: true,
+                message: "Business profile completed successfully.",
+                businessProfile
+            });
+
+        } catch (error) {
+            if (session) {
+                try {
+                    await session.abortTransaction();
+                    session.endSession();
+                } catch {}
+            }
+            // On error, clean up uploaded files if any (e.g. in multer upload)
+            if (req.files) deleteUploadedFiles(req.files);
+
+            console.error("[completeBusinessProfile] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
         }
-
-        // Compute closedDays if openDays present
-        let closedDays;
-        if (openDays !== undefined) {
-            closedDays = VALID_DAYS.filter(day => !openDays.includes(day));
-        }
-
-        // Handle businessLogo (multer upload)
-        let businessLogo = businessProfile.businessLogo;
-        if (
-            req.files &&
-            req.files.businessLogo &&
-            Array.isArray(req.files.businessLogo) &&
-            req.files.businessLogo.length > 0
-        ) {
-            businessLogo = req.files.businessLogo[0].path;
-            filesToDelete.push(req.files.businessLogo[0]);
-            console.log("[editBusinessProfile] Received new businessLogo:", businessLogo);
-        }
-
-        // Prepare map location (overwrites prev if either lat/lng given)
-        let businessMapLocation = businessProfile.businessMapLocation || {};
-        let latDefined = lat !== undefined && lat !== null && lat !== "";
-        let lngDefined = lng !== undefined && lng !== null && lng !== "";
-
-        if (latDefined || lngDefined) {
-            businessMapLocation = {};
-            if (latDefined) businessMapLocation.lat = lat;
-            if (lngDefined) businessMapLocation.lng = lng;
-            if (Object.keys(businessMapLocation).length === 0) businessMapLocation = undefined;
-        }
-
-        // Prepare update object (only allowed fields)
-        const updateData = {};
-
-        if (businessAddress !== undefined) updateData.businessAddress = businessAddress;
-        if (pincode !== undefined) updateData.pincode = pincode;
-        if (latDefined || lngDefined) updateData.businessMapLocation = businessMapLocation;
-        if (businessPhone !== undefined) updateData.businessPhone = businessPhone;
-        if (businessEmail !== undefined) updateData.businessEmail = businessEmail;
-        if (openHours !== undefined) updateData.openHours = openHours;
-        if (openDays !== undefined) {
-            updateData.openDays = openDays;
-            updateData.closedDays = closedDays;
-        }
-        if (businessLogo !== undefined) updateData.businessLogo = businessLogo;
-        if (gst !== undefined) updateData.gst = gst; // allow gst to be updated; must be a number
-
-        console.log("[editBusinessProfile] Update fields:", updateData);
-
-        // Start transaction
-        session = await mongoose.startSession();
-        session.startTransaction();
-
-        // Update business profile doc
-        Object.assign(businessProfile, updateData);
-        await businessProfile.save({ session });
-
-        await session.commitTransaction();
-        session.endSession();
-
-        return res.status(200).json({
-            success: true,
-            message: "Business profile updated successfully.",
-            businessProfile,
-        });
-
-    } catch (error) {
-        if (session) {
-            try {
-                await session.abortTransaction();
-                session.endSession();
-            } catch { }
-        }
-        if (req.files) deleteUploadedFiles(req.files);
-
-        console.error("[editBusinessProfile] Error:", error);
-        return res.status(500).json({ message: "Internal Server Error" });
     }
-}
+
+    /**
+     * Edit (update) business profile for autoshopowner.
+     * Only allows editing of certain fields: (cannot edit name or HST number)
+     * Now supports city: { type: String, default: null }
+     */
+    async editBusinessProfile(req, res) {
+        let filesToDelete = [];
+        let session = null;
+        try {
+            const userId = req.user?.id;
+            console.log("[editBusinessProfile] userId:", userId);
+
+            // Validate user authentication
+            if (!userId) {
+                console.log("[editBusinessProfile] No userId present in auth context");
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
+            }
+
+            // Lookup user
+            const user = await User.findById(userId);
+            console.log("[editBusinessProfile] User lookup result:", user ? "FOUND" : "NOT FOUND", user?._id || "");
+            if (!user) {
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(404).json({ message: "User not found." });
+            }
+
+            if (user.role !== "autoshopowner") {
+                console.log(`[editBusinessProfile] User role not autoshopowner: ${user.role}`);
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(403).json({ message: "Only users with role 'autoshopowner' can edit a business profile." });
+            }
+
+            // Must have an existing business profile
+            if (!user.businessProfile) {
+                console.log("[editBusinessProfile] No businessProfile field in user document");
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(404).json({ message: "Business profile not found." });
+            }
+
+            // Fetch existing business profile
+            let businessProfile = await BusinessProfileModel.findById(user.businessProfile);
+            if (!businessProfile) {
+                console.log("[editBusinessProfile] Business profile document not found for id:", user.businessProfile);
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(404).json({ message: "Business profile not found." });
+            }
+
+            // Only allow editing allowed fields (do not allow editing businessName or businessHSTNumber)
+            let {
+                businessAddress,
+                city, // <---- Added city support
+                pincode,
+                businessPhone,
+                businessEmail,
+                openHours,
+                openDays,
+                lat,
+                lng,
+                gst, // add gst
+            } = req.body;
+
+            // Parse lat/lng if sent as strings
+            if (typeof lat === "string") {
+                try { lat = parseFloat(lat); } catch { lat = undefined; }
+            }
+            if (typeof lng === "string") {
+                try { lng = parseFloat(lng); } catch { lng = undefined; }
+            }
+
+            // Parse gst as number
+            if (typeof gst === "string" && gst !== "") {
+                const parsedGst = Number(gst);
+                gst = isNaN(parsedGst) ? undefined : parsedGst;
+            }
+            if (gst !== undefined && typeof gst !== "number") {
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(400).json({ message: "gst must be a number." });
+            }
+
+            // If openDays is a stringified array, parse
+            if (typeof openDays === "string") {
+                try {
+                    const tmp = JSON.parse(openDays);
+                    if (Array.isArray(tmp)) openDays = tmp;
+                } catch (e) {
+                    openDays = openDays.split(",").map(s => s.trim()).filter(Boolean);
+                }
+            }
+
+            // Validate openDays if present
+            const VALID_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+            if (openDays !== undefined) {
+                if (!Array.isArray(openDays)) {
+                    if (req.files) deleteUploadedFiles(req.files);
+                    return res.status(400).json({ message: "openDays must be an array of day names." });
+                }
+                for (const day of openDays) {
+                    if (!VALID_DAYS.includes(day)) {
+                        if (req.files) deleteUploadedFiles(req.files);
+                        return res.status(400).json({
+                            message: `openDays can only contain any of [${VALID_DAYS.join(", ")}]. Invalid value: "${day}"`
+                        });
+                    }
+                }
+            }
+
+            // Compute closedDays if openDays present
+            let closedDays;
+            if (openDays !== undefined) {
+                closedDays = VALID_DAYS.filter(day => !openDays.includes(day));
+            }
+
+            // Handle businessLogo (multer upload)
+            let businessLogo = businessProfile.businessLogo;
+            if (
+                req.files &&
+                req.files.businessLogo &&
+                Array.isArray(req.files.businessLogo) &&
+                req.files.businessLogo.length > 0
+            ) {
+                businessLogo = req.files.businessLogo[0].path;
+                filesToDelete.push(req.files.businessLogo[0]);
+                console.log("[editBusinessProfile] Received new businessLogo:", businessLogo);
+            }
+
+            // Prepare map location (overwrites prev if either lat/lng given)
+            let businessMapLocation = businessProfile.businessMapLocation || {};
+            let latDefined = lat !== undefined && lat !== null && lat !== "";
+            let lngDefined = lng !== undefined && lng !== null && lng !== "";
+
+            if (latDefined || lngDefined) {
+                businessMapLocation = {};
+                if (latDefined) businessMapLocation.lat = lat;
+                if (lngDefined) businessMapLocation.lng = lng;
+                if (Object.keys(businessMapLocation).length === 0) businessMapLocation = undefined;
+            }
+
+            // Prepare update object (only allowed fields)
+            const updateData = {};
+
+            if (businessAddress !== undefined) updateData.businessAddress = businessAddress;
+            if (city !== undefined) updateData.city = city; // <-- Now supports setting city to a string, or null
+            if (pincode !== undefined) updateData.pincode = pincode;
+            if (latDefined || lngDefined) updateData.businessMapLocation = businessMapLocation;
+            if (businessPhone !== undefined) updateData.businessPhone = businessPhone;
+            if (businessEmail !== undefined) updateData.businessEmail = businessEmail;
+            if (openHours !== undefined) updateData.openHours = openHours;
+            if (openDays !== undefined) {
+                updateData.openDays = openDays;
+                updateData.closedDays = closedDays;
+            }
+            if (businessLogo !== undefined) updateData.businessLogo = businessLogo;
+            if (gst !== undefined) updateData.gst = gst; // allow gst to be updated; must be a number
+
+            console.log("[editBusinessProfile] Update fields:", updateData);
+
+            // Start transaction
+            session = await mongoose.startSession();
+            session.startTransaction();
+
+            // Update business profile doc
+            Object.assign(businessProfile, updateData);
+            await businessProfile.save({ session });
+
+            await session.commitTransaction();
+            session.endSession();
+
+            return res.status(200).json({
+                success: true,
+                message: "Business profile updated successfully.",
+                businessProfile,
+            });
+
+        } catch (error) {
+            if (session) {
+                try {
+                    await session.abortTransaction();
+                    session.endSession();
+                } catch { }
+            }
+            if (req.files) deleteUploadedFiles(req.files);
+
+            console.error("[editBusinessProfile] Error:", error);
+            return res.status(500).json({ message: "Internal Server Error" });
+        }
+    }
 
 
-//Team member
+    //Team member   
 
     // Add a team member to a business profile (photo as uploaded image)
     async addTeamMember(req, res) {

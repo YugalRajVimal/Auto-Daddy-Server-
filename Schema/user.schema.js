@@ -22,7 +22,7 @@ const UserSchema = new mongoose.Schema(
     phone:{type: String, default: ""},
     pincode:{type: String, default: null},
     address:{type: String, default: null},
-    //city
+    city: { type: String, default: null }, // <-- Added city field
     profilePhoto:{type: String, default: null},
     isDisabled: { type: Boolean, default: false },
     isProfileComplete :{type: Boolean, default: false},
