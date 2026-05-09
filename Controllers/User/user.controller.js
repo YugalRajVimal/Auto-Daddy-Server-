@@ -6,6 +6,7 @@ import DealModel from "../../Schema/deals.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
+import canadianMunicipalities from "../cityData.js";
 
 
 class UserController {
@@ -858,6 +859,45 @@ class UserController {
             return res.status(500).json({ success: false, message: "Failed to reject JobCard", error: error.message });
         }
     }
+
+
+async fetchCities(req, res) {
+    try {
+      const search = req.query.search?.trim();
+      if (search) {
+        // Case-insensitive substring search
+        const searchLower = search.toLowerCase();
+        const matches = canadianMunicipalities.filter(city =>
+          city.toLowerCase().includes(searchLower)
+        );
+  
+        // You can optionally paginate matches as well, but requirement is just to return matches
+        return res.status(200).json({
+          success: true,
+          data: matches
+        });
+      } else {
+        // Pagination: page, pageSize = 100
+        const page = parseInt(req.query.page, 10) > 0 ? parseInt(req.query.page, 10) : 1;
+        const pageSize = 100;
+        const startIdx = (page - 1) * pageSize;
+        const endIdx = startIdx + pageSize;
+        const pageResults = canadianMunicipalities.slice(startIdx, endIdx);
+  
+        return res.status(200).json({
+          success: true,
+          page,
+          pageSize,
+          total: canadianMunicipalities.length,
+          totalPages: Math.ceil(canadianMunicipalities.length / pageSize),
+          data: pageResults
+        });
+      }
+    } catch (err) {
+      console.error("[fetchCities] Error:", err);
+      res.status(500).json({ success: false, message: "Failed to fetch cities", error: err.message });
+    }
+  }
 
 
 }
