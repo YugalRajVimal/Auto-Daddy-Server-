@@ -29,6 +29,7 @@ const myServiceSchema = new Schema({
 const businessProfileSchema = new Schema({
   businessName: { type: String, required: true },
   businessAddress: { type: String, required: true },
+  city: { type: String, default: null }, // <-- Added city field 
   pincode: { type: String, required: true },
   businessMapLocation: {
     type: {

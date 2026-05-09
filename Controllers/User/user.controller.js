@@ -1,6 +1,7 @@
 import { deleteUploadedFiles } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
 
 import BusinessProfileModel from "../../Schema/bussiness-profile.js";
+import DashboardDataModel from "../../Schema/dashboardData.schema.js";
 import DealModel from "../../Schema/deals.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
 import { User } from "../../Schema/user.schema.js";
@@ -8,6 +9,109 @@ import { VehicleModel } from "../../Schema/vehicles.schema.js";
 
 
 class UserController {
+
+    /**
+     * Get dashboard data for the user:
+     * - Dashboard content from dashboardData.schema.js (single document, if available)
+     * - User profile (limited public fields)
+     * - Upcoming next service (from JobCards for this user, soonest DUE)
+     */
+    getDashboardsDetails = async (req, res) => {
+        try {
+            // 1. Dashboard data (static marketing info, etc)
+            const dashboardDoc = await DashboardDataModel.findOne().lean();
+
+            // 2. User profile (basic info only)
+            const userId = req.user && req.user.id;
+            if (!userId) {
+                return res.status(401).json({ success: false, message: "Unauthorized" });
+            }
+            // Only select safe fields
+            const user = await User.findById(userId)
+                .select("name email phone profilePhoto isProfileComplete myVehicles createdAt role")
+                .populate({
+                    path: "myVehicles",
+                    model: "Vehicle",
+                    select: "make model year licensePlateNo odometer currentServiceHistory",
+                })
+                .lean();
+
+            if (!user) {
+                return res.status(404).json({ success: false, message: "User not found" });
+            }
+
+            // 3. Upcoming next service (JobCard where customer==userId, dueOdometer/maintenance-related, sorted by closest future)
+            let nextService = null;
+            const userVehicleIds = Array.isArray(user.myVehicles) ?
+                user.myVehicles.map(v => v._id || v) : [];
+
+            if (userVehicleIds.length > 0) {
+                // Build the query for the next job card
+                const jobCardQuery = {
+                    vehicleId: { $in: userVehicleIds },
+                    customerId: userId,
+                    status: { $in: ["Pending", "Scheduled", "Upcoming"] },
+                };
+
+                // Get the next job card, populating customer, vehicle, services, etc.
+                const nextJobCard = await JobCard.findOne(jobCardQuery)
+                    .sort([
+                        ["dueOdometerReading", 1],
+                        ["createdAt", 1]
+                    ])
+                    .populate([
+                        {
+                            path: "customerId",
+                            model: "User",
+                            select: "name email phone profilePhoto"
+                        },
+                        {
+                            path: "vehicleId",
+                            model: "Vehicle",
+                            select: "make model year licensePlateNo odometer currentServiceHistory"
+                        },
+                        {
+                            path: "services", // assuming job card has a 'services' field referencing services
+                            model: "Service", // adapt to the name of your Service model
+                            // select fields as needed, e.g. select: "serviceName price ..."
+                        }
+                    ])
+                    .lean();
+
+                if (nextJobCard) {
+                    nextService = {
+                        jobCardId: nextJobCard._id,
+                        vehicle: nextJobCard.vehicleId, // populated vehicle details
+                        customer: nextJobCard.customerId, // populated customer details
+                        dueOdometerReading: nextJobCard.dueOdometerReading,
+                        createdAt: nextJobCard.createdAt,
+                        issueDescription: nextJobCard.issueDescription,
+                        serviceType: nextJobCard.serviceType,
+                        priorityLevel: nextJobCard.priorityLevel,
+                        status: nextJobCard.status,
+                        dueDate: nextJobCard.dueDate,
+                        services: nextJobCard.services || [],
+                        // add any other fields you want to expose
+                    };
+                }
+            }
+
+            // Respond
+            return res.status(200).json({
+                success: true,
+                dashboard: dashboardDoc || {},
+                userProfile: user,
+                nextService: nextService,
+            });
+        } catch (err) {
+            console.error("[getDashboardsDetails] Error:", err);
+            return res.status(500).json({
+                success: false,
+                message: "Failed to get dashboard details",
+                error: err.message,
+            });
+        }
+    }
 
     completeProfile = async (req, res) => {
         try {
@@ -116,6 +220,7 @@ class UserController {
                 countryCode,
                 pincode,
                 address,
+                city,
                 favoriteAutoShops
             } = user;
 
@@ -126,6 +231,7 @@ class UserController {
                 countryCode,
                 pincode,
                 address,
+                city,
                 favoriteAutoShopsIds:favoriteAutoShops
             });
 
@@ -154,9 +260,9 @@ class UserController {
             }
 
             const updateFields = {};
-            // Omit the "phone" from editable fields
+            // Now also allowing "city" to be edited
             const allowedFields = [
-                "name", "email", "countryCode", "pincode", "address"
+                "name", "email", "countryCode", "pincode", "address", "city"
             ];
 
             for (const key of allowedFields) {
@@ -206,13 +312,13 @@ class UserController {
 
             // Only return relevant info, still include phone in response (not updated)
             const {
-                name, email, phone, countryCode, pincode, address, profilePhoto
+                name, email, phone, countryCode, pincode, address, profilePhoto, city
             } = updatedUser;
 
             return res.status(200).json({
                 success: true,
                 message: "Profile updated successfully.",
-                data: { name, email, phone, countryCode, pincode, address, profilePhoto }
+                data: { name, email, phone, countryCode, pincode, address, city, profilePhoto }
             });
 
         } catch (error) {
@@ -303,12 +409,8 @@ class UserController {
         }
     }
 
-    // --------- VEHICLE CRUD Operations ----------
-
+    // ---------- VEHICLE CRUD Operations ----------
     // Add a new vehicle for the authenticated user (car owner)
-
-
-
     addVehicle = async (req, res) => {
         const session = await VehicleModel.startSession();
         session.startTransaction();
@@ -508,18 +610,77 @@ class UserController {
     // Fetch all auto shops (reuse logic from AutoShopController)
     getAllAutoShops = async (req, res) => {
         try {
-            // Find all auto shops and populate services, subServices, and also populate the deals in myDeals correctly
-            const autoShops = await BusinessProfileModel.find({})
-                .populate({
-                    path: 'myServices.service',
+            // Fetch requesting user (to get their city)
+            const userId = req.user?.id;
+            let userCity = null;
+            if (userId) {
+                // Find user and their city (if available)
+                const user = await User.findById(userId).lean();
+                userCity = user?.city?.trim().toLowerCase() || null;
+            }
+
+            // Only select required fields from the business profile model
+            // Fields: businessName, openHours, openDays, closedDays, businessAddress, city, businessPhone, businessEmail,
+            // businessLogo (businessProfileImage), businessMapLocation
+            let autoShops = await BusinessProfileModel.find({}, {
+                    businessName: 1,
+                    openHours: 1,
+                    openDays: 1,
+                    closedDays: 1,
+                    businessAddress: 1,
+                    city: 1,
+                    businessPhone: 1,
+                    businessEmail: 1,
+                    businessLogo: 1, // will be named as businessProfileImage below
+                    businessMapLocation: 1,
+                    _id: 1
                 })
                 .populate({
-                    path: 'myServices.subServices.subService',
+                    path: 'myServices.service',
+                    model: 'Services',
+                    select: 'name desc',
                 })
                 .populate({
                     path: 'myDeals',
                     model: 'Deal'
-                });
+                })
+                .lean();
+
+            // Map/rename businessLogo -> businessProfileImage in the result
+            autoShops = autoShops.map(shop => {
+                return {
+                    _id: shop._id,
+                    businessName: shop.businessName,
+                    openHours: shop.openHours,
+                    openDays: shop.openDays,
+                    closedDays: shop.closedDays,
+                    businessAddress: shop.businessAddress,
+                    city: shop.city,
+                    contactDetails: {
+                        phone: shop.businessPhone,
+                        email: shop.businessEmail
+                    },
+                    businessProfileImage: shop.businessLogo,
+                    businessMapLocation: shop.businessMapLocation,
+                    myServices: shop.myServices,
+                    myDeals: shop.myDeals
+                };
+            });
+
+            // If userCity is available, sort so that matching city shops come first
+            if (userCity) {
+                const matching = [];
+                const others = [];
+                for (const shop of autoShops) {
+                    const shopCity = shop.city?.trim().toLowerCase() || null;
+                    if (shopCity && shopCity === userCity) {
+                        matching.push(shop);
+                    } else {
+                        others.push(shop);
+                    }
+                }
+                autoShops = matching.concat(others);
+            }
 
             return res.status(200).json({ success: true, data: autoShops });
         } catch (error) {
