@@ -380,31 +380,32 @@ class UserController {
 
     getFavAutoShops = async (req, res) => {
         try {
-            const id = req.user?.id;
-            if (!id) {
+            const userId = req.user?.id;
+            if (!userId) {
                 return res.status(401).json({ message: "Unauthorized" });
             }
 
-            // Populate favoriteAutoShops when fetching user
-            const user = await User.findById(id)
-                .populate('favoriteAutoShops')
+            // Fetch user with populated favoriteAutoShops using BusinessProfile (not AutoShop)
+            const user = await User.findById(userId)
+                .populate({
+                    path: 'favoriteAutoShops',
+                    model: 'BusinessProfile', // explicitly populate from BusinessProfile model
+                    select: 'businessName businessAddress city businessLogo businessPhone businessEmail openHours openDays closedDays businessMapLocation isBusinessActive myServices myDeals'
+                })
                 .lean();
 
             if (!user) {
                 return res.status(404).json({ message: "User not found." });
             }
 
-            const {
-             
-                favoriteAutoShops
-            } = user;
+            const favoriteAutoShops = user.favoriteAutoShops || [];
 
             return res.status(200).json({
-                favoriteAutoShops: favoriteAutoShops || []
+                favoriteAutoShops
             });
 
         } catch (error) {
-            console.error("[getProfileDetails] Error:", error);
+            console.error("[getFavAutoShops] Error:", error);
             return res.status(500).json({ message: "Internal Server Error" });
         }
     }
