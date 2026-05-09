@@ -1,7 +1,10 @@
 import multer from "multer";
 import fs from "fs";
 
-// Configure disk storage
+// -- v1
+// Add import for VehicleModel if needed in future, but not required for this middleware code specifically
+
+// Configure disk storage for multer
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     let uploadPath = "./Uploads/";
@@ -29,10 +32,14 @@ const storage = multer.diskStorage({
       uploadPath = "./Uploads/ExcelFiles";
     }
     else if (
+      // @vehicles.schema.js (8-9)
+      // Support for car ownership certificate and insurance certificate
       file.fieldname === "licensePlateFrontImage" ||
       file.fieldname === "licensePlateBackImage" ||
       file.fieldname === "carImages" ||
-      file.fieldname === "vehiclePhotos"
+      file.fieldname === "vehiclePhotos" ||
+      file.fieldname === "carOwnershipCertificate" ||
+      file.fieldname === "insuranceCertificate"
     ) {
       uploadPath = "./Uploads/Vehicles";
     }
@@ -85,7 +92,10 @@ const fileFilter = (req, file, cb) => {
     "businessLogo",
     "teamMemberPhoto",
     "profilePhoto",
-    "carOwnerDocuments",  // kept here so memoryUpload also benefits from filter
+    "carOwnerDocuments",        // Memory uploads and filtering
+    // @vehicles.schema.js (8-9)
+    "carOwnershipCertificate",
+    "insuranceCertificate"
   ];
 
   if (imageFields.includes(file.fieldname)) {

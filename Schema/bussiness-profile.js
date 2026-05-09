@@ -25,11 +25,17 @@ const myServiceSchema = new Schema({
   subServices: [selectedSubServiceSchema] // List of subService ObjectIds for this service
 }, { _id: false });
 
+// Rating Schema: UserId and rating value 
+const ratingSchema = new Schema({
+  userId: { type: Types.ObjectId, ref: 'User', required: true },
+  rating: { type: Number, required: true, min: 1, max: 5 },
+}, { timestamps: true, _id: false });
+
 // Business Profile Schema
 const businessProfileSchema = new Schema({
   businessName: { type: String, required: true },
   businessAddress: { type: String, required: true },
-  city: { type: String, default: null }, // <-- Added city field 
+  city: { type: String, default: null },
   pincode: { type: String, required: true },
   businessMapLocation: {
     type: {
@@ -54,7 +60,8 @@ const businessProfileSchema = new Schema({
   // Nested myServices array, each containing a reference to a main service and selected subservices (nested like services schema)
   myServices: [myServiceSchema],
 
-  //vehicles  (  )
+  // Ratings array: each rating with userId
+  ratings: [ratingSchema],
 
   // Add support for linking deals to this business profile
   myDeals: [{ type: Types.ObjectId, ref: "Deal" }],

@@ -22,79 +22,50 @@ class AuthController {
       }
 
       // Clean formatting (do not remove +)
-      countryCode = countryCode.trim(); // Preserve leading '+'
+      countryCode = countryCode.trim();
       phone = phone.trim();
       countryCode = countryCode.replace(/\s+/g, "");
       phone = phone.replace(/\s+/g, "");
       if (email) email = email.trim().toLowerCase();
 
-      // Validate
+      // Allow only specific country codes
+      const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
+      if (!allowedCountryCodes.includes(countryCode)) {
+        return res.status(400).json({ 
+          message: "Invalid country code. Allowed: +1 (Canada/United States), +61 (Australia), +44 (United Kingdom), +91 (India)." 
+        });
+      }
+
       if (!/^\+?\d{1,4}$/.test(countryCode)) {
-        // Allow optional leading +
-        return res.status(400).json({ message: "Invalid country code." });
+        return res.status(400).json({ message: "Invalid country code format." });
       }
       if (!/^\d{5,15}$/.test(phone)) {
         return res.status(400).json({ message: "Invalid phone number." });
       }
 
-      // Use standard OTP field: otp, otpExpiresAt, otpGeneratedAt, otpAttempts
+      // Only allow login for existing users -- no user creation here
+      let user = await User.findOne({ countryCode, phone });
+
+      if (!user) {
+        // No user found for this phone/countryCode
+        return res.status(404).json({ message: "User with this phone does not exist." });
+      }
+
+      // Use standard OTP fields
       // const otp = Math.floor(100000 + Math.random() * 900000).toString();
       const otp = "000000";
       const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min expiry
       const otpGeneratedAt = new Date();
 
-      // Try to find user by countryCode/phone
-      let user = await User.findOne({ countryCode, phone });
+      user.otp = otp;
+      user.otpExpiresAt = otpExpiresAt;
+      user.otpGeneratedAt = otpGeneratedAt;
+      user.otpAttempts = 0;
+      await user.save();
 
-      if (user) {
-        user.otp = otp;
-        user.otpExpiresAt = otpExpiresAt;
-        user.otpGeneratedAt = otpGeneratedAt;
-        user.otpAttempts = 0;
-        await user.save();
-
-        return res.status(200).json({
-          message: "OTP sent successfully for login",
-          userId: user._id,
-        });
-      }
-
-      // BEFORE creating new, check if email or phone already exists on another user
-      // (shouldn't happen if proper check on user collection, but for safety)
-      if (email) {
-        const existingEmailUser = await User.findOne({ email: email });
-        if (existingEmailUser) {
-          return res.status(409).json({
-            message: "User with this email already exists.",
-            userId: existingEmailUser._id
-          });
-        }
-      }
-      const existingPhoneUser = await User.findOne({ countryCode, phone });
-      if (existingPhoneUser) {
-        // Unlikely to occur (we checked above), but extra safety
-        return res.status(409).json({
-          message: "User with this phone already exists.",
-          userId: existingPhoneUser._id
-        });
-      }
-
-      // Create new user using standard schema fields (no custom signUpOTP* fields)
-      user = await User.create({
-        countryCode,
-        phone,
-        email: email || undefined,
-        otp,
-        otpExpiresAt,
-        otpGeneratedAt,
-        otpAttempts: 0,
-        phoneVerified: false,
-        emailVerified: false
-      });
-
-      return res.status(201).json({
-        message: "Sign-up OTP sent successfully",
-        userId: user._id
+      return res.status(200).json({
+        message: "OTP sent successfully for login",
+        userId: user._id,
       });
 
     } catch (error) {
@@ -330,10 +301,10 @@ class AuthController {
   // Verify Account with OTP per user.schema.js fields
   verifyAccount = async (req, res) => {
     try {
-      let { countryCode, phone, otp } = req.body;
+      let { countryCode, phone, otp, deviceId } = req.body;
       console.log("[verifyAccount] Incoming params:", req.body);
 
-      console.log("[verifyAccount] Incoming params:", { countryCode, phone, otp });
+      console.log("[verifyAccount] Incoming params:", { countryCode, phone, otp, deviceId });
 
       if (!countryCode || !phone || !otp) {
         console.log("[verifyAccount] Missing params:", { countryCode, phone, otp });
@@ -374,13 +345,16 @@ class AuthController {
         return res.status(401).json({ message: "OTP has expired. Please request a new OTP." });
       }
 
-      // Update fields for verified user; clear OTP and set phoneVerified
+      // Update fields for verified user; clear OTP and set phoneVerified, save deviceId if provided
       user.otp = null;
       user.otpExpiresAt = null;
       user.otpGeneratedAt = null;
       user.otpAttempts = 0;
       user.phoneVerified = true;
       user.lastLogin = new Date();
+      if (deviceId) {
+        user.deviceId = deviceId;
+      }
       await user.save();
 
       // Generate JWT

@@ -28,6 +28,11 @@ userRouter.get("/favorite-auto-shops", jwtAuth, (req, res) => { userController.g
 
 // -------- VEHICLE CRUD ROUTES --------
 
+// Route to fetch car companies (with optional companyName search)
+userRouter.get("/car-companies", (req, res) => {
+  userController.fetchCarCompanies(req, res);
+});
+
 // Add a new vehicle
 
 userRouter.post(
@@ -54,6 +59,12 @@ userRouter.get("/deals", (req, res) => { userController.getAllDeals(req, res) })
 
 // Route to get all auto shops (public endpoint)
 userRouter.get("/auto-shops", (req, res) => { userController.getAllAutoShops(req, res) });
+
+// Route to rate an auto shop (POST: autoShopId, rating [1-5] in body)
+userRouter.post("/rate-auto-shop", jwtAuth, (req, res) => {
+  userController.rateAutoShop(req, res);
+});
+
 
 // Fetch all job cards for the authenticated user (car owner)
 userRouter.get("/job-cards", jwtAuth, (req, res) => { userController.getAllJobCards(req, res) });
@@ -108,6 +119,14 @@ userRouter.get(
   "/documents",
   jwtAuth,
   (req, res) => userController.getCarOwnerDocuments(req, res)
+);
+
+
+// Toggle like/unlike for Thought of the Day (user)
+userRouter.post(
+  "/thought-of-the-day/toggle-like",
+  jwtAuth,
+  (req, res) => userController.toggleThoughtOfTheDayLiked(req, res)
 );
 
 

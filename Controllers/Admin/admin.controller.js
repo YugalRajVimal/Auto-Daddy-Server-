@@ -1,3 +1,4 @@
+import CarCompany from "../../Schema/car-company-schema.js";
 import DashboardDataModel from "../../Schema/dashboardData.schema.js";
 import DealModel from "../../Schema/deals.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
@@ -731,6 +732,103 @@ async deleteDashboardData(req, res) {
     } catch (err) {
         console.error("[deleteDashboardData] Error:", err);
         return res.status(500).json({ message: "Failed to delete dashboard data", error: err.message });
+    }
+}
+
+// --- Car Company CRUD Operations ---
+
+
+/**
+ * Add a new car company with models and years
+ * POST /admin/car-company
+ * Body: { companyName: string, models: [{ modelName: string, years: [number] }] }
+ */
+async addCarCompany(req, res) {
+    try {
+        const { companyName, models } = req.body;
+        if (!companyName || !Array.isArray(models) || models.length === 0) {
+            return res.status(400).json({ message: "companyName and models are required." });
+        }
+
+        // Check for duplicate companyName
+        const existing = await CarCompany.findOne({ companyName });
+        if (existing) {
+            return res.status(409).json({ message: "Car company already exists." });
+        }
+
+        const newCompany = new CarCompany({ companyName, models });
+        await newCompany.save();
+
+        return res.status(201).json({ success: true, data: newCompany });
+    } catch (err) {
+        console.error("[addCarCompany] Error:", err);
+        return res.status(500).json({ message: "Failed to add car company", error: err.message });
+    }
+}
+
+/**
+ * Fetch all car companies, or filter by companyName if query provided
+ * GET /admin/car-company?companyName=Honda
+ */
+async fetchCarCompanies(req, res) {
+    try {
+        const { companyName } = req.query;
+        let companies;
+        if (companyName) {
+            companies = await CarCompany.find({ companyName: { $regex: companyName, $options: "i" } });
+        } else {
+            companies = await CarCompany.find({});
+        }
+        return res.status(200).json({ success: true, data: companies });
+    } catch (err) {
+        console.error("[fetchCarCompanies] Error:", err);
+        return res.status(500).json({ message: "Failed to fetch car companies", error: err.message });
+    }
+}
+
+/**
+ * Edit a car company by ID
+ * PATCH /admin/car-company/:id
+ * Body may include any subset of { companyName, models }
+ */
+async editCarCompany(req, res) {
+    try {
+        const { id } = req.params;
+        const { companyName, models } = req.body;
+        if (!companyName && !models) {
+            return res.status(400).json({ message: "Nothing to update." });
+        }
+
+        const updateFields = {};
+        if (companyName) updateFields.companyName = companyName;
+        if (models) updateFields.models = models;
+
+        const updated = await CarCompany.findByIdAndUpdate(id, updateFields, { new: true });
+        if (!updated) {
+            return res.status(404).json({ message: "CarCompany not found." });
+        }
+        return res.status(200).json({ success: true, data: updated });
+    } catch (err) {
+        console.error("[editCarCompany] Error:", err);
+        return res.status(500).json({ message: "Failed to edit car company", error: err.message });
+    }
+}
+
+/**
+ * Delete a car company by ID
+ * DELETE /admin/car-company/:id
+ */
+async deleteCarCompany(req, res) {
+    try {
+        const { id } = req.params;
+        const deleted = await CarCompany.findByIdAndDelete(id);
+        if (!deleted) {
+            return res.status(404).json({ message: "CarCompany not found." });
+        }
+        return res.status(200).json({ success: true, message: "CarCompany deleted." });
+    } catch (err) {
+        console.error("[deleteCarCompany] Error:", err);
+        return res.status(500).json({ message: "Failed to delete car company", error: err.message });
     }
 }
 

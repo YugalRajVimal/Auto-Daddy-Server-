@@ -135,6 +135,15 @@ autoShopRouter.post(
 );
 
 
+// Route to fetch all car companies (or filter by companyName query)
+autoShopRouter.get(
+  "/car-companies",
+  jwtAuth,
+  (req, res) => autoShopController.fetchCarCompanies(req, res)
+);
+
+
+
 // Route to onboard (create) a new car owner from the auto shop panel (by the autoshop owner)
 autoShopRouter.post(
   "/onboard-carowner",
