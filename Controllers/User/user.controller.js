@@ -704,18 +704,38 @@ class UserController {
                 return res.status(404).json({ success: false, message: "User not found" });
             }
 
-            // Find all JobCards where this user is the customer
-            const jobCards = await JobCard.find({ customerId: userId })
-                .populate([
-                    { path: 'business', model: 'BusinessProfile', select: 'businessName businessType address contactNumber' },
-                    { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' },
-                ])
-                .sort({ createdAt: -1 })
-                .lean();
+            // Find job cards separated by status
+            const [pendingJobCards, approvedJobCards, rejectedJobCards] = await Promise.all([
+                JobCard.find({ customerId: userId, status: 'Pending' })
+                    .populate([
+                        { path: 'business', model: 'BusinessProfile', select: 'businessName businessType address contactNumber' },
+                        { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' }
+                    ])
+                    .sort({ createdAt: -1 })
+                    .lean(),
+                JobCard.find({ customerId: userId, status: 'Approved' })
+                    .populate([
+                        { path: 'business', model: 'BusinessProfile', select: 'businessName businessType address contactNumber' },
+                        { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' }
+                    ])
+                    .sort({ createdAt: -1 })
+                    .lean(),
+                JobCard.find({ customerId: userId, status: 'Rejected' })
+                    .populate([
+                        { path: 'business', model: 'BusinessProfile', select: 'businessName businessType address contactNumber' },
+                        { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' }
+                    ])
+                    .sort({ createdAt: -1 })
+                    .lean(),
+            ]);
 
             return res.status(200).json({
                 success: true,
-                data: jobCards
+                data: {
+                    pending: pendingJobCards,
+                    approved: approvedJobCards,
+                    rejected: rejectedJobCards
+                }
             });
         } catch (error) {
             console.error("[getAllJobCards - CarOwner] Error:", error);
