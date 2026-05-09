@@ -604,12 +604,17 @@ class UserController {
                 }
             }
 
-            // Fetch all deals where business isActive and get business city in populate
+            // Fetch all deals, populating business profile and then each service inside deal.services
             let deals = await DealModel.find({})
                 .populate({
                     path: "createdBy",
                     select: "city businessName businessAddress businessLogo",
                     model: "BusinessProfile"
+                })
+                .populate({
+                    path: "serviceId", // This assumes "services" is an array [{service: ObjectId, ...}]
+                    model: "Services",
+                    select: "name desc"
                 })
                 .lean();
 
