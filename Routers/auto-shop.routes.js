@@ -402,6 +402,10 @@ autoShopRouter.get(
 );
 
 
+autoShopRouter.get("/cities", (req, res) => {
+  autoShopController.fetchCities(req, res);
+});
+
 
 
 

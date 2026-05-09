@@ -68,6 +68,12 @@ userRouter.post("/job-cards/:jobCardId/reject", jwtAuth, (req, res) => {
   userController.rejectJobCard(req, res); 
 });
 
+// Route to fetch Canadian cities (search or paginated)
+userRouter.get("/cities", (req, res) => {
+  userController.fetchCities(req, res);
+});
+
+
 
 
 
