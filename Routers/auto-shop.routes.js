@@ -416,7 +416,25 @@ autoShopRouter.get("/cities", (req, res) => {
 });
 
 
+// Route to fetch only main car companies (with optional companyName search)
+autoShopRouter.get("/main-car-companies", (req, res) => {
+  autoShopController.fetchMainCarCompanies(req, res);
+});
 
+// Route to add car companies to the authenticated user's business profile
+autoShopRouter.patch(
+  "/my-car-companies",
+  jwtAuth,
+  (req, res) => autoShopController.addCarCompaniesToBusinessProfile(req, res)
+);
+
+
+// Route to remove car companies from the authenticated user's business profile
+autoShopRouter.delete(
+  "/my-car-companies",
+  jwtAuth,
+  (req, res) => autoShopController.removeCarCompaniesFromBusinessProfile(req, res)
+);
 
 
 

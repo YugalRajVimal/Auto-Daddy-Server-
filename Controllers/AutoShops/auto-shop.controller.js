@@ -423,13 +423,18 @@ class AutoShopController {
                 return res.status(404).json({ message: "Business profile not found." });
             }
 
-            const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
+            // Populate ONLY main companyName and _id for carCompanies
+            const businessProfile = await BusinessProfileModel.findById(user.businessProfile)
+                .populate({
+                    path: "carCompanies",
+                    select: "companyName"
+                })
+                .lean();
 
             if (!businessProfile) {
                 return res.status(404).json({ message: "Business profile not found." });
             }
 
-            // Send both the businessProfile and user profile (excluding sensitive info like password)
             // Remove sensitive info if present
             const { password, ...userSafeProfile } = user;
 
@@ -5634,6 +5639,156 @@ async fetchCities(req, res) {
     res.status(500).json({ success: false, message: "Failed to fetch cities", error: err.message });
   }
 }
+
+async fetchMainCarCompanies(req, res) {
+    try {
+      // Lazy require to avoid circular or unused import at top level
+
+      const { companyName } = req.query;
+      let companies;
+      if (companyName) {
+        companies = await CarCompany.find(
+          { companyName: { $regex: companyName, $options: "i" } },
+          { companyName: 1, _id: 1 }
+        );
+      } else {
+        companies = await CarCompany.find({}, { companyName: 1, _id: 1 });
+      }
+      // Send array of objects with _id and companyName
+      return res.status(200).json({ success: true, data: companies });
+    } catch (err) {
+      console.error("[fetchMainCarCompanies] Error:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to fetch car companies",
+        error: err.message
+      });
+    }
+  }
+
+  
+/**
+ * Add carCompanies to BusinessProfile using array of CarCompany _id values
+ * Expects req.body.carCompanyIds to be an array of CarCompany ObjectIds (as string)
+ * PATCH /business-profile/car-companies
+ * Requires authentication (should have req.user.businessProfileId or get from req.user)
+ */
+async addCarCompaniesToBusinessProfile(req, res) {
+  try {
+    const { carCompanyIds } = req.body;
+
+    if (!Array.isArray(carCompanyIds) || carCompanyIds.length === 0) {
+      return res.status(400).json({ success: false, message: "carCompanyIds array required" });
+    }
+
+    // Get authenticated user's ID
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "User not authenticated" });
+    }
+
+    // Get user's businessProfile
+    const user = await User.findById(userId).select('businessProfile');
+    if (!user ) {
+      return res.status(401).json({ success: false, message: "Business profile not found for user" });
+    }
+console.log(user);
+    // Fetch the business profile
+    const businessProfile = await BusinessProfileModel.findById(user.businessProfile);
+    if (!businessProfile) {
+      return res.status(404).json({ success: false, message: "BusinessProfile not found" });
+    }
+
+    // Validate all CarCompany Ids
+    const existingCompanies = await CarCompany.find({ _id: { $in: carCompanyIds } }).select("_id");
+    const foundIds = existingCompanies.map((c) => String(c._id));
+    const notFoundIds = carCompanyIds.filter(id => !foundIds.includes(String(id)));
+    if (notFoundIds.length > 0) {
+      return res.status(404).json({ success: false, message: "Some CarCompany ids not found", notFoundIds });
+    }
+
+    // Add only unique new CarCompany Ids
+    const currentIds = (businessProfile.carCompanies || []).map(id => String(id));
+    const uniqueToAdd = carCompanyIds.filter(id => !currentIds.includes(String(id)));
+    if (uniqueToAdd.length === 0) {
+      return res.status(200).json({ success: true, message: "All companies already associated", carCompanies: businessProfile.carCompanies });
+    }
+    businessProfile.carCompanies.push(...uniqueToAdd);
+    await businessProfile.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "carCompanies added to business profile",
+      carCompanies: businessProfile.carCompanies
+    });
+  } catch (err) {
+    console.error("[addCarCompaniesToBusinessProfile] Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to add car companies", error: err.message });
+  }
+}
+
+/**
+ * Removes car companies from the authenticated user's business profile.
+ * Expects `carCompanyIds` array in the request body.
+ */
+async removeCarCompaniesFromBusinessProfile(req, res) {
+  try {
+    // Ids of car companies to remove
+    const { carCompanyIds } = req.body;
+
+    if (!Array.isArray(carCompanyIds) || carCompanyIds.length === 0) {
+      return res.status(400).json({ success: false, message: "carCompanyIds array required" });
+    }
+
+    // Get authenticated user's businessProfileId (assume stored on user object)
+    const businessProfileId = req.user?.businessProfileId;
+    if (!businessProfileId) {
+      return res.status(401).json({ success: false, message: "Business profile not found for user" });
+    }
+
+    // Validate all CarCompany Ids: Ensure they exist
+    const existingCompanies = await CarCompany.find({ _id: { $in: carCompanyIds } }).select("_id");
+    const foundIds = existingCompanies.map((c) => String(c._id));
+    const notFoundIds = carCompanyIds.filter(id => !foundIds.includes(String(id)));
+    if (notFoundIds.length > 0) {
+      return res.status(404).json({ success: false, message: "Some CarCompany ids not found", notFoundIds });
+    }
+
+    // Find business profile and remove these car company ids
+    const businessProfile = await BusinessProfileModel.findById(businessProfileId);
+    if (!businessProfile) {
+      return res.status(404).json({ success: false, message: "BusinessProfile not found" });
+    }
+
+    // Remove only if present
+    const beforeCount = (businessProfile.carCompanies || []).length;
+    businessProfile.carCompanies = (businessProfile.carCompanies || []).filter(
+      id => !carCompanyIds.includes(String(id))
+    );
+    const afterCount = businessProfile.carCompanies.length;
+
+    if (beforeCount === afterCount) {
+      return res.status(200).json({ success: true, message: "No companies were removed; none matched the provided ids", carCompanies: businessProfile.carCompanies });
+    }
+
+    await businessProfile.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "carCompanies removed from business profile",
+      carCompanies: businessProfile.carCompanies
+    });
+  } catch (err) {
+    console.error("[removeCarCompaniesFromBusinessProfile] Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to remove car companies", error: err.message });
+  }
+}
+
+
+
+
+
+
 
 
 
