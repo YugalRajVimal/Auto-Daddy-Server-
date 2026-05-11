@@ -439,6 +439,8 @@ class UserController {
         }
       }
 
+   
+
     // ---------- VEHICLE CRUD Operations ----------
     // Add a new vehicle for the authenticated user (car owner)
     // @vehicles.schema.js (8-9): Add carOwnershipCertificate and insuranceCertificate file handling
@@ -622,6 +624,55 @@ class UserController {
         } catch (error) {
             console.error("[fetchAllVehicles] Error:", error);
             return res.status(500).json({ message: "Internal Server Error" });
+        }
+    };
+
+    // Delete a vehicle for the authenticated user (remove from vehicles collection and user's myVehicles array)
+    deleteVehicle = async (req, res) => {
+        try {
+            const userId = req.user?.id;
+            const { vehicleId } = req.body;
+
+            if (!userId) {
+                return res.status(401).json({ success: false, message: "Unauthorized" });
+            }
+
+            if (!vehicleId) {
+                return res.status(400).json({ success: false, message: "Vehicle ID is required." });
+            }
+
+            // Find the user first
+            const user = await User.findById(userId);
+            if (!user) {
+                return res.status(404).json({ success: false, message: "User not found." });
+            }
+
+            // Check if this vehicle is present in user's myVehicles
+            const index = user.myVehicles.findIndex(
+                id => String(id) === String(vehicleId)
+            );
+            if (index === -1) {
+                return res.status(404).json({ success: false, message: "Vehicle not found in user's vehicles." });
+            }
+
+            // Remove the vehicle from VehicleModel (delete from database)
+            const deletedVehicle = await VehicleModel.findByIdAndDelete(vehicleId);
+            if (!deletedVehicle) {
+                return res.status(404).json({ success: false, message: "Vehicle not found in database." });
+            }
+
+            // Remove from user's myVehicles array
+            user.myVehicles.splice(index, 1);
+            await user.save();
+
+            return res.status(200).json({
+                success: true,
+                message: "Vehicle deleted successfully.",
+                deletedVehicleId: vehicleId
+            });
+        } catch (error) {
+            console.error("[deleteVehicle] Error:", error);
+            return res.status(500).json({ success: false, message: "Internal Server Error" });
         }
     };
 

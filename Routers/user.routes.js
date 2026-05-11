@@ -33,6 +33,8 @@ userRouter.get("/car-companies", (req, res) => {
   userController.fetchCarCompanies(req, res);
 });
 
+
+
 // Add a new vehicle
 
 userRouter.post(
@@ -49,6 +51,16 @@ userRouter.put("/vehicle/:vehicleId", jwtAuth, (req, res) => { userController.ed
 
 // Fetch all vehicles for the authenticated user (car owner)
 userRouter.get("/vehicles", jwtAuth, (req, res) => { userController.fetchAllVehicles(req, res) });
+
+// Delete a vehicle by ID for the authenticated user
+userRouter.delete(
+  "/vehicle",
+  jwtAuth,
+  (req, res) => {
+    userController.deleteVehicle(req, res);
+  }
+);
+
 
 
 

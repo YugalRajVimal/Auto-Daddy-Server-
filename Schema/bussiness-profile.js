@@ -50,9 +50,12 @@ const businessProfileSchema = new Schema({
   gst: { type: Number }, // GST field added
   openHours: { type: String },         // e.g., "08:00-20:00"
   openDays: { type: [String] },        // e.g., ["Monday", "Tuesday", ...]
-  closedDays:{type: [String]},
+  closedDays: { type: [String] },
   teamMembers: [teamMemberSchema],
   businessLogo: { type: String },      // URL or file path to the logo
+
+  // Add car companies this business works with
+  carCompanies: [{ type: Types.ObjectId, ref: 'CarCompany' }],
 
   // Business active status
   isBusinessActive: { type: Boolean, default: true },
