@@ -44,7 +44,8 @@ class AuthController {
       }
 
       // Only allow login for existing users -- no user creation here
-      let user = await User.findOne({ countryCode, phone });
+      // Only fetch the necessary fields (_id and fields to be updated)
+      let user = await User.findOne({ countryCode, phone }).select("_id otp otpExpiresAt otpGeneratedAt otpAttempts");
 
       if (!user) {
         // No user found for this phone/countryCode
@@ -57,11 +58,18 @@ class AuthController {
       const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min expiry
       const otpGeneratedAt = new Date();
 
-      user.otp = otp;
-      user.otpExpiresAt = otpExpiresAt;
-      user.otpGeneratedAt = otpGeneratedAt;
-      user.otpAttempts = 0;
-      await user.save();
+      // Only update the fields that are being set, avoid retrieving the full doc
+      await User.updateOne(
+        { _id: user._id },
+        {
+          $set: {
+            otp: otp,
+            otpExpiresAt: otpExpiresAt,
+            otpGeneratedAt: otpGeneratedAt,
+            otpAttempts: 0
+          }
+        }
+      );
 
       return res.status(200).json({
         message: "OTP sent successfully for login",
@@ -304,8 +312,6 @@ class AuthController {
       let { countryCode, phone, otp, deviceId } = req.body;
       console.log("[verifyAccount] Incoming params:", req.body);
 
-      console.log("[verifyAccount] Incoming params:", { countryCode, phone, otp, deviceId });
-
       if (!countryCode || !phone || !otp) {
         console.log("[verifyAccount] Missing params:", { countryCode, phone, otp });
         return res.status(400).json({ message: "Country code, phone number, and OTP are required" });
@@ -324,10 +330,12 @@ class AuthController {
         return res.status(400).json({ message: "Invalid phone number." });
       }
 
-      // Find user with matching phone and code; populate businessProfile if autoshopowner
-      // We'll check role after finding in DB
-      let user = await User.findOne({ countryCode, phone }).populate("businessProfile");
-
+      // Fetch only necessary fields
+      let user = await User.findOne(
+        { countryCode, phone },
+        "_id otp otpExpiresAt otpGeneratedAt otpAttempts phoneVerified lastLogin role name profilePhoto isProfileComplete isAutoShopBusinessProfileComplete businessProfile"
+      );
+      
       if (!user) {
         console.log("[verifyAccount] User NOT found for", { countryCode, phone });
         return res.status(401).json({ message: "Invalid phone or country code" });
@@ -346,16 +354,19 @@ class AuthController {
       }
 
       // Update fields for verified user; clear OTP and set phoneVerified, save deviceId if provided
-      user.otp = null;
-      user.otpExpiresAt = null;
-      user.otpGeneratedAt = null;
-      user.otpAttempts = 0;
-      user.phoneVerified = true;
-      user.lastLogin = new Date();
+      // Only update minimal required fields
+      const updateObj = {
+        otp: null,
+        otpExpiresAt: null,
+        otpGeneratedAt: null,
+        otpAttempts: 0,
+        phoneVerified: true,
+        lastLogin: new Date()
+      };
       if (deviceId) {
-        user.deviceId = deviceId;
+        updateObj.deviceId = deviceId;
       }
-      await user.save();
+      await User.updateOne({ _id: user._id }, { $set: updateObj });
 
       // Generate JWT
       const tokenPayload = { id: user._id };
@@ -368,11 +379,17 @@ class AuthController {
 
       console.log("[verifyAccount] Account verified: userId =", user._id);
 
-      // Send name and profilePhoto along with other needed fields
-      // If autoshopowner, use businessLogo in profilePhoto by populating businessProfile
+      // Need to fetch businessLogo if user is autoshopowner
       let profilePhoto = user.profilePhoto || null;
-      if (user.role === "autoshopowner" && user.businessProfile && user.businessProfile.businessLogo) {
-        profilePhoto = user.businessProfile.businessLogo;
+      if (user.role === "autoshopowner" && user.businessProfile) {
+        // Only fetch businessLogo if needed; otherwise, we never fetch all businessProfile
+        const businessProfileData = await User.findById(user._id)
+          .select("businessProfile")
+          .populate({ path: "businessProfile", select: "businessLogo" });
+
+        if (businessProfileData && businessProfileData.businessProfile && businessProfileData.businessProfile.businessLogo) {
+          profilePhoto = businessProfileData.businessProfile.businessLogo;
+        }
       }
 
       return res.status(200).json({
