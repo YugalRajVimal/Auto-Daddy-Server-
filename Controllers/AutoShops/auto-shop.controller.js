@@ -5740,11 +5740,18 @@ async removeCarCompaniesFromBusinessProfile(req, res) {
       return res.status(400).json({ success: false, message: "carCompanyIds array required" });
     }
 
-    // Get authenticated user's businessProfileId (assume stored on user object)
-    const businessProfileId = req.user?.businessProfileId;
-    if (!businessProfileId) {
+    // Get authenticated user's ID
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "User not authenticated" });
+    }
+
+    // Fetch user's businessProfile from User model
+    const user = await User.findById(userId).select('businessProfile');
+    if (!user || !user.businessProfile) {
       return res.status(401).json({ success: false, message: "Business profile not found for user" });
     }
+    const businessProfileId = user.businessProfile;
 
     // Validate all CarCompany Ids: Ensure they exist
     const existingCompanies = await CarCompany.find({ _id: { $in: carCompanyIds } }).select("_id");
