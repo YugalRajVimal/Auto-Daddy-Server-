@@ -1350,6 +1350,148 @@ async toggleThoughtOfTheDayLiked(req, res) {
 }
 
 
+
+
+// Get odometerReading from user profile's myVehicles[] and dueOdometerReading from latest JobCard for this user for every vehicle (with vehicle number)
+getVehiclesOdometerReadings = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+
+    // Get user and their vehicles, include 'licensePlateNo' from Vehicle
+    const user = await User.findById(userId)
+      .populate({
+        path: "myVehicles",
+        select: "number odometerReading licensePlateNo",
+        model: "Vehicle"
+      })
+      .lean();
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+    const vehicles = Array.isArray(user.myVehicles) ? user.myVehicles : [];
+
+    // Import JobCard dynamically
+    let JobCard;
+    try {
+      JobCard = (await import("../../Schema/jobCard.schema.js")).default;
+    } catch (e) {
+      return res.status(500).json({ success: false, message: "Server config error: JobCard model not found" });
+    }
+
+    // Prepare result array
+    const results = await Promise.all(
+      vehicles.map(async (veh) => {
+        // Find the latest JobCard for this user & this vehicle (by createdAt descending)
+        const jobCard = await JobCard.findOne({
+          customerId: userId,
+          vehicleId: veh._id
+        })
+          .sort({ createdAt: -1 })
+          .select("dueOdometerReading createdAt")
+          .lean();
+
+        return {
+          _id: veh._id, // Add vehicle _id
+          vehicleNumber: veh.number,
+          licensePlateNo: veh.licensePlateNo || null,
+          odometerReading: veh.odometerReading || null,
+          dueOdometerReading: jobCard?.dueOdometerReading || null,
+          latestJobCardAt: jobCard?.createdAt || null
+        };
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      vehicles: results
+    });
+  } catch (err) {
+    console.error("[getVehiclesOdometerReadings]", err);
+    return res.status(500).json({ success: false, message: "Internal server error" });
+  }
+};
+
+/**
+ * Edit/update odometerReading using vehicle plate number
+ * Expected request body: { licensePlateNo: String, odometerReading: Number }
+ * Returns updated vehicle document or error
+ */
+/**
+ * Edit/update odometerReading using vehicle plate number
+ * Expected request body: { licensePlateNo: String, odometerReading: Number }
+ * Returns updated vehicle document or error
+ */
+editOdometerById = async (req, res) => {
+  try {
+    const { vehicleId, odometerReading } = req.body;
+
+    console.log("[editOdometerById] Input - vehicleId:", vehicleId, "odometerReading:", odometerReading);
+
+    // Check required fields and odometerReading is a finite number
+    if (
+      !vehicleId ||
+      odometerReading === undefined ||
+      odometerReading === null ||
+      typeof odometerReading !== "number" ||
+      !Number.isFinite(odometerReading)
+    ) {
+      console.log("[editOdometerById] Invalid input:", req.body);
+      return res.status(400).json({
+        success: false,
+        message: "vehicleId and valid odometerReading are required",
+      });
+    }
+
+    // Find the current vehicle by _id
+    const vehicle = await VehicleModel.findById(vehicleId).lean();
+    if (!vehicle) {
+      console.log("[editOdometerById] Vehicle not found for vehicleId:", vehicleId);
+      return res.status(404).json({
+        success: false,
+        message: "Vehicle not found with provided vehicle ID",
+      });
+    }
+
+    // Check if new odometer reading is greater than previous
+    const prevOdometer = vehicle.odometerReading || 0;
+    if (odometerReading <= prevOdometer) {
+      console.log("[editOdometerById] New odometer reading must be greater than the previous value");
+      return res.status(400).json({
+        success: false,
+        message: `New odometer reading (${odometerReading}) must be greater than previous value (${prevOdometer})`,
+      });
+    }
+
+    // Update the odometer reading
+    const updatedVehicle = await VehicleModel.findByIdAndUpdate(
+      vehicleId,
+      { $set: { odometerReading } },
+      { new: true }
+    ).lean();
+
+    console.log("[editOdometerById] Update successful for vehicle:", updatedVehicle);
+
+    return res.status(200).json({
+      success: true,
+      message: "Odometer reading updated successfully",
+      vehicle: updatedVehicle,
+    });
+  } catch (err) {
+    console.error("[editOdometerById] Unexpected error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+
+
+
+
 }
 
   

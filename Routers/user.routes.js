@@ -130,6 +130,22 @@ userRouter.post(
 );
 
 
+// Get odometerReading and dueOdometerReading for all vehicles owned by the user
+userRouter.get(
+  "/odometer-readings",
+  jwtAuth,
+  (req, res) => userController.getVehiclesOdometerReadings(req, res)
+);
+
+
+
+// Edit/update odometerReading using vehicle plate number
+userRouter.put(
+  "/odometer",
+  jwtAuth,
+  (req, res) => userController.editOdometerById(req, res)
+);
+
 
 
 
