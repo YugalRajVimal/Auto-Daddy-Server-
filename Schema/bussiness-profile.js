@@ -63,6 +63,8 @@ const businessProfileSchema = new Schema({
   // Nested myServices array, each containing a reference to a main service and selected subservices (nested like services schema)
   myServices: [myServiceSchema],
 
+  serviceWeWorkWith: [{ type: Types.ObjectId, ref: 'Services' }],
+
   // Ratings array: each rating with userId
   ratings: [ratingSchema],
 
