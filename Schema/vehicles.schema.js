@@ -19,7 +19,8 @@ const VehicleSchema = new mongoose.Schema(
       type: [String],
       default: [],
       validate: [arr => arr.length <= 5, '{PATH} exceeds the limit of 5 images']
-    } // Array of up to 5 image URLs
+    }, // Array of up to 5 image URLs
+    disabled: { type: Boolean, default: false } // Whether the vehicle is disabled (soft-deleted/archived)
   },
   {
     timestamps: true
