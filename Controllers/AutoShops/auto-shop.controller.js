@@ -552,7 +552,7 @@ class AutoShopController {
                 return res.status(400).json({ message: "Business profile already completed." });
             }
 
-            // Extract business profile details (include gst and city fields)
+            // Extract business profile details (include gst and city fields, and serviceWeWorkWith)
             let {
                 businessName,
                 businessAddress,
@@ -566,6 +566,7 @@ class AutoShopController {
                 lat,
                 lng,
                 gst, // new gst field
+                serviceWeWorkWith, // ADD: array of service ObjectIds or strings
             } = req.body;
 
             // Fallback for lat/lng as stringified JSON
@@ -627,6 +628,32 @@ class AutoShopController {
             // Compute closedDays by excluding openDays from all valid days (Monday-Saturday)
             const closedDays = VALID_DAYS.filter(day => !openDays.includes(day));
 
+            // Parse serviceWeWorkWith similar to openDays - accept ["id", ...] or a stringified array or comma separated
+            if (typeof serviceWeWorkWith === "string") {
+                try {
+                    const tmp = JSON.parse(serviceWeWorkWith);
+                    if (Array.isArray(tmp)) {
+                        serviceWeWorkWith = tmp;
+                    } else {
+                        // fallback comma
+                        serviceWeWorkWith = serviceWeWorkWith.split(",").map(s => s.trim()).filter(Boolean);
+                    }
+                } catch (e) {
+                    // fallback comma
+                    serviceWeWorkWith = serviceWeWorkWith.split(",").map(s => s.trim()).filter(Boolean);
+                }
+            }
+            if (serviceWeWorkWith === undefined) {
+                serviceWeWorkWith = [];
+            }
+            if (!Array.isArray(serviceWeWorkWith)) {
+                if (req.files) deleteUploadedFiles(req.files);
+                return res.status(400).json({ message: "serviceWeWorkWith must be an array of service IDs." });
+            }
+
+            // Optionally: filter out empty, null, undefined
+            serviceWeWorkWith = serviceWeWorkWith.filter(id => !!id);
+
             console.log("[completeBusinessProfile] Received business profile details: ", {
                 businessName,
                 businessAddress,
@@ -641,6 +668,7 @@ class AutoShopController {
                 openDays,
                 closedDays,
                 gst,
+                serviceWeWorkWith,
             });
 
             // Required checks
@@ -677,7 +705,7 @@ class AutoShopController {
                 if (Object.keys(businessMapLocation).length === 0) businessMapLocation = undefined;
             }
 
-            // Prepare business profile data shaped according to businessProfileSchema, including gst and city fields
+            // Prepare business profile data shaped according to businessProfileSchema, including gst, city, and serviceWeWorkWith fields
             const businessProfileDoc = {
                 businessName,
                 businessAddress,
@@ -692,6 +720,7 @@ class AutoShopController {
                 closedDays,
                 businessLogo,
                 gst, // ensure gst is a number or undefined
+                serviceWeWorkWith, // ADD: service IDs array
             };
 
             console.log("[completeBusinessProfile] Prepared businessProfileDoc for DB:", businessProfileDoc);
@@ -750,6 +779,7 @@ class AutoShopController {
      * Edit (update) business profile for autoshopowner.
      * Only allows editing of certain fields: (cannot edit name or HST number)
      * Now supports city: { type: String, default: null }
+     * Now supports editing serviceWeWorkWith: [{ type: Types.ObjectId, ref: 'Services' }]
      */
     async editBusinessProfile(req, res) {
         let filesToDelete = [];
@@ -806,6 +836,7 @@ class AutoShopController {
                 lat,
                 lng,
                 gst, // add gst
+                serviceWeWorkWith // NEW: allow edit of serviceWeWorkWith array
             } = req.body;
 
             // Parse lat/lng if sent as strings
@@ -884,6 +915,33 @@ class AutoShopController {
                 if (Object.keys(businessMapLocation).length === 0) businessMapLocation = undefined;
             }
 
+            // Parse and validate serviceWeWorkWith field if present
+            if (serviceWeWorkWith !== undefined) {
+                if (typeof serviceWeWorkWith === "string") {
+                    // Accept comma separated IDs or JSON stringified array
+                    try {
+                        const parsed = JSON.parse(serviceWeWorkWith);
+                        if (Array.isArray(parsed)) serviceWeWorkWith = parsed;
+                        else serviceWeWorkWith = [parsed];
+                    } catch {
+                        // Assume comma separated IDs
+                        serviceWeWorkWith = serviceWeWorkWith
+                            .split(",")
+                            .map(s => s.trim())
+                            .filter(Boolean);
+                    }
+                }
+                // Validate all IDs (should be Mongo id strings)
+                if (!Array.isArray(serviceWeWorkWith)) {
+                    if (req.files) deleteUploadedFiles(req.files);
+                    return res.status(400).json({ message: "serviceWeWorkWith must be an array of service IDs." });
+                }
+                if (serviceWeWorkWith.some(id => typeof id !== "string" || !id.match(/^[a-f\d]{24}$/i))) {
+                    if (req.files) deleteUploadedFiles(req.files);
+                    return res.status(400).json({ message: "Each entry in serviceWeWorkWith must be a valid ObjectId string." });
+                }
+            }
+
             // Prepare update object (only allowed fields)
             const updateData = {};
 
@@ -900,6 +958,7 @@ class AutoShopController {
             }
             if (businessLogo !== undefined) updateData.businessLogo = businessLogo;
             if (gst !== undefined) updateData.gst = gst; // allow gst to be updated; must be a number
+            if (serviceWeWorkWith !== undefined) updateData.serviceWeWorkWith = serviceWeWorkWith; // NEW: update list of service ids
 
             console.log("[editBusinessProfile] Update fields:", updateData);
 
@@ -2359,22 +2418,30 @@ async getAllMyServices(req, res) {
         const myServices = Array.isArray(businessProfile.myServices)
             ? businessProfile.myServices : [];
 
-        // Gather service IDs from myServices
-        const myServiceIds = myServices.map(ms => ms.service && ms.service.toString()).filter(Boolean);
+        // Only consider these services for the response
+        const allowedServiceIds = Array.isArray(businessProfile.serviceWeWorkWith)
+            ? businessProfile.serviceWeWorkWith.map(id => id.toString())
+            : [];
 
-        // Fetch all master services
-        const allMasterServices = await servicesSchema.find({}).lean();
+        if (allowedServiceIds.length === 0) {
+            // If serviceWeWorkWith is empty, send empty array as user can't work with any services
+            return res.status(200).json({
+                success: true,
+                services: []
+            });
+        }
+
+        // Fetch only master services present in serviceWeWorkWith
+        const allowedServices = await servicesSchema.find({ _id: { $in: allowedServiceIds } }).lean();
 
         // Map for quick lookup by _id.toString()
         const masterServicesMap = {};
-        for (const svc of allMasterServices) {
+        for (const svc of allowedServices) {
             masterServicesMap[svc._id.toString()] = svc;
         }
 
-        // Map myServices to response format (with selected subservices)
+        // Map myServices to response format (with selected subservices) for only allowed services
         const result = [];
-
-        // Track the IDs in myServices we found
         const foundMyServiceIdsSet = new Set();
 
         myServices.forEach(ms => {
@@ -2398,8 +2465,8 @@ async getAllMyServices(req, res) {
             }
         });
 
-        // Add services NOT in myServices, with empty subservices
-        allMasterServices.forEach(masterSvc => {
+        // Add allowed services NOT present in myServices, with empty subservices
+        allowedServices.forEach(masterSvc => {
             const svcIdString = masterSvc._id.toString();
             if (!foundMyServiceIdsSet.has(svcIdString)) {
                 result.push({
