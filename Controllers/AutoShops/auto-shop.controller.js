@@ -1322,7 +1322,7 @@ addToMyCustomers = async (req, res) => {
 fetchMyCustomers = async (req, res) => {
     try {
         const autoshopOwnerId = req.user?.id;
-        const { phone, numberPlate, dateType, date, week, month, year } = req.query;
+        const { search, dateType, date, week, month, year } = req.query;
 
         if (!autoshopOwnerId) {
             return res.status(401).json({ message: "Unauthorized." });
@@ -1334,14 +1334,14 @@ fetchMyCustomers = async (req, res) => {
             return res.status(404).json({ message: "Auto shop owner not found." });
         }
 
-        // Prepare numberPlate search if provided
-        let vehicleIdsForPlate = [];
-        if (numberPlate) {
+        // Prepare numberPlate search if provided via search param
+        let vehicleIdsForSearch = [];
+        if (search) {
             const vehicleDocs = await VehicleModel.find(
-                { licensePlateNo: { $regex: numberPlate, $options: "i" } },
+                { licensePlateNo: { $regex: search, $options: "i" } },
                 { _id: 1 }
             );
-            vehicleIdsForPlate = vehicleDocs.map(v => v._id.toString());
+            vehicleIdsForSearch = vehicleDocs.map(v => v._id.toString());
         }
 
         let filteredCustomerIds = [];
@@ -1414,33 +1414,45 @@ fetchMyCustomers = async (req, res) => {
         }
 
         // Build DB query for User customers ("carowner"s owned by this shop, plus filters)
-        let customersQuery = User.find({
-            _id: { $in: filteredCustomerIds }
-        })
+        // Multi-field "search" filter: matches name, phone, numberPlate (via myVehicles)
+        let customersQueryConditions = [
+            { _id: { $in: filteredCustomerIds } }
+        ];
+
+        if (search) {
+            let orConditions = [
+                { name: { $regex: search, $options: "i" } },
+                { phone: { $regex: search, $options: "i" } }
+            ];
+            if (vehicleIdsForSearch.length > 0) {
+                orConditions.push({ myVehicles: { $in: vehicleIdsForSearch } });
+            }
+            // If there was a vehicle number match, it's included; if not, skip OR for numberPlate
+            customersQueryConditions.push({ $or: orConditions });
+        }
+
+        // If user entered search as numberPlate and there is no match, return empty right away
+        if (
+            search &&
+            search.trim() !== "" &&
+            // Only for search as numberPlate, i.e. if vehicle search attempted
+            vehicleIdsForSearch.length === 0 && (
+                // Try to check: if regex doesn't match name/phone but neither does numberPlate, return []
+                // We can't know here if search is exactly intended for numberPlate only, so this is a best effort
+                // If the orConditions above had only vehicleIdsForSearch, we can return empty; but we include name/phone too
+                false // skip early return; we allow other or conditions to match
+            )
+        ) {
+            return res.status(200).json({ myCustomers: [] });
+        }
+
+        let customersQuery = User.find({ $and: customersQueryConditions })
             .select("name email phone countryCode status isDisabled myVehicles address pincode")
             .populate({
                 path: "myVehicles",
                 model: "Vehicle",
                 select: "-carImages -licensePlateFrontImagePath -licensePlateBackImagePath"
             });
-
-        // Build filtering conditions
-        let andConditions = [];
-
-        if (phone) {
-            andConditions.push({ phone: phone });
-        }
-
-        if (numberPlate && vehicleIdsForPlate.length > 0) {
-            andConditions.push({ myVehicles: { $in: vehicleIdsForPlate } });
-        } else if (numberPlate && vehicleIdsForPlate.length === 0) {
-            // No vehicles match, so return empty directly
-            return res.status(200).json({ myCustomers: [] });
-        }
-
-        if (andConditions.length) {
-            customersQuery = customersQuery.where({ $and: andConditions });
-        }
 
         const myCustomers = await customersQuery.lean();
 
@@ -4665,7 +4677,6 @@ async getAllJobCards(req, res) {
 
         let createdAtMatch = {};
 
-        // If no dateType is provided, return all job cards (no date filtering)
         if (typeof dateType !== "undefined" && dateType !== null && dateType !== "") {
             let _dateType = dateType;
             let startDate, endDate;
@@ -4700,20 +4711,18 @@ async getAllJobCards(req, res) {
                         );
                         if (_month === -1) _month = now.getMonth();
                     } else {
-                        // Allow month as integer, or zero-padded ("01", "02", etc)
                         if (typeof month === "string" && month.match(/^\d{1,2}$/)) {
                             let monthNum = Number(month);
                             if (!isNaN(monthNum) && monthNum >= 1 && monthNum <= 12) {
-                                _month = monthNum - 1; // Convert 1-12 to JS 0-indexed
+                                _month = monthNum - 1;
                             } else {
                                 _month = now.getMonth();
                             }
                         } else {
-                            // If month is already a number, use it directly (assume 0-based or 1-based)
                             let monthNum = Number(month);
                             if (!isNaN(monthNum)) {
                                 if (monthNum >= 1 && monthNum <= 12) {
-                                    _month = monthNum - 1; // 1-based -> 0-based
+                                    _month = monthNum - 1;
                                 } else if (monthNum >= 0 && monthNum <= 11) {
                                     _month = monthNum;
                                 } else {
@@ -4736,23 +4745,42 @@ async getAllJobCards(req, res) {
                 createdAtMatch.createdAt = { $gte: startDate, $lt: endDate };
             }
         }
-        // else: no dateType in request, createdAtMatch remains empty, fetch all.
 
-        // Find all job cards created by this business, within date filter if supplied
-        const jobCards = await JobCard.find({
-                business: user.businessProfile,
-                ...createdAtMatch
-            })
-            .populate([
-                { path: 'customerId', model: 'User', select: 'name phone email' },
-                { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' },
-            ])
-            .sort({ createdAt: -1 })
-            .lean();
+        const baseQuery = {
+            business: user.businessProfile,
+            ...createdAtMatch,
+        };
+
+        // Fetch job cards by statuses
+        const [pendingJobCards, approvedJobCards, rejectedJobCards] = await Promise.all([
+            JobCard.find({ ...baseQuery, status: "Pending" })
+                .populate([
+                    { path: 'customerId', model: 'User', select: 'name phone email' },
+                    { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' },
+                ])
+                .sort({ createdAt: -1 })
+                .lean(),
+            JobCard.find({ ...baseQuery, status: "Approved" })
+                .populate([
+                    { path: 'customerId', model: 'User', select: 'name phone email' },
+                    { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' },
+                ])
+                .sort({ createdAt: -1 })
+                .lean(),
+            JobCard.find({ ...baseQuery, status: "Rejected" })
+                .populate([
+                    { path: 'customerId', model: 'User', select: 'name phone email' },
+                    { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' },
+                ])
+                .sort({ createdAt: -1 })
+                .lean(),
+        ]);
 
         return res.status(200).json({
             success: true,
-            data: jobCards
+            pending: pendingJobCards,
+            approved: approvedJobCards,
+            rejected: rejectedJobCards
         });
     } catch (err) {
         console.error("[getAllJobCards] Error:", err);
