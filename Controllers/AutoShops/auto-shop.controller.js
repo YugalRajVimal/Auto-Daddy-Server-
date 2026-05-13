@@ -1172,12 +1172,12 @@ searchCarOwner = async (req, res) => {
             return res.status(400).json({ message: "A search parameter is required." });
         }
 
-        // Try to find all car owners matching anywhere in name, phone, email, or numberplate
-        // First, search for vehicles matching numberplate if search could be a numberplate fragment
+        // First, search for vehicles matching numberplate (exclude disabled vehicles)
         let vehicleIds = [];
         const vehicleDocs = await VehicleModel.find(
             {
-                licensePlateNo: { $regex: search, $options: "i" }
+                licensePlateNo: { $regex: search, $options: "i" },
+                disabled: { $ne: true }
             },
             { _id: 1 }
         );
@@ -1199,12 +1199,13 @@ searchCarOwner = async (req, res) => {
             $or: orConditions
         };
 
-        // Fetch users, populate their vehicles
+        // Fetch users, populate their vehicles, but only vehicles that are not disabled
         const users = await User.find(userQuery)
             .select("-password")
             .populate({
                 path: "myVehicles",
                 model: "Vehicle",
+                match: { disabled: { $ne: true } }
             });
 
         // Check which users are already customers
@@ -1334,11 +1335,14 @@ fetchMyCustomers = async (req, res) => {
             return res.status(404).json({ message: "Auto shop owner not found." });
         }
 
-        // Prepare numberPlate search if provided via search param
+        // Prepare numberPlate search if provided via search param, only fetch enabled vehicles
         let vehicleIdsForSearch = [];
         if (search) {
             const vehicleDocs = await VehicleModel.find(
-                { licensePlateNo: { $regex: search, $options: "i" } },
+                { 
+                    licensePlateNo: { $regex: search, $options: "i" },
+                    disabled: { $ne: true }
+                },
                 { _id: 1 }
             );
             vehicleIdsForSearch = vehicleDocs.map(v => v._id.toString());
@@ -1427,7 +1431,6 @@ fetchMyCustomers = async (req, res) => {
             if (vehicleIdsForSearch.length > 0) {
                 orConditions.push({ myVehicles: { $in: vehicleIdsForSearch } });
             }
-            // If there was a vehicle number match, it's included; if not, skip OR for numberPlate
             customersQueryConditions.push({ $or: orConditions });
         }
 
@@ -1437,10 +1440,7 @@ fetchMyCustomers = async (req, res) => {
             search.trim() !== "" &&
             // Only for search as numberPlate, i.e. if vehicle search attempted
             vehicleIdsForSearch.length === 0 && (
-                // Try to check: if regex doesn't match name/phone but neither does numberPlate, return []
-                // We can't know here if search is exactly intended for numberPlate only, so this is a best effort
-                // If the orConditions above had only vehicleIdsForSearch, we can return empty; but we include name/phone too
-                false // skip early return; we allow other or conditions to match
+                false
             )
         ) {
             return res.status(200).json({ myCustomers: [] });
@@ -1451,7 +1451,8 @@ fetchMyCustomers = async (req, res) => {
             .populate({
                 path: "myVehicles",
                 model: "Vehicle",
-                select: "-carImages -licensePlateFrontImagePath -licensePlateBackImagePath"
+                select: "-carImages -licensePlateFrontImagePath -licensePlateBackImagePath",
+                match: { disabled: { $ne: true } }  // <-- Do not fetch disabled vehicles
             });
 
         const myCustomers = await customersQuery.lean();
@@ -1497,11 +1498,13 @@ fetchMyCustomers = async (req, res) => {
                     }
                 }
 
-                // Fetch vehicle number plate
+                // Fetch vehicle number plate only for enabled vehicles
                 let vehicleNumberPlate = null;
                 if (recentJobCard.vehicleId) {
                     try {
-                        const vehicleDoc = await VehicleModel.findById(recentJobCard.vehicleId).select("licensePlateNo").lean();
+                        const vehicleDoc = await VehicleModel.findOne({ _id: recentJobCard.vehicleId, disabled: { $ne: true } })
+                            .select("licensePlateNo")
+                            .lean();
                         vehicleNumberPlate = vehicleDoc ? vehicleDoc.licensePlateNo : null;
                     } catch (e) { }
                 }
@@ -1547,16 +1550,7 @@ fetchMyCustomers = async (req, res) => {
 editCustomer = async (req, res) => {
     try {
         const autoshopOwnerId = req.user?.id;
-        const {
-            carOwnerId,
-            name,
-            email,
-            phone,
-            countryCode,
-            address,
-            pincode,
-            vehicles // array of vehicle objects per requirement
-        } = req.body;
+        const { carOwnerId } = req.body;
 
         if (!autoshopOwnerId) {
             return res.status(401).json({ message: "Unauthorized." });
@@ -1565,19 +1559,19 @@ editCustomer = async (req, res) => {
             return res.status(400).json({ message: "carOwnerId is required." });
         }
 
-        // Fetch the autoshop owner and check they have this customer in myCustomers
+        // Check relationship: Only allow editing customers they own
         const autoshopOwner = await User.findOne({ _id: autoshopOwnerId, role: "autoshopowner" }).lean();
         if (!autoshopOwner) {
             return res.status(404).json({ message: "Auto shop owner not found." });
         }
         if (
-            !autoshopOwner.myCustomers ||
+            !Array.isArray(autoshopOwner.myCustomers) ||
             !autoshopOwner.myCustomers.map(id => id.toString()).includes(carOwnerId.toString())
         ) {
             return res.status(403).json({ message: "This car owner is not your customer." });
         }
 
-        // Now, fetch the car owner to check their existing myVehicles array
+        // Fetch existing customer and vehicles
         const customer = await User.findOne({ _id: carOwnerId, role: "carowner" }).lean();
         if (!customer) {
             return res.status(404).json({ message: "Car owner not found." });
@@ -1586,78 +1580,81 @@ editCustomer = async (req, res) => {
             ? customer.myVehicles.map(id => id.toString())
             : [];
 
-        // Prepare update fields
+        // Build allowed user update fields dynamically from user.schema.js
+        const allowedUserFields = [
+            "name", "email", "phone", "countryCode", "pincode", "address", "city", "profilePhoto",
+            "isDisabled", "isProfileComplete", "favoriteAutoShops", "documents"
+        ];
         let updateFields = {};
-        if (name !== undefined) updateFields.name = name;
-        if (email !== undefined) updateFields.email = email;
-        if (phone !== undefined) updateFields.phone = phone;
-        if (countryCode !== undefined) updateFields.countryCode = countryCode;
-        if (address !== undefined) updateFields.address = address;
-        if (pincode !== undefined) updateFields.pincode = pincode;
+        for (const field of allowedUserFields) {
+            if (field in req.body && req.body[field] !== undefined) {
+                updateFields[field] = req.body[field];
+            }
+        }
 
-        // Will collect the vehicle ObjectIds for the updated myVehicles array
+        // Vehicles: Only allow updating vehicles if vId (vehicleId) is present.
+        let vehiclesFromBody = req.body.vehicles;
         let updatedVehicleObjectIds = [];
-
-        if (Array.isArray(vehicles)) {
-            for (const v of vehicles) {
-                // Expect: vId, licensePlateNo, vinNo, vehicleName, model, year, odometerReading
-                let vehicleDoc = null;
+        if (Array.isArray(vehiclesFromBody)) {
+            for (const v of vehiclesFromBody) {
+                // Edit existing vehicle
                 if (v.vId && mongoose.Types.ObjectId.isValid(v.vId)) {
-                    const vehId = v.vId;
-                    // Check: Is vehId in this customer's myVehicles?
-                    if (!existingVehicleIds.includes(vehId.toString())) {
+                    const vehId = v.vId.toString();
+                    if (!existingVehicleIds.includes(vehId)) {
                         return res.status(400).json({
                             message: `Invalid vehicle id (${vehId}) for this customer.`
                         });
                     }
-                    vehicleDoc = await VehicleModel.findOneAndUpdate(
-                        { _id: vehId },
-                        {
-                            $set: {
-                                licensePlateNo: v.licensePlateNo,
-                                vinNo: v.vinNo,
-                                "make.name": v.vehicleName,
-                                "make.model": v.model,
-                                year: v.year,
-                                odometerReading: v.odometerReading
-                            }
-                        },
-                        { new: true }
-                    );
-                    if (vehicleDoc) {
-                        updatedVehicleObjectIds.push(vehicleDoc._id);
+                    // Build vehicle update set for only fields provided in v and allowed by vehicles.schema.js
+                    const allowedVehicleFields = [
+                        "licensePlateNo", "licensePlateFrontImagePath", "licensePlateBackImagePath",
+                        "carOwnershipCertificate", "insuranceCertificate", "vinNo", "year",
+                        "odometerReading", "carImages", "disabled"
+                    ];
+                    let vehicleUpdateFields = {};
+                    for (const field of allowedVehicleFields) {
+                        if (v[field] !== undefined) {
+                            vehicleUpdateFields[field] = v[field];
+                        }
                     }
-                }
-                // If vId not present, create a new vehicle document (no validation needed here)
-                if (!vehicleDoc) {
-                    // All fields required for new creation must be present
-                    if (v.licensePlateNo && v.vinNo && v.vehicleName && v.model && v.year && v.odometerReading) {
-                        const newVehicle = new VehicleModel({
-                            licensePlateNo: v.licensePlateNo,
-                            vinNo: v.vinNo,
-                            make: { name: v.vehicleName, model: v.model },
-                            year: v.year,
-                            odometerReading: v.odometerReading
-                        });
-                        const savedVehicle = await newVehicle.save();
-                        updatedVehicleObjectIds.push(savedVehicle._id);
+                    // Special handling for make.name/model if supplied as vehicleName/model
+                    if (v.vehicleName !== undefined) vehicleUpdateFields["make.name"] = v.vehicleName;
+                    if (v.model !== undefined) vehicleUpdateFields["make.model"] = v.model;
+
+                    // Only update if there are fields to update
+                    if (Object.keys(vehicleUpdateFields).length > 0) {
+                        const vehicleDoc = await VehicleModel.findOneAndUpdate(
+                            { _id: vehId },
+                            { $set: vehicleUpdateFields },
+                            { new: true }
+                        );
+                        if (vehicleDoc) {
+                            updatedVehicleObjectIds.push(vehicleDoc._id);
+                        }
+                    } else {
+                        // Just push the existing id, nothing to edit
+                        updatedVehicleObjectIds.push(vehId);
                     }
-                }
+                } 
+                // If no vId present, do not create new (per new clarifications: no creation unless vId/edit)
             }
-            updateFields.myVehicles = updatedVehicleObjectIds;
+            // Only set myVehicles if something provided for vehicles 
+            if (updatedVehicleObjectIds.length > 0) {
+                updateFields.myVehicles = updatedVehicleObjectIds;
+            }
         }
 
         if (Object.keys(updateFields).length === 0) {
             return res.status(400).json({ message: "No update fields provided." });
         }
 
-        // Only update the customer if their role is 'carowner'
+        // Update customer
         const customerDoc = await User.findOneAndUpdate(
             { _id: carOwnerId, role: "carowner" },
             { $set: updateFields },
             { new: true }
         )
-        .select("name email phone countryCode status isDisabled myVehicles address pincode")
+        .select("name email phone countryCode status isDisabled myVehicles address pincode city profilePhoto isProfileComplete documents favoriteAutoShops onboardedBy")
         .populate({
             path: "myVehicles",
             model: "Vehicle",
@@ -1763,6 +1760,201 @@ async fetchCarCompanies(req, res) {
  *    ]
  * }
  */
+// onboardCarOwner = async (req, res) => {
+//     try {
+//         const {
+//             name,
+//             email,
+//             phone,
+//             countryCode,
+//             pincode,
+//             role,
+//             address,
+//             vehicles // Expect an array of vehicle objects or undefined
+//         } = req.body;
+
+//         // Only require main fields for car owner, NOT vehicle
+//         if (
+//             !name ||
+//             !email ||
+//             !phone ||
+//             !countryCode ||
+//             !pincode ||
+//             !role ||
+//             !address
+//         ) {
+//             return res.status(400).json({
+//                 message: "All owner fields (name, email, phone, countryCode, pincode, role, address) are required.",
+//             });
+//         }
+
+//         // Only allow the specified country codes
+//         const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
+//         if (!allowedCountryCodes.includes(countryCode)) {
+//             return res.status(400).json({
+//                 message:
+//                     "Invalid country code. Allowed: +1 (Canada/United States), +61 (Australia), +44 (United Kingdom), +91 (India).",
+//             });
+//         }
+
+//         // Only allow role carowner
+//         if (role !== "carowner") {
+//             return res.status(400).json({
+//                 message: "Only role 'carowner' is allowed for onboarding via this endpoint.",
+//             });
+//         }
+
+//         // Check if ANY user (not just carowners) exists with this email or phone/countryCode
+//         if (email) {
+//             const existingEmailUser = await User.findOne({ email: email });
+//             if (existingEmailUser) {
+//                 return res.status(409).json({
+//                     message: "A user with this email already exists.",
+//                     userId: existingEmailUser._id
+//                 });
+//             }
+//         }
+//         if (phone && countryCode) {
+//             const existingPhoneUser = await User.findOne({ phone: phone, countryCode: countryCode });
+//             if (existingPhoneUser) {
+//                 return res.status(409).json({
+//                     message: "A user with this phone and country code already exists.",
+//                     userId: existingPhoneUser._id
+//                 });
+//             }
+//         }
+
+//         // Default OTP
+//         const otp = "000000";
+//         const expiresInMs = 1000 * 600; // 10 min
+//         const otpExpiresAt = new Date(Date.now() + expiresInMs);
+
+//         // Get autoshop owner ID from the JWT-authenticated user
+//         const onboardedBy = req.user?.id || null;
+
+//         // -- Create the CAROWNER first
+//         const newCarOwner = await User.create({
+//             name,
+//             email,
+//             phone,
+//             countryCode,
+//             pincode,
+//             role,
+//             address,
+//             isProfileComplete: true,
+//             otp,
+//             otpExpiresAt,
+//             otpGeneratedAt: new Date(),
+//             otpAttempts: 0,
+//             onboardedBy
+//         });
+
+//         let newVehicles = [];
+//         // Handle vehicles array
+//         if (Array.isArray(vehicles)) {
+//             for (const veh of vehicles) {
+//                 // Only add non-null/undefined fields to the payload for Vehicle
+//                 const {
+//                     licensePlateNo,
+//                     vinNo,
+//                     vehicleName,
+//                     model,
+//                     year,
+//                     odometerReading
+//                 } = veh || {};
+
+//                 const vehiclePayload = {};
+//                 if (licensePlateNo !== undefined) vehiclePayload.licensePlateNo = licensePlateNo;
+//                 if (vinNo !== undefined) vehiclePayload.vinNo = vinNo;
+//                 if (vehicleName !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), name: vehicleName };
+//                 if (model !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), model: model };
+//                 if (year !== undefined) vehiclePayload.year = year;
+//                 if (odometerReading !== undefined) vehiclePayload.odometerReading = odometerReading;
+
+//                 // For Vehicle schema, both make.name and make.model are required
+//                 if (
+//                     vehiclePayload.licensePlateNo &&
+//                     vehiclePayload.vinNo &&
+//                     vehiclePayload.make &&
+//                     vehiclePayload.make.name &&
+//                     vehiclePayload.make.model &&
+//                     vehiclePayload.year
+//                 ) {
+//                     const createdVehicle = await VehicleModel.create(vehiclePayload);
+
+//                     newCarOwner.myVehicles = newCarOwner.myVehicles || [];
+//                     newCarOwner.myVehicles.push(createdVehicle._id);
+//                     newVehicles.push(createdVehicle);
+//                 }
+//             }
+//             if (newVehicles.length > 0) {
+//                 await newCarOwner.save();
+//             }
+//         } else if (
+//             // Fallback: accept vehicle data at root level for backward compatibility
+//             req.body.licensePlateNo ||
+//             req.body.vinNo ||
+//             req.body.vehicleName ||
+//             req.body.model ||
+//             req.body.year
+//         ) {
+//             // Only add non-null/undefined fields to the payload for Vehicle
+//             const vehiclePayload = {};
+//             if (req.body.licensePlateNo !== undefined) vehiclePayload.licensePlateNo = req.body.licensePlateNo;
+//             if (req.body.vinNo !== undefined) vehiclePayload.vinNo = req.body.vinNo;
+//             if (req.body.vehicleName !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), name: req.body.vehicleName };
+//             if (req.body.model !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), model: req.body.model };
+//             if (req.body.year !== undefined) vehiclePayload.year = req.body.year;
+//             if (req.body.odometerReading !== undefined) vehiclePayload.odometerReading = req.body.odometerReading;
+
+//             if (
+//                 vehiclePayload.licensePlateNo &&
+//                 vehiclePayload.vinNo &&
+//                 vehiclePayload.make &&
+//                 vehiclePayload.make.name &&
+//                 vehiclePayload.make.model &&
+//                 vehiclePayload.year
+//             ) {
+//                 const createdVehicle = await VehicleModel.create(vehiclePayload);
+//                 newCarOwner.myVehicles = newCarOwner.myVehicles || [];
+//                 newCarOwner.myVehicles.push(createdVehicle._id);
+//                 newVehicles.push(createdVehicle);
+//                 await newCarOwner.save();
+//             }
+//         }
+
+//         return res.status(201).json({
+//             message: "Car owner onboarded successfully. OTP sent.",
+//             otp: otp,
+//             carOwner: {
+//                 id: newCarOwner._id,
+//                 name: newCarOwner.name,
+//                 email: newCarOwner.email,
+//                 phone: newCarOwner.phone,
+//                 countryCode: newCarOwner.countryCode,
+//                 pincode: newCarOwner.pincode,
+//                 role: newCarOwner.role,
+//                 address: newCarOwner.address,
+//                 isProfileComplete: newCarOwner.isProfileComplete,
+//                 status: newCarOwner.status,
+//                 onboardedBy: newCarOwner.onboardedBy,
+//                 vehicles: newVehicles.map(v => ({
+//                     id: v._id,
+//                     licensePlateNo: v.licensePlateNo,
+//                     vinNo: v.vinNo,
+//                     name: v.make?.name,
+//                     model: v.make?.model,
+//                     year: v.year,
+//                     odometerReading: v.odometerReading
+//                 }))
+//             },
+//         });
+//     } catch (error) {
+//         console.error("[onboardCarOwner] Error:", error);
+//         return res.status(500).json({ message: "Internal Server Error" });
+//     }
+// };
+
 onboardCarOwner = async (req, res) => {
     try {
         const {
@@ -1853,17 +2045,28 @@ onboardCarOwner = async (req, res) => {
         });
 
         let newVehicles = [];
+
+        // This helper checks for existing NOT disabled vehicle with the same licensePlateNo
+        async function isDuplicateNotDisabledPlate(licensePlateNo) {
+            if (!licensePlateNo) return false;
+            const existing = await VehicleModel.findOne({ 
+                licensePlateNo: licensePlateNo,
+                $or: [{disabled: false}, {disabled: { $exists: false }}]
+            });
+            return !!existing;
+        }
+
         // Handle vehicles array
         if (Array.isArray(vehicles)) {
             for (const veh of vehicles) {
-                // Only add non-null/undefined fields to the payload for Vehicle
                 const {
                     licensePlateNo,
                     vinNo,
                     vehicleName,
                     model,
                     year,
-                    odometerReading
+                    odometerReading,
+                    disabled // explicitly passable in upcoming API
                 } = veh || {};
 
                 const vehiclePayload = {};
@@ -1873,6 +2076,7 @@ onboardCarOwner = async (req, res) => {
                 if (model !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), model: model };
                 if (year !== undefined) vehiclePayload.year = year;
                 if (odometerReading !== undefined) vehiclePayload.odometerReading = odometerReading;
+                if (typeof disabled !== "undefined") vehiclePayload.disabled = disabled; // only sets if supplied
 
                 // For Vehicle schema, both make.name and make.model are required
                 if (
@@ -1883,8 +2087,18 @@ onboardCarOwner = async (req, res) => {
                     vehiclePayload.make.model &&
                     vehiclePayload.year
                 ) {
+                    let willBeDisabled = !!vehiclePayload.disabled;
+                    // If vehicle to be created is not disabled OR disabled=false, check for duplicate not-disabled
+                    if (!willBeDisabled) {
+                        const plateExists = await isDuplicateNotDisabledPlate(vehiclePayload.licensePlateNo);
+                        if (plateExists) {
+                            return res.status(409).json({
+                                message: `A vehicle with license plate "${vehiclePayload.licensePlateNo}" already exists and is not disabled. Only one enabled vehicle per license plate is allowed.`,
+                                licensePlateNo: vehiclePayload.licensePlateNo
+                            });
+                        }
+                    }
                     const createdVehicle = await VehicleModel.create(vehiclePayload);
-
                     newCarOwner.myVehicles = newCarOwner.myVehicles || [];
                     newCarOwner.myVehicles.push(createdVehicle._id);
                     newVehicles.push(createdVehicle);
@@ -1901,7 +2115,6 @@ onboardCarOwner = async (req, res) => {
             req.body.model ||
             req.body.year
         ) {
-            // Only add non-null/undefined fields to the payload for Vehicle
             const vehiclePayload = {};
             if (req.body.licensePlateNo !== undefined) vehiclePayload.licensePlateNo = req.body.licensePlateNo;
             if (req.body.vinNo !== undefined) vehiclePayload.vinNo = req.body.vinNo;
@@ -1909,6 +2122,7 @@ onboardCarOwner = async (req, res) => {
             if (req.body.model !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), model: req.body.model };
             if (req.body.year !== undefined) vehiclePayload.year = req.body.year;
             if (req.body.odometerReading !== undefined) vehiclePayload.odometerReading = req.body.odometerReading;
+            if (typeof req.body.disabled !== "undefined") vehiclePayload.disabled = req.body.disabled;
 
             if (
                 vehiclePayload.licensePlateNo &&
@@ -1918,6 +2132,19 @@ onboardCarOwner = async (req, res) => {
                 vehiclePayload.make.model &&
                 vehiclePayload.year
             ) {
+                let willBeDisabled = !!vehiclePayload.disabled;
+                if (!willBeDisabled) {
+                    const plateExists = await VehicleModel.findOne({ 
+                        licensePlateNo: vehiclePayload.licensePlateNo,
+                        $or: [{disabled: false}, {disabled: { $exists: false }}]
+                    });
+                    if (plateExists) {
+                        return res.status(409).json({
+                            message: `A vehicle with license plate "${vehiclePayload.licensePlateNo}" already exists and is not disabled. Only one enabled vehicle per license plate is allowed.`,
+                            licensePlateNo: vehiclePayload.licensePlateNo
+                        });
+                    }
+                }
                 const createdVehicle = await VehicleModel.create(vehiclePayload);
                 newCarOwner.myVehicles = newCarOwner.myVehicles || [];
                 newCarOwner.myVehicles.push(createdVehicle._id);
@@ -3037,7 +3264,7 @@ async fetchMyDeals(req, res) {
             typeof id === "string" ? new mongoose.Types.ObjectId(id) : id
         );
 
-        // Fetch all deals for this business, along with service details if dealType Service
+        // Fetch all deals for this business
         const deals = await DealModel.find({
             _id: { $in: dealIds },
             createdBy: businessProfile._id
@@ -3049,7 +3276,7 @@ async fetchMyDeals(req, res) {
         let serviceDeals = [];
         let partsDeals = [];
 
-        deals.forEach(deal => {
+        for (const deal of deals) {
             if (deal.dealType === "Service") {
                 // Attach full service details from serviceId
                 let serviceObj = null;
@@ -3080,25 +3307,46 @@ async fetchMyDeals(req, res) {
                     typeof deal.selectedVehicle === "object" &&
                     deal.selectedVehicle.id
                 ) {
-                    selectedVehicle = {
-                        id: deal.selectedVehicle.id,
-                        name: deal.selectedVehicle.name,
-                        model: deal.selectedVehicle.model, // Use 'model' as per deals.schema.js
-                        year: deal.selectedVehicle.year
-                    };
+                    // Only include selectedVehicle if NOT disabled
+                    // We need to check if the vehicle is disabled by fetching from DB
+                    const vehicleId = deal.selectedVehicle.id;
+                    let allowVehicle = false;
+                    let vehicleInfo = null;
+                    // Defensive: Only attempt fetch if id is valid at all
+                    if (vehicleId) {
+                        const vehicle = await VehicleModel.findById(vehicleId, "disabled name make.model year").lean();
+                        if (vehicle && vehicle.disabled !== true) {
+                            // Compose info in compatible format
+                            vehicleInfo = {
+                                id: vehicle._id,
+                                name: vehicle.name || vehicle.make?.name || "", // try to match prior structure
+                                model: vehicle.make?.model || "",
+                                year: vehicle.year
+                            };
+                            allowVehicle = true;
+                        }
+                    }
+                    if (allowVehicle) {
+                        selectedVehicle = vehicleInfo;
+                    } else {
+                        selectedVehicle = null; // Do not send disabled vehicles
+                    }
                 }
-                partsDeals.push({
-                    dealType: deal.dealType,
-                    partName: deal.partName,
-                    selectedVehicle,
-                    description: deal.description,
-                    discountedPrice: deal.discountedPrice,
-                    offerEndsOnDate: deal.offerEndsOnDate,
-                    createdBy: deal.createdBy && deal.createdBy._id ? deal.createdBy._id : deal.createdBy,
-                    _id: deal._id
-                });
+                // If selectedVehicle is null (disabled or missing), skip this partsDeal
+                if (selectedVehicle) {
+                    partsDeals.push({
+                        dealType: deal.dealType,
+                        partName: deal.partName,
+                        selectedVehicle,
+                        description: deal.description,
+                        discountedPrice: deal.discountedPrice,
+                        offerEndsOnDate: deal.offerEndsOnDate,
+                        createdBy: deal.createdBy && deal.createdBy._id ? deal.createdBy._id : deal.createdBy,
+                        _id: deal._id
+                    });
+                }
             }
-        });
+        }
 
         // Sort services deals by service name, parts by partName
         serviceDeals.sort((a, b) => {
@@ -3314,13 +3562,43 @@ async createJobCard(req, res) {
             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
             return res.status(404).json({ success: false, message: "Customer not found" });
         }
-        const myVehiclesList = Array.isArray(customerUser.myVehicles)
-            ? customerUser.myVehicles.map(v =>
-                v.vehicle?._id?.toString() || v._id?.toString() || v.toString()
-            ) : [];
-        if (!myVehiclesList.includes(vehicleId.toString())) {
+        // Validate that vehicle belongs to customer and that it is not disabled
+        let myVehiclesList = [];
+        let vehicleObj = null;
+        if (Array.isArray(customerUser.myVehicles)) {
+            for (const v of customerUser.myVehicles) {
+                // Normalize vehicle id extraction
+                const vehicleIdResolved =
+                    v.vehicle?._id?.toString() || v._id?.toString() || v.toString();
+                if (vehicleIdResolved === vehicleId.toString()) {
+                    myVehiclesList.push(vehicleIdResolved);
+                    // Try fetch entire vehicle record if _id matches
+                    vehicleObj = (v.vehicle && typeof v.vehicle === "object" && v.vehicle._id)
+                        ? v.vehicle
+                        : null;
+                }
+            }
+        }
+        // Defensive: fetch vehicle from DB if can't get disabled from user doc (lean v. hydrated object)
+        if (!myVehiclesList.length) {
             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
             return res.status(400).json({ success: false, message: "Vehicle does not belong to customer" });
+        }
+        // If we have the whole vehicle object with disabled built-in, check it locally, else look up
+        let isVehicleDisabled = false;
+        if (vehicleObj && typeof vehicleObj === "object" && vehicleObj.hasOwnProperty("disabled")) {
+            isVehicleDisabled = !!vehicleObj.disabled;
+        } else {
+            const vehicleRecord = await VehicleModel.findById(vehicleId).lean();
+            if (!vehicleRecord) {
+                if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+                return res.status(400).json({ success: false, message: "Vehicle record not found" });
+            }
+            isVehicleDisabled = !!vehicleRecord.disabled;
+        }
+        if (isVehicleDisabled) {
+            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+            return res.status(400).json({ success: false, message: "Vehicle is disabled and cannot be used" });
         }
 
         // Get business profile, and build allowed services/subservices lookup using serviceId and subService.name
@@ -4380,271 +4658,271 @@ async markJobStatus(req, res) {
  * @jobCard.schema.js (78-79): labourCharge: { type: Number }, // Labour charge for the job
  *                             labourDuration: { type: String }, // Labour duration for the job
  */
-async editJobCard(req, res) {
-    // Accept vehiclePhotos from file uploads (multer) via req.files["vehiclePhotos"]
+// async editJobCard(req, res) {
+//     // Accept vehiclePhotos from file uploads (multer) via req.files["vehiclePhotos"]
 
-    try {
-        const { jobCardId } = req.params;
+//     try {
+//         const { jobCardId } = req.params;
 
-        // Parse services if it's a string
-        if (typeof req.body.services === "string") {
-            try {
-                req.body.services = JSON.parse(req.body.services);
-            } catch (err) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid services JSON format"
-                });
-            }
-        }
+//         // Parse services if it's a string
+//         if (typeof req.body.services === "string") {
+//             try {
+//                 req.body.services = JSON.parse(req.body.services);
+//             } catch (err) {
+//                 return res.status(400).json({
+//                     success: false,
+//                     message: "Invalid services JSON format"
+//                 });
+//             }
+//         }
 
-        // Parse labourCharge if it's a string (should be number or undefined)
-        let labourCharge = req.body.labourCharge;
-        if (typeof labourCharge === "string") {
-            labourCharge = parseFloat(labourCharge);
-            if (isNaN(labourCharge)) labourCharge = undefined;
-        }
+//         // Parse labourCharge if it's a string (should be number or undefined)
+//         let labourCharge = req.body.labourCharge;
+//         if (typeof labourCharge === "string") {
+//             labourCharge = parseFloat(labourCharge);
+//             if (isNaN(labourCharge)) labourCharge = undefined;
+//         }
 
-        // Parse labourDuration (should be string or undefined, but just ensure it's string)
-        let labourDuration = req.body.labourDuration;
-        if (typeof labourDuration !== "undefined" && labourDuration !== null) {
-            labourDuration = String(labourDuration);
-        }
+//         // Parse labourDuration (should be string or undefined, but just ensure it's string)
+//         let labourDuration = req.body.labourDuration;
+//         if (typeof labourDuration !== "undefined" && labourDuration !== null) {
+//             labourDuration = String(labourDuration);
+//         }
 
-        const {
-            odometerReading,
-            dueOdometerReading,
-            issueDescription,
-            serviceType, // can't be updated but validated for match
-            priorityLevel, // can't be updated but validated for match
-            services,
-            additionalNotes,
-            technicalRemarks
-        } = req.body;
+//         const {
+//             odometerReading,
+//             dueOdometerReading,
+//             issueDescription,
+//             serviceType, // can't be updated but validated for match
+//             priorityLevel, // can't be updated but validated for match
+//             services,
+//             additionalNotes,
+//             technicalRemarks
+//         } = req.body;
 
-        // Find requesting user
-        const user = await User.findById(req.user.id);
-        if (!user) {
-            if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
-            return res.status(404).json({ success: false, message: "AutoShop owner user not found" });
-        }
+//         // Find requesting user
+//         const user = await User.findById(req.user.id);
+//         if (!user) {
+//             if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
+//             return res.status(404).json({ success: false, message: "AutoShop owner user not found" });
+//         }
 
-        // Find the job card and check business ownership
-        const jobCard = await JobCard.findById(jobCardId);
-        if (!jobCard) {
-            if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
-            return res.status(404).json({ success: false, message: "JobCard not found" });
-        }
-        if (
-            !jobCard.business ||
-            jobCard.business.toString() !== (user.businessProfile?.toString?.() || user.businessProfile)
-        ) {
-            if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
-            return res.status(403).json({ success: false, message: "You do not own this JobCard" });
-        }
-        if (jobCard.status !== "Pending") {
-            if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
-            return res.status(400).json({ success: false, message: "Only Pending job cards can be edited." });
-        }
+//         // Find the job card and check business ownership
+//         const jobCard = await JobCard.findById(jobCardId);
+//         if (!jobCard) {
+//             if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
+//             return res.status(404).json({ success: false, message: "JobCard not found" });
+//         }
+//         if (
+//             !jobCard.business ||
+//             jobCard.business.toString() !== (user.businessProfile?.toString?.() || user.businessProfile)
+//         ) {
+//             if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
+//             return res.status(403).json({ success: false, message: "You do not own this JobCard" });
+//         }
+//         if (jobCard.status !== "Pending") {
+//             if (req.files && req.files["vehiclePhotos"]) await deleteUploadedFiles(req.files["vehiclePhotos"]);
+//             return res.status(400).json({ success: false, message: "Only Pending job cards can be edited." });
+//         }
 
-        // Only allow update on fields outlined
-        // Get uploaded photos if available
-        let uploadedPhotos = [];
-        if (req.files && req.files["vehiclePhotos"]) {
-            if (Array.isArray(req.files["vehiclePhotos"])) {
-                uploadedPhotos = req.files["vehiclePhotos"];
-            } else if (req.files["vehiclePhotos"]) {
-                uploadedPhotos = [req.files["vehiclePhotos"]];
-            }
-        }
-        let vehiclePhotos;
-        if (uploadedPhotos.length) {
-            vehiclePhotos = uploadedPhotos.map(f => f.path || f.location || f.filename).filter(Boolean);
-        } else {
-            // If no new upload, keep existing
-            vehiclePhotos = jobCard.vehiclePhotos || [];
-        }
+//         // Only allow update on fields outlined
+//         // Get uploaded photos if available
+//         let uploadedPhotos = [];
+//         if (req.files && req.files["vehiclePhotos"]) {
+//             if (Array.isArray(req.files["vehiclePhotos"])) {
+//                 uploadedPhotos = req.files["vehiclePhotos"];
+//             } else if (req.files["vehiclePhotos"]) {
+//                 uploadedPhotos = [req.files["vehiclePhotos"]];
+//             }
+//         }
+//         let vehiclePhotos;
+//         if (uploadedPhotos.length) {
+//             vehiclePhotos = uploadedPhotos.map(f => f.path || f.location || f.filename).filter(Boolean);
+//         } else {
+//             // If no new upload, keep existing
+//             vehiclePhotos = jobCard.vehiclePhotos || [];
+//         }
 
-        // Validate if fields are present and correct, similar to createJobCard
-        const missingFields = [];
-        if (!services || !Array.isArray(services)) missingFields.push("services");
-        if (!odometerReading && odometerReading !== 0) missingFields.push("odometerReading");
-        if (!priorityLevel) missingFields.push("priorityLevel");
-        if (!serviceType) missingFields.push("serviceType");
-        if (missingFields.length > 0) {
-            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
-            return res.status(400).json({
-                success: false,
-                message: `Missing required fields: ${missingFields.join(", ")}`
-            });
-        }
+//         // Validate if fields are present and correct, similar to createJobCard
+//         const missingFields = [];
+//         if (!services || !Array.isArray(services)) missingFields.push("services");
+//         if (!odometerReading && odometerReading !== 0) missingFields.push("odometerReading");
+//         if (!priorityLevel) missingFields.push("priorityLevel");
+//         if (!serviceType) missingFields.push("serviceType");
+//         if (missingFields.length > 0) {
+//             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+//             return res.status(400).json({
+//                 success: false,
+//                 message: `Missing required fields: ${missingFields.join(", ")}`
+//             });
+//         }
 
-        // Validate type matches current
-        if (priorityLevel !== jobCard.priorityLevel) {
-            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
-            return res.status(400).json({ success: false, message: "Cannot change priorityLevel" });
-        }
-        if (serviceType !== jobCard.serviceType) {
-            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
-            return res.status(400).json({ success: false, message: "Cannot change serviceType" });
-        }
+//         // Validate type matches current
+//         if (priorityLevel !== jobCard.priorityLevel) {
+//             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+//             return res.status(400).json({ success: false, message: "Cannot change priorityLevel" });
+//         }
+//         if (serviceType !== jobCard.serviceType) {
+//             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+//             return res.status(400).json({ success: false, message: "Cannot change serviceType" });
+//         }
 
-        const allowedServiceTypes = ['Repair', 'Maintenance', 'Inspection'];
-        const allowedPriorityLevels = ['Normal', 'Urgent'];
-        if (!allowedServiceTypes.includes(serviceType)) {
-            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
-            return res.status(400).json({ success: false, message: "Invalid serviceType" });
-        }
-        if (!allowedPriorityLevels.includes(priorityLevel)) {
-            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
-            return res.status(400).json({ success: false, message: "Invalid priorityLevel" });
-        }
-        if (vehiclePhotos.length > 5) {
-            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
-            return res.status(400).json({ success: false, message: "Maximum 5 vehiclePhotos allowed" });
-        }
+//         const allowedServiceTypes = ['Repair', 'Maintenance', 'Inspection'];
+//         const allowedPriorityLevels = ['Normal', 'Urgent'];
+//         if (!allowedServiceTypes.includes(serviceType)) {
+//             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+//             return res.status(400).json({ success: false, message: "Invalid serviceType" });
+//         }
+//         if (!allowedPriorityLevels.includes(priorityLevel)) {
+//             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+//             return res.status(400).json({ success: false, message: "Invalid priorityLevel" });
+//         }
+//         if (vehiclePhotos.length > 5) {
+//             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+//             return res.status(400).json({ success: false, message: "Maximum 5 vehiclePhotos allowed" });
+//         }
 
-        // Validate customer (should not change)
-        const customerUser = await User.findById(jobCard.customerId || jobCard.customer?._id);
-        if (!customerUser) {
-            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
-            return res.status(404).json({ success: false, message: "Customer not found" });
-        }
-        const myVehiclesList = Array.isArray(customerUser.myVehicles)
-            ? customerUser.myVehicles.map(v =>
-                v.vehicle?._id?.toString() || v._id?.toString() || v.toString()
-            ) : [];
-        if (!myVehiclesList.includes((jobCard.vehicleId || jobCard.vehicle?._id)?.toString())) {
-            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
-            return res.status(400).json({ success: false, message: "Vehicle does not belong to customer" });
-        }
+//         // Validate customer (should not change)
+//         const customerUser = await User.findById(jobCard.customerId || jobCard.customer?._id);
+//         if (!customerUser) {
+//             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+//             return res.status(404).json({ success: false, message: "Customer not found" });
+//         }
+//         const myVehiclesList = Array.isArray(customerUser.myVehicles)
+//             ? customerUser.myVehicles.map(v =>
+//                 v.vehicle?._id?.toString() || v._id?.toString() || v.toString()
+//             ) : [];
+//         if (!myVehiclesList.includes((jobCard.vehicleId || jobCard.vehicle?._id)?.toString())) {
+//             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+//             return res.status(400).json({ success: false, message: "Vehicle does not belong to customer" });
+//         }
 
-        // Get business profile and build allowed services/subservices as in createJobCard
-        const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
-        if (!businessProfile) {
-            if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
-            return res.status(404).json({ success: false, message: "Business profile not found" });
-        }
+//         // Get business profile and build allowed services/subservices as in createJobCard
+//         const businessProfile = await BusinessProfileModel.findById(user.businessProfile).lean();
+//         if (!businessProfile) {
+//             if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+//             return res.status(404).json({ success: false, message: "Business profile not found" });
+//         }
 
-        // Build allowed services/subServices
-        const allowedServiceIds = new Set();
-        const allowedSubServiceNamesByService = {};
-        (businessProfile.myServices || []).forEach(ms => {
-            const serviceId = ms.service?._id?.toString() || ms.service?.toString();
-            if (serviceId) {
-                allowedServiceIds.add(serviceId);
-                allowedSubServiceNamesByService[serviceId] = new Set(
-                    (ms.subServices || []).map(ss =>
-                        (ss.subService?.name || ss.name || (typeof ss.subService === "string" ? ss.subService : undefined))
-                    ).filter(Boolean)
-                );
-            }
-        });
+//         // Build allowed services/subServices
+//         const allowedServiceIds = new Set();
+//         const allowedSubServiceNamesByService = {};
+//         (businessProfile.myServices || []).forEach(ms => {
+//             const serviceId = ms.service?._id?.toString() || ms.service?.toString();
+//             if (serviceId) {
+//                 allowedServiceIds.add(serviceId);
+//                 allowedSubServiceNamesByService[serviceId] = new Set(
+//                     (ms.subServices || []).map(ss =>
+//                         (ss.subService?.name || ss.name || (typeof ss.subService === "string" ? ss.subService : undefined))
+//                     ).filter(Boolean)
+//                 );
+//             }
+//         });
 
-        // Validate input services/subservices (by service id and subService name, not objectId)
-        for (const s of services) {
-            const sid = s.service?.toString() || s.id?.toString();
-            if (!sid || !allowedServiceIds.has(sid)) {
-                if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
-                return res.status(400).json({ success: false, message: `Service ${sid} not provided by this AutoShop` });
-            }
-            if (Array.isArray(s.subServices)) {
-                const allowedSubNames = allowedSubServiceNamesByService[sid] || new Set();
-                for (const sub of s.subServices) {
-                    const subName = typeof sub.name === "string" ? sub.name : null;
-                    if (!subName || !allowedSubNames.has(subName)) {
-                        if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
-                        return res.status(400).json({
-                            success: false,
-                            message: `SubService "${subName}" not available under Service ${sid}`
-                        });
-                    }
-                }
-            }
-        }
+//         // Validate input services/subservices (by service id and subService name, not objectId)
+//         for (const s of services) {
+//             const sid = s.service?.toString() || s.id?.toString();
+//             if (!sid || !allowedServiceIds.has(sid)) {
+//                 if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+//                 return res.status(400).json({ success: false, message: `Service ${sid} not provided by this AutoShop` });
+//             }
+//             if (Array.isArray(s.subServices)) {
+//                 const allowedSubNames = allowedSubServiceNamesByService[sid] || new Set();
+//                 for (const sub of s.subServices) {
+//                     const subName = typeof sub.name === "string" ? sub.name : null;
+//                     if (!subName || !allowedSubNames.has(subName)) {
+//                         if (uploadedPhotos.length) await deleteUploadedFiles(uploadedPhotos);
+//                         return res.status(400).json({
+//                             success: false,
+//                             message: `SubService "${subName}" not available under Service ${sid}`
+//                         });
+//                     }
+//                 }
+//             }
+//         }
 
-        // Calculate new total
-        let totalAmount = 0;
-        const servicesPayload = (services || []).map(serviceItem => {
-            let subTotal = 0;
-            const mappedSubServices = Array.isArray(serviceItem.subServices)
-                ? serviceItem.subServices.map(ss => {
-                    const price = parseFloat(ss.price ?? 0);
-                    if (!isNaN(price)) subTotal += price;
-                    return {
-                        name: ss.name,
-                        desc: ss.desc,
-                        price: isNaN(price) ? 0 : price,
-                    };
-                })
-                : [];
-            totalAmount += subTotal;
+//         // Calculate new total
+//         let totalAmount = 0;
+//         const servicesPayload = (services || []).map(serviceItem => {
+//             let subTotal = 0;
+//             const mappedSubServices = Array.isArray(serviceItem.subServices)
+//                 ? serviceItem.subServices.map(ss => {
+//                     const price = parseFloat(ss.price ?? 0);
+//                     if (!isNaN(price)) subTotal += price;
+//                     return {
+//                         name: ss.name,
+//                         desc: ss.desc,
+//                         price: isNaN(price) ? 0 : price,
+//                     };
+//                 })
+//                 : [];
+//             totalAmount += subTotal;
 
-            return {
-                service: serviceItem.service?.toString() || serviceItem.id?.toString(),
-                subServices: mappedSubServices
-            };
-        });
+//             return {
+//                 service: serviceItem.service?.toString() || serviceItem.id?.toString(),
+//                 subServices: mappedSubServices
+//             };
+//         });
 
-        // Add labourCharge (from request or fall back to existing jobCard)
-        if (typeof labourCharge === "number" && !isNaN(labourCharge)) {
-            totalAmount += labourCharge;
-        } else if (typeof jobCard.labourCharge === "number" && !isNaN(jobCard.labourCharge)) {
-            totalAmount += jobCard.labourCharge;
-        }
-        // If new vehicle photos are uploaded, remove old ones
-        if (uploadedPhotos.length && Array.isArray(jobCard.vehiclePhotos) && jobCard.vehiclePhotos.length) {
-            try {
-                await deleteUploadedFiles(jobCard.vehiclePhotos);
-            } catch(err) {
-                // Ignore error, log
-                console.warn("Failed to clean up previous vehicle photos after jobcard edit", err);
-            }
-        }
+//         // Add labourCharge (from request or fall back to existing jobCard)
+//         if (typeof labourCharge === "number" && !isNaN(labourCharge)) {
+//             totalAmount += labourCharge;
+//         } else if (typeof jobCard.labourCharge === "number" && !isNaN(jobCard.labourCharge)) {
+//             totalAmount += jobCard.labourCharge;
+//         }
+//         // If new vehicle photos are uploaded, remove old ones
+//         if (uploadedPhotos.length && Array.isArray(jobCard.vehiclePhotos) && jobCard.vehiclePhotos.length) {
+//             try {
+//                 await deleteUploadedFiles(jobCard.vehiclePhotos);
+//             } catch(err) {
+//                 // Ignore error, log
+//                 console.warn("Failed to clean up previous vehicle photos after jobcard edit", err);
+//             }
+//         }
 
-        // Update editable fields
-        jobCard.odometerReading = odometerReading;
-        jobCard.dueOdometerReading = dueOdometerReading;
-        jobCard.issueDescription = issueDescription;
-        jobCard.services = servicesPayload;
-        jobCard.additionalNotes = additionalNotes;
-        jobCard.technicalRemarks = technicalRemarks;
-        jobCard.vehiclePhotos = Array.isArray(vehiclePhotos) ? vehiclePhotos : [];
-        jobCard.totalPayableAmount = Number(totalAmount.toFixed(2));
-        // set labourCharge and labourDuration if provided
-        if (typeof labourCharge === "number" && !isNaN(labourCharge)) {
-            jobCard.labourCharge = labourCharge;
-        }
-        if (typeof labourDuration === "string" && labourDuration.length > 0) {
-            jobCard.labourDuration = labourDuration;
-        }
+//         // Update editable fields
+//         jobCard.odometerReading = odometerReading;
+//         jobCard.dueOdometerReading = dueOdometerReading;
+//         jobCard.issueDescription = issueDescription;
+//         jobCard.services = servicesPayload;
+//         jobCard.additionalNotes = additionalNotes;
+//         jobCard.technicalRemarks = technicalRemarks;
+//         jobCard.vehiclePhotos = Array.isArray(vehiclePhotos) ? vehiclePhotos : [];
+//         jobCard.totalPayableAmount = Number(totalAmount.toFixed(2));
+//         // set labourCharge and labourDuration if provided
+//         if (typeof labourCharge === "number" && !isNaN(labourCharge)) {
+//             jobCard.labourCharge = labourCharge;
+//         }
+//         if (typeof labourDuration === "string" && labourDuration.length > 0) {
+//             jobCard.labourDuration = labourDuration;
+//         }
 
-        await jobCard.save();
+//         await jobCard.save();
 
-        return res.status(200).json({
-            success: true,
-            message: "JobCard updated successfully",
-            data: {
-                ...jobCard.toObject(),
-                totalPayableAmount: Number(totalAmount.toFixed(2)),
-                services: servicesPayload
-            }
-        });
-    } catch (err) {
-        // Cleanup any newly uploaded files on error
-        if (req.files && req.files["vehiclePhotos"]) {
-            const files =
-                Array.isArray(req.files["vehiclePhotos"])
-                    ? req.files["vehiclePhotos"]
-                    : [req.files["vehiclePhotos"]];
-            if (files.length) {
-                await deleteUploadedFiles(files);
-            }
-        }
-        console.error("[editJobCard] Error:", err);
-        return res.status(500).json({ success: false, message: "Failed to edit JobCard", error: err.message });
-    }
-}
+//         return res.status(200).json({
+//             success: true,
+//             message: "JobCard updated successfully",
+//             data: {
+//                 ...jobCard.toObject(),
+//                 totalPayableAmount: Number(totalAmount.toFixed(2)),
+//                 services: servicesPayload
+//             }
+//         });
+//     } catch (err) {
+//         // Cleanup any newly uploaded files on error
+//         if (req.files && req.files["vehiclePhotos"]) {
+//             const files =
+//                 Array.isArray(req.files["vehiclePhotos"])
+//                     ? req.files["vehiclePhotos"]
+//                     : [req.files["vehiclePhotos"]];
+//             if (files.length) {
+//                 await deleteUploadedFiles(files);
+//             }
+//         }
+//         console.error("[editJobCard] Error:", err);
+//         return res.status(500).json({ success: false, message: "Failed to edit JobCard", error: err.message });
+//     }
+// }
 
 
 /**

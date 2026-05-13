@@ -487,6 +487,26 @@ class UserController {
                 return res.status(400).json({ message: "Required vehicle fields missing." });
             }
 
+            // Only allow adding if NO non-disabled (i.e. enabled) vehicle exists with the same licensePlateNo
+            // Treat missing 'disabled' field as disabled: false (i.e., enabled)
+            const enabledVehicle = await VehicleModel.findOne({
+                licensePlateNo: licensePlateNo,
+                $or: [
+                    { disabled: false },
+                    { disabled: { $exists: false } }
+                ]
+            }).session(session);
+
+            if (enabledVehicle) {
+                await session.abortTransaction();
+                session.endSession();
+                deleteUploadedFiles(req.files);
+                return res.status(409).json({
+                    success: false,
+                    message: "A vehicle with this license plate already exists and is not disabled."
+                });
+            }
+
             // Prepare new vehicle payload
             const vehicleData = {
                 licensePlateNo,
@@ -502,6 +522,11 @@ class UserController {
             if (carImages.length) vehicleData.carImages = carImages;
             if (carOwnershipCertificate) vehicleData.carOwnershipCertificate = carOwnershipCertificate;
             if (insuranceCertificate) vehicleData.insuranceCertificate = insuranceCertificate;
+
+            // By default, set disabled: false unless set via body (for completeness)
+            if (!('disabled' in vehicleData)) {
+                vehicleData.disabled = false;
+            }
 
             let newVehicle;
             try {
@@ -560,21 +585,73 @@ class UserController {
                 return res.status(400).json({ message: "Vehicle ID is required." });
             }
 
-            // Only allow update if user owns the vehicle (if ownership modeled)
-            // For now, assuming only "by ID" and not multi-tenant check
-            
+            // Find user and check if the vehicleId is in their myVehicles array
+            const user = await User.findById(userId).lean();
+            if (!user || !Array.isArray(user.myVehicles) || !user.myVehicles.some(v => v.toString() === vehicleId)) {
+                return res.status(403).json({ message: "You can only edit your own vehicles." });
+            }
+
             const updateFields = {};
             [
                 "licensePlateNo",
-                "licensePlateImagePath",
+                "licensePlateFrontImagePath",
+                "licensePlateBackImagePath",
+                "carOwnershipCertificate",
+                "insuranceCertificate",
                 "vinNo",
                 "make",
                 "year",
                 "odometerReading",
-                "carImage"
+                "carImages",
+                "disabled"
             ].forEach(field => {
                 if (req.body[field] !== undefined) updateFields[field] = req.body[field];
             });
+
+            // Fetch current state of the vehicle
+            const existingVehicle = await VehicleModel.findById(vehicleId).lean();
+            if (!existingVehicle) {
+                return res.status(404).json({ message: "Vehicle not found." });
+            }
+
+            // Determine upcoming disabled status
+            let willBeDisabled;
+            if (updateFields.hasOwnProperty('disabled')) {
+                willBeDisabled = !!updateFields.disabled;
+            } else if (existingVehicle.hasOwnProperty('disabled')) {
+                willBeDisabled = !!existingVehicle.disabled;
+            } else {
+                willBeDisabled = false;
+            }
+            let willUseNumberPlate = updateFields.hasOwnProperty('licensePlateNo')
+                ? updateFields.licensePlateNo
+                : existingVehicle.licensePlateNo;
+
+            // If NOT disabling, check that there are no other (not self) enabled vehicles with the same licensePlateNo
+            if (!willBeDisabled && willUseNumberPlate) {
+                const enabledVehicle = await VehicleModel.findOne({
+                    _id: { $ne: vehicleId },
+                    licensePlateNo: willUseNumberPlate,
+                    $or: [
+                        { disabled: false },
+                        { disabled: { $exists: false } }
+                    ]
+                });
+                if (enabledVehicle) {
+                    return res.status(409).json({
+                        success: false,
+                        message: "A vehicle with this license plate already exists and is not disabled."
+                    });
+                }
+            }
+
+            // If disabling is not set nor in DB, set explicitly to false
+            if (
+                !updateFields.hasOwnProperty('disabled') &&
+                (!existingVehicle.hasOwnProperty('disabled') || typeof existingVehicle.disabled === 'undefined')
+            ) {
+                updateFields.disabled = false;
+            }
 
             const updatedVehicle = await VehicleModel.findByIdAndUpdate(
                 vehicleId,
