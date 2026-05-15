@@ -455,20 +455,30 @@ class AutoShopController {
      * Only editable fields: name, email, countryCode, pincode, address
      * Does not allow editing phone or role.
      */
+    /**
+     * Only allows "autoshopowner" role to edit their profile.
+     * Editable fields: name, email, countryCode, pincode, address
+     * Cannot edit phone or role.
+     */
     async editProfile(req, res) {
         try {
             const userId = req.user?.id;
             if (!userId) {
-                return res.status(401).json({ message: "Unauthorized" });
+                return res.status(401).json({ message: "Unauthorized. User ID missing." });
             }
 
-            // Define which fields the autoshopowner can update
-            const allowedFields = [
-                "name", "email", "countryCode", "pincode", "address"
-            ];
+            const user = await User.findById(userId).lean();
+            if (!user) {
+                return res.status(404).json({ message: "User not found." });
+            }
+            if (user.role !== "autoshopowner") {
+                return res.status(403).json({ message: "Only autoshopowner can edit this profile." });
+            }
 
-            // Collect the fields provided in the request body
+            // Only autoshopowner can proceed
+            const allowedFields = ["name", "email", "countryCode", "pincode", "address"];
             const updateFields = {};
+
             for (const key of allowedFields) {
                 if (req.body[key] !== undefined) {
                     updateFields[key] = req.body[key];
@@ -477,15 +487,6 @@ class AutoShopController {
 
             if (Object.keys(updateFields).length === 0) {
                 return res.status(400).json({ message: "No profile fields provided to update." });
-            }
-
-            // Ensure user is autoshopowner before updating
-            const user = await User.findById(userId);
-            if (!user) {
-                return res.status(404).json({ message: "User not found." });
-            }
-            if (user.role !== "autoshopowner") {
-                return res.status(403).json({ message: "Forbidden. Only autoshopowner can edit this profile." });
             }
 
             const updatedUser = await User.findByIdAndUpdate(
@@ -498,10 +499,8 @@ class AutoShopController {
                 return res.status(404).json({ message: "User not found after update." });
             }
 
-            // Return updated profile info (exclude confidential/sensitive data)
-            const {
-                name, email, phone, countryCode, pincode, address
-            } = updatedUser;
+            // Return updated user profile (sensitive data omitted)
+            const { name, email, phone, countryCode, pincode, address } = updatedUser;
 
             return res.status(200).json({
                 success: true,
@@ -3345,7 +3344,6 @@ async fetchMyDeals(req, res) {
 
         for (const deal of deals) {
             if (deal.dealType === "Service") {
-                // Attach full service details from serviceId
                 let serviceObj = null;
                 if (deal.serviceId && (deal.serviceId.name || deal.serviceId.desc)) {
                     serviceObj = {
@@ -3367,51 +3365,40 @@ async fetchMyDeals(req, res) {
             }
 
             if (deal.dealType === "Parts") {
-                // Include selectedVehicle fields from deal (flat fields in deal.selectedVehicle)
+                // According to deals.schema.js:
+                // selectedVehicle is an embedded document with id, name, model, year as strings/ids,
+                // partName is required (string), description, discountedPrice, offerEndsOnDate.
+                // We do NOT need to fetch and merge vehicle from VehicleModel, just return deal.selectedVehicle as per the schema.
+
+                // selectedVehicle may be undefined/null for some entries; only send if valid object.
                 let selectedVehicle = null;
                 if (
                     deal.selectedVehicle &&
                     typeof deal.selectedVehicle === "object" &&
-                    deal.selectedVehicle.id
+                    deal.selectedVehicle.id &&
+                    deal.selectedVehicle.name &&
+                    deal.selectedVehicle.model &&
+                    deal.selectedVehicle.year
                 ) {
-                    // Only include selectedVehicle if NOT disabled
-                    // We need to check if the vehicle is disabled by fetching from DB
-                    const vehicleId = deal.selectedVehicle.id;
-                    let allowVehicle = false;
-                    let vehicleInfo = null;
-                    // Defensive: Only attempt fetch if id is valid at all
-                    if (vehicleId) {
-                        const vehicle = await VehicleModel.findById(vehicleId, "disabled name make.model year").lean();
-                        if (vehicle && vehicle.disabled !== true) {
-                            // Compose info in compatible format
-                            vehicleInfo = {
-                                id: vehicle._id,
-                                name: vehicle.name || vehicle.make?.name || "", // try to match prior structure
-                                model: vehicle.make?.model || "",
-                                year: vehicle.year
-                            };
-                            allowVehicle = true;
-                        }
-                    }
-                    if (allowVehicle) {
-                        selectedVehicle = vehicleInfo;
-                    } else {
-                        selectedVehicle = null; // Do not send disabled vehicles
-                    }
+                    // Build selectedVehicle to match @deals.schema.js (id, name, model, year)
+                    selectedVehicle = {
+                        id: deal.selectedVehicle.id,
+                        name: deal.selectedVehicle.name,
+                        model: deal.selectedVehicle.model,
+                        year: deal.selectedVehicle.year
+                    };
                 }
-                // If selectedVehicle is null (disabled or missing), skip this partsDeal
-                if (selectedVehicle) {
-                    partsDeals.push({
-                        dealType: deal.dealType,
-                        partName: deal.partName,
-                        selectedVehicle,
-                        description: deal.description,
-                        discountedPrice: deal.discountedPrice,
-                        offerEndsOnDate: deal.offerEndsOnDate,
-                        createdBy: deal.createdBy && deal.createdBy._id ? deal.createdBy._id : deal.createdBy,
-                        _id: deal._id
-                    });
-                }
+
+                partsDeals.push({
+                    dealType: deal.dealType,
+                    partName: deal.partName,
+                    selectedVehicle, // This matches the actual schema, no filtering for enable/disable
+                    description: deal.description,
+                    discountedPrice: deal.discountedPrice,
+                    offerEndsOnDate: deal.offerEndsOnDate,
+                    createdBy: deal.createdBy && deal.createdBy._id ? deal.createdBy._id : deal.createdBy,
+                    _id: deal._id
+                });
             }
         }
 
@@ -5936,7 +5923,7 @@ async collectPayment(req, res) {
       // --- Begin Sample Data ---
       // For now, simulate: hasPurchasedTemplate = true/false
       // When true, set a sample template as "purchased"
-      const hasPurchasedTemplate = true; // set to true to simulate purchased
+      const hasPurchasedTemplate = false; // set to true to simulate purchased
 
       let purchasedTemplateId = null;
       if (hasPurchasedTemplate && templates.length > 0) {
