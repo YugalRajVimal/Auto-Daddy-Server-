@@ -1650,12 +1650,12 @@ editCustomer = async (req, res) => {
             }
         }
 
-        // Vehicles: Only allow updating vehicles if vId (vehicleId) is present.
+        // Vehicles: allow editing if vId present, or add new if all required fields present and vId not present
         let vehiclesFromBody = req.body.vehicles;
         let updatedVehicleObjectIds = [];
         if (Array.isArray(vehiclesFromBody)) {
             for (const v of vehiclesFromBody) {
-                // Edit existing vehicle
+                // EDIT EXISTING VEHICLE:
                 if (v.vId && mongoose.Types.ObjectId.isValid(v.vId)) {
                     const vehId = v.vId.toString();
                     if (!existingVehicleIds.includes(vehId)) {
@@ -1679,7 +1679,6 @@ editCustomer = async (req, res) => {
                     if (v.vehicleName !== undefined) vehicleUpdateFields["make.name"] = v.vehicleName;
                     if (v.model !== undefined) vehicleUpdateFields["make.model"] = v.model;
 
-                    // Only update if there are fields to update
                     if (Object.keys(vehicleUpdateFields).length > 0) {
                         const vehicleDoc = await VehicleModel.findOneAndUpdate(
                             { _id: vehId },
@@ -1693,9 +1692,47 @@ editCustomer = async (req, res) => {
                         // Just push the existing id, nothing to edit
                         updatedVehicleObjectIds.push(vehId);
                     }
-                } 
-                // If no vId present, do not create new (per new clarifications: no creation unless vId/edit)
+                }
+                // ADD NEW VEHICLE IF NO vId AND ALL REQUIRED FIELDS (INCLUDING vinNo, odometerReading) ARE PRESENT:
+                else if (!v.vId) {
+                    // Now required fields: licensePlateNo, vehicleName, model, year, vinNo, odometerReading (all required for addition)
+                    const requiredFields = ["licensePlateNo", "vehicleName", "model", "year", "vinNo", "odometerReading"];
+                    const hasAllRequired = requiredFields.every(field => v[field] !== undefined && v[field] !== null && v[field] !== "");
+
+                    if (hasAllRequired) {
+                        // Build the new vehicle object according to VehicleModel schema
+                        let newVehicleData = {
+                            licensePlateNo: v.licensePlateNo,
+                            year: v.year,
+                            "make.name": v.vehicleName,
+                            "make.model": v.model,
+                            vinNo: v.vinNo,
+                            odometerReading: v.odometerReading,
+                            // Optionally add other fields if present (extras, not required)
+                            licensePlateFrontImagePath: v.licensePlateFrontImagePath,
+                            licensePlateBackImagePath: v.licensePlateBackImagePath,
+                            carOwnershipCertificate: v.carOwnershipCertificate,
+                            insuranceCertificate: v.insuranceCertificate,
+                            carImages: v.carImages,
+                            disabled: v.disabled,
+                            owner: customer._id // link to carOwner
+                        };
+
+                        // Remove undefined properties
+                        Object.keys(newVehicleData).forEach(key => {
+                            if (newVehicleData[key] === undefined) delete newVehicleData[key];
+                        });
+
+                        const newVehicleDoc = await VehicleModel.create(newVehicleData);
+                        if (newVehicleDoc && newVehicleDoc._id) {
+                            updatedVehicleObjectIds.push(newVehicleDoc._id);
+                        }
+                    }
+                    // If the required fields are not all present, skip this vehicle entry (do not throw)
+                }
+                // Else: skip if neither valid vId nor all required fields for new vehicle
             }
+
             // Only set myVehicles if something provided for vehicles 
             if (updatedVehicleObjectIds.length > 0) {
                 updateFields.myVehicles = updatedVehicleObjectIds;
