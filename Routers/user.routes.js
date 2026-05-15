@@ -66,7 +66,7 @@ userRouter.delete(
 
 
 // Route to get all deals (public endpoint)
-userRouter.get("/deals", (req, res) => { userController.getAllDeals(req, res) });
+userRouter.get("/deals",jwtAuth, (req, res) => { userController.getAllDeals(req, res) });
 
 
 // Route to get all auto shops (public endpoint)
@@ -157,6 +157,14 @@ userRouter.put(
   jwtAuth,
   (req, res) => userController.editOdometerById(req, res)
 );
+
+// Discard a deal for the authenticated user
+userRouter.post(
+  "/discard-deal",
+  jwtAuth,
+  (req, res) => userController.discardDeal(req, res)
+);
+
 
 
 

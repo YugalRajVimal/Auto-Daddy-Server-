@@ -50,6 +50,7 @@ const UserSchema = new mongoose.Schema(
       }
     ].slice(0, 5), // max 5 documents
 
+    discardedDeals: [{ type: mongoose.Schema.Types.ObjectId, ref: "Deal", default: [] }],
 
     // OTP fields are available for all users.
     otp: { type: String }, // Last sent OTP
