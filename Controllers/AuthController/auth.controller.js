@@ -309,7 +309,7 @@ class AuthController {
   // Verify Account with OTP per user.schema.js fields
   verifyAccount = async (req, res) => {
     try {
-      let { countryCode, phone, otp, deviceId } = req.body;
+      let { countryCode, phone, otp, deviceId, fcmToken } = req.body;
       console.log("[verifyAccount] Incoming params:", req.body);
 
       if (!countryCode || !phone || !otp) {
@@ -330,10 +330,10 @@ class AuthController {
         return res.status(400).json({ message: "Invalid phone number." });
       }
 
-      // Fetch only necessary fields
+      // Fetch only necessary fields, including fcmToken
       let user = await User.findOne(
         { countryCode, phone },
-        "_id otp otpExpiresAt otpGeneratedAt otpAttempts phoneVerified lastLogin role name profilePhoto isProfileComplete isAutoShopBusinessProfileComplete businessProfile"
+        "_id otp otpExpiresAt otpGeneratedAt otpAttempts phoneVerified lastLogin role name profilePhoto isProfileComplete isAutoShopBusinessProfileComplete businessProfile fcmToken"
       );
       
       if (!user) {
@@ -353,7 +353,7 @@ class AuthController {
         return res.status(401).json({ message: "OTP has expired. Please request a new OTP." });
       }
 
-      // Update fields for verified user; clear OTP and set phoneVerified, save deviceId if provided
+      // Update fields for verified user; clear OTP and set phoneVerified, save deviceId and fcmToken if provided
       // Only update minimal required fields
       const updateObj = {
         otp: null,
@@ -365,6 +365,9 @@ class AuthController {
       };
       if (deviceId) {
         updateObj.deviceId = deviceId;
+      }
+      if (typeof fcmToken === "string" && fcmToken.trim().length > 0) {
+        updateObj.fcmToken = fcmToken.trim();
       }
       await User.updateOne({ _id: user._id }, { $set: updateObj });
 
@@ -399,7 +402,8 @@ class AuthController {
         isAutoShopBusinessProfileComplete: user.isAutoShopBusinessProfileComplete,
         role: user.role,
         name: user.name || null,
-        profilePhoto: profilePhoto
+        profilePhoto: profilePhoto,
+        fcmToken: (typeof fcmToken === "string" && fcmToken.trim().length > 0) ? fcmToken.trim() : user.fcmToken || null
       });
 
     } catch (error) {

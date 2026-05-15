@@ -59,6 +59,7 @@ const UserSchema = new mongoose.Schema(
     otpAttempts: { type: Number, default: 0 }, // Attempts for the current OTP
 
     deviceId: { type: String, default: null },
+    fcmToken: { type: String, default: null },
 
 
     thoughtOfTheDayLiked: { type: Boolean, default: false },

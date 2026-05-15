@@ -6188,6 +6188,49 @@ async removeCarCompaniesFromBusinessProfile(req, res) {
   }
 }
 
+// Send push notification to an auto shop owner using FCM token
+// Assumes you have a function sendPushNotification(fcmToken, title, message, data)
+
+async  notifyAutoShopOwnerForService(req, res) {
+  try {
+    const { autoShopOwnerId, serviceId, title, message } = req.body;
+
+    if (!autoShopOwnerId || !serviceId) {
+      return res.status(400).json({ message: "autoShopOwnerId and serviceId are required" });
+    }
+
+    // Fetch the auto shop owner and get their fcmToken
+    const user = await User.findOne({ _id: autoShopOwnerId, role: "autoshopowner" }).select("fcmToken name");
+    if (!user || !user.fcmToken) {
+      return res.status(404).json({ message: "Auto shop owner not found or has no FCM token" });
+    }
+
+    // Compose your notification payload
+    const notifTitle = title || "New Service Notification";
+    const notifMessage = message || `You have a new notification regarding service ID: ${serviceId}`;
+    const notifData = {
+      serviceId: serviceId.toString(),
+      userId: autoShopOwnerId.toString()
+    };
+
+    // You must have a sendPushNotification function somewhere in your project;
+    //   it should return a result or throw an error.
+    // This snippet assumes such a function exists and is imported.
+
+    try {
+      await sendPushNotification(user.fcmToken, notifTitle, notifMessage, notifData);
+      return res.status(200).json({ message: "Notification sent successfully." });
+    } catch (notifyErr) {
+      console.error("[notifyAutoShopOwnerForService] FCM send error:", notifyErr);
+      return res.status(500).json({ message: "Failed to send notification", error: notifyErr.message });
+    }
+  } catch (err) {
+    console.error("[notifyAutoShopOwnerForService] Error:", err);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+}
+
+
 
 
 
