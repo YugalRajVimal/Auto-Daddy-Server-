@@ -756,12 +756,21 @@ class UserController {
     // Fetch all deals, prioritizing deals from businesses in the same city as the user (if possible)
     getAllDeals = async (req, res) => {
         try {
-            // Try to get logged in user to get user's city (public route so may not exist)
+            // Try to get logged in user to get user's city and discardedDeals (public route so may not exist)
             let userCity = null;
+            let discardedDeals = [];
+            console.log("[getAllDeals] req.user:", req.user);
+
             if (req.user && req.user.id) {
-                const user = await User.findById(req.user.id).select("city").lean();
-                if (user && user.city) {
-                    userCity = user.city.trim().toLowerCase();
+                const user = await User.findById(req.user.id).select("city discardedDeals").lean();
+                console.log("[getAllDeals] Fetched user:", user);
+                if (user) {
+                    if (user.city) {
+                        userCity = user.city.trim().toLowerCase();
+                    }
+                    if (Array.isArray(user.discardedDeals)) {
+                        discardedDeals = user.discardedDeals.map(id => id.toString());
+                    }
                 }
             }
 
@@ -773,22 +782,34 @@ class UserController {
                     model: "BusinessProfile"
                 })
                 .populate({
-                    path: "serviceId", // This assumes "services" is an array [{service: ObjectId, ...}]
+                    path: "serviceId",
                     model: "Services",
                     select: "name desc"
                 })
                 .lean();
 
+            console.log("[getAllDeals] Raw deals fetched:", deals.length);
+
             // Filter for enabled deals only (even if schema doesn't mention dealEnabled, so fallback to all deals)
             // Remove deals without a valid business
             deals = deals.filter(
                 d =>
-                    d.createdBy && // valid business
+                    d.createdBy &&
                     (
-                        typeof d.dealEnabled === "undefined" || // allow if dealEnabled missing
-                        d.dealEnabled === true                // or explicitly enabled
+                        typeof d.dealEnabled === "undefined" ||
+                        d.dealEnabled === true
                     )
             );
+
+            console.log("[getAllDeals] Deals after enabled/business filter:", deals.length);
+
+            // Remove discarded deals for authenticated user
+            if (discardedDeals.length > 0) {
+                deals = deals.filter(
+                    d => !discardedDeals.includes(d._id.toString())
+                );
+                console.log("[getAllDeals] Deals after discarding for user:", deals.length);
+            }
 
             let cityDeals = [];
             let otherDeals = [];
@@ -800,9 +821,12 @@ class UserController {
                 otherDeals = deals.filter(
                     d => !(d.createdBy && typeof d.createdBy.city === "string" && d.createdBy.city.trim().toLowerCase() === userCity)
                 );
+                console.log(`[getAllDeals] cityDeals for city '${userCity}':`, cityDeals.length);
+                console.log("[getAllDeals] otherDeals:", otherDeals.length);
             } else {
-                cityDeals = deals; // if no user city, just show all
+                cityDeals = deals;
                 otherDeals = [];
+                console.log("[getAllDeals] No user city - all deals:", cityDeals.length);
             }
 
             return res.status(200).json({
@@ -1687,6 +1711,66 @@ editOdometerById = async (req, res) => {
   }
 };
 
+
+/**
+ * Discard a deal ID for a user (add deal to user's discardedDeals array).
+ * Route: POST /discard-deal
+ * Body: { dealId }
+ * Auth: user must be authenticated
+ */
+discardDeal = async (req, res) => {
+  try {
+    const userId = req.user && req.user.id;
+    const { dealId } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    if (!dealId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "dealId is required" });
+    }
+
+    // Check if deal exists
+    const deal = await DealModel.findById(dealId).lean();
+    if (!deal) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Deal not found" });
+    }
+
+    // Add dealId to user's discardedDeals array if not already present
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (user.discardedDeals && user.discardedDeals.includes(dealId)) {
+      // Already discarded
+      return res.status(200).json({
+        success: true,
+        message: "Deal already discarded",
+        discardedDeals: user.discardedDeals,
+      });
+    }
+
+    user.discardedDeals = user.discardedDeals || [];
+    user.discardedDeals.push(dealId);
+    await user.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Deal discarded successfully",
+      discardedDeals: user.discardedDeals,
+    });
+  } catch (error) {
+    console.error("[discardDeal] Error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal Server Error" });
+  }
+};
 
 
 
