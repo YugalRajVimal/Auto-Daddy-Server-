@@ -826,16 +826,36 @@ class UserController {
                 userCity = user?.city?.trim().toLowerCase() || null;
             }
 
-            // Combine search for both serviceName and subServiceName into one param: `search`
-            // Use: ?search=theNameToSearch (case-insensitive, matches service or subservice)
-            const { search } = req.query;
+            // Extract filter parameters from query
+            // Filter options:
+            // - search: text search on service/subservice names
+            // - service: filter by service id(s) (single or comma-separated list)
+            // - carCompanies: filter by carCompany id(s) (now replacing vehicle-based filtering)
+            const { search, service, carCompanies } = req.query;
+
             let filterSearch = typeof search === "string" && search.trim().length > 0 ? search.trim().toLowerCase() : null;
+
+            // Build service filter array if provided
+            let filterServiceIds = [];
+            if (typeof service === "string" && service.trim().length > 0) {
+                // Accept comma-separated list or single serviceId as string
+                filterServiceIds = service.split(',').map(s => s.trim()).filter(Boolean);
+            }
+
+            // Build carCompanies filter array if provided
+            let filterCarCompanyIds = [];
+            if (typeof carCompanies === "string" && carCompanies.trim().length > 0) {
+                // Accept comma-separated list or single carCompanyId as string
+                filterCarCompanyIds = carCompanies.split(',').map(v => v.trim()).filter(Boolean);
+            }
 
             // Get all services from db
             const allServices = await servicesSchema.find({}, { _id: 1, name: 1, desc: 1 }).lean();
 
-            // Only select required fields from the business profile model
-            let autoShops = await BusinessProfileModel.find({}, {
+            // Build the filter object for business profiles (if we want to filter on some properties at the DB level)
+            let businessProfileFilter = {}; // add more filters if needed
+
+            let autoShops = await BusinessProfileModel.find(businessProfileFilter, {
                     businessName: 1,
                     openHours: 1,
                     openDays: 1,
@@ -848,12 +868,18 @@ class UserController {
                     businessMapLocation: 1,
                     myServices: 1,
                     ratings: 1,
+                    carCompanies: 1, // <-- expose carCompanies in response
                     _id: 1
                 })
                 .populate({
                     path: 'myServices.service',
                     model: 'Services',
                     select: 'name desc'
+                })
+                .populate({
+                    path: 'carCompanies',
+                    model: 'CarCompany',
+                    select: 'name'  // populate car company details
                 })
                 .lean();
 
@@ -934,11 +960,45 @@ class UserController {
                     businessProfileImage: shop.businessLogo,
                     businessMapLocation: shop.businessMapLocation,
                     myServices: allMyServices,
-                    avgRating: avgRating
+                    avgRating: avgRating,
+                    carCompanies: shop.carCompanies || []
                 };
             });
 
-            // ----- FILTERING LOGIC BY search (serviceName or subServiceName, case-insensitive) -----
+            // ----- FILTERING LOGIC -----
+            // 1. Filter by Service(s)
+            if (filterServiceIds.length > 0) {
+                autoShops = autoShops.filter(shop => {
+                    // If any of the shop's services match requested serviceIds and is actually set (>0 subServices, else it's "empty" service assignment for this shop)
+                    for (const ms of shop.myServices) {
+                        if (
+                            filterServiceIds.includes(String(ms.service._id)) &&
+                            (Array.isArray(ms.subServices) ? ms.subServices.length > 0 : false)
+                        ) {
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+            }
+
+            // 2. Filter by Car Company(ies)
+            // shop.carCompanies can be Array of populated objects or ObjectIds
+            if (filterCarCompanyIds.length > 0) {
+                autoShops = autoShops.filter(shop => {
+                    let shopCarCompanies = Array.isArray(shop.carCompanies) ? shop.carCompanies : [];
+                    // Normalize all carCompany IDs to string for comparison
+                    shopCarCompanies = shopCarCompanies.map(cc => {
+                        if (cc && typeof cc === "object" && cc._id) return String(cc._id);
+                        if (typeof cc === "string") return cc;
+                        return String(cc);
+                    });
+                    // If any carCompany in this shop matches the filter
+                    return filterCarCompanyIds.some(fid => shopCarCompanies.includes(fid));
+                });
+            }
+
+            // 3. Search by service name or sub-service name
             if (filterSearch) {
                 autoShops = autoShops.filter(shop => {
                     let matched = false;
@@ -1080,27 +1140,38 @@ class UserController {
                 return res.status(404).json({ success: false, message: "User not found" });
             }
 
-            // Find job cards separated by status
+            // Optionally filter by vehicleId if present in query
+            const { vehicleId } = req.query;
+
+            // Prepare base filter for all status types
+            let baseFilter = { customerId: userId };
+            if (vehicleId && typeof vehicleId === "string" && vehicleId.trim().length > 0) {
+                baseFilter.vehicleId = vehicleId.trim();
+            }
+
+            const vehiclePopulate = { 
+                path: 'vehicleId', 
+                model: 'Vehicle', 
+                select: 'make model licensePlateNo' 
+            };
+            const businessPopulate = { 
+                path: 'business', 
+                model: 'BusinessProfile', 
+                select: 'businessName businessType address contactNumber' 
+            };
+
+            // Find job cards separated by status (filtered by vehicle if provided)
             const [pendingJobCards, approvedJobCards, rejectedJobCards] = await Promise.all([
-                JobCard.find({ customerId: userId, status: 'Pending' })
-                    .populate([
-                        { path: 'business', model: 'BusinessProfile', select: 'businessName businessType address contactNumber' },
-                        { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' }
-                    ])
+                JobCard.find({ ...baseFilter, status: 'Pending' })
+                    .populate([businessPopulate, vehiclePopulate])
                     .sort({ createdAt: -1 })
                     .lean(),
-                JobCard.find({ customerId: userId, status: 'Approved' })
-                    .populate([
-                        { path: 'business', model: 'BusinessProfile', select: 'businessName businessType address contactNumber' },
-                        { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' }
-                    ])
+                JobCard.find({ ...baseFilter, status: 'Approved' })
+                    .populate([businessPopulate, vehiclePopulate])
                     .sort({ createdAt: -1 })
                     .lean(),
-                JobCard.find({ customerId: userId, status: 'Rejected' })
-                    .populate([
-                        { path: 'business', model: 'BusinessProfile', select: 'businessName businessType address contactNumber' },
-                        { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' }
-                    ])
+                JobCard.find({ ...baseFilter, status: 'Rejected' })
+                    .populate([businessPopulate, vehiclePopulate])
                     .sort({ createdAt: -1 })
                     .lean(),
             ]);
