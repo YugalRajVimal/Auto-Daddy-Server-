@@ -3,10 +3,6 @@ import mongoose from "mongoose";
 const VehicleSchema = new mongoose.Schema(
   {
     licensePlateNo: { type: String, required: true }, // Vehicle license plate number
-    licensePlateFrontImagePath: { type: String, default: null }, // Path or URL to license plate image
-    licensePlateBackImagePath: { type: String, default: null }, // Path or URL to license plate image
-    carOwnershipCertificate: { type: String, default: null }, // Path or URL to car ownership certificate image
-    insuranceCertificate: { type: String, default: null }, // Path or URL to insurance certificate image
 
     vinNo: { type: String, required: true }, // Vehicle Identification Number (VIN)
     make: {
@@ -15,11 +11,7 @@ const VehicleSchema = new mongoose.Schema(
     },
     year: { type: Number, required: true }, // Model year
     odometerReading: { type: Number, default: 0 }, // Odometer reading (kilometers/miles)
-    carImages: {
-      type: [String],
-      default: [],
-      validate: [arr => arr.length <= 5, '{PATH} exceeds the limit of 5 images']
-    }, // Array of up to 5 image URLs
+   
     disabled: { type: Boolean, default: false } // Whether the vehicle is disabled (soft-deleted/archived)
   },
   {

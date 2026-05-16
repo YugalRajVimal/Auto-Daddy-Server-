@@ -1,14 +1,12 @@
 import multer from "multer";
 import fs from "fs";
 
-// -- v1
-// Add import for VehicleModel if needed in future, but not required for this middleware code specifically
-
 // Configure disk storage for multer
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     let uploadPath = "./Uploads/";
 
+    // Therapist file fields (unchanged for context outside user.schema.js updates)
     const therapistFileFields = [
       "aadhaarFront",
       "aadhaarBack",
@@ -32,14 +30,12 @@ const storage = multer.diskStorage({
       uploadPath = "./Uploads/ExcelFiles";
     }
     else if (
-      // @vehicles.schema.js (8-9)
-      // Support for car ownership certificate and insurance certificate
-      file.fieldname === "licensePlateFrontImage" ||
-      file.fieldname === "licensePlateBackImage" ||
-      file.fieldname === "carImages" ||
-      file.fieldname === "vehiclePhotos" ||
+      // Vehicle-related user document fields as per user.schema.js
       file.fieldname === "carOwnershipCertificate" ||
-      file.fieldname === "insuranceCertificate"
+      file.fieldname === "insuranceCertificate" ||
+      file.fieldname === "carImage" ||
+      file.fieldname === "drivingLicenseFront" ||
+      file.fieldname === "drivingLicenseBack"
     ) {
       uploadPath = "./Uploads/Vehicles";
     }
@@ -84,18 +80,16 @@ const fileFilter = (req, file, cb) => {
     return cb(new Error("Only Excel files are allowed"), false);
   }
 
+  // Update imageFields to match names in user.schema.js
   const imageFields = [
-    "licensePlateFrontImage",
-    "licensePlateBackImage",
-    "carImages",
-    "vehiclePhotos",
     "businessLogo",
     "teamMemberPhoto",
     "profilePhoto",
-    "carOwnerDocuments",        // Memory uploads and filtering
-    // @vehicles.schema.js (8-9)
     "carOwnershipCertificate",
-    "insuranceCertificate"
+    "insuranceCertificate",
+    "carImage",
+    "drivingLicenseFront",
+    "drivingLicenseBack"
   ];
 
   if (imageFields.includes(file.fieldname)) {
@@ -112,7 +106,7 @@ const fileFilter = (req, file, cb) => {
 // Disk storage — for all regular file uploads
 const upload = multer({ storage, fileFilter });
 
-// Memory storage — for fields that need file.buffer (e.g. carOwnerDocuments saved as base64)
+// Memory storage — for fields that need file.buffer (e.g., special memory uploads—none as per user.schema.js)
 const uploadMemory = multer({ storage: multer.memoryStorage(), fileFilter });
 
 export { upload, uploadMemory };

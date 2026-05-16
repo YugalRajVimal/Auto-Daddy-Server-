@@ -7,29 +7,42 @@ import mongoose from "mongoose";
 
 const NullableFile = { type: mongoose.Schema.Types.Mixed, default: null };
 
+const VehicleDocumentSchema = new mongoose.Schema(
+  {
+    vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: "Vehicle", required: true }, // Link to Vehicle
+    carOwnershipCertificate: { type: String },
+    insuranceCertificate: { type: String },   
+    carImage: { type: String },               
+    drivingLicenseFront: { type: String },    
+    drivingLicenseBack: { type: String },     
+  }
+);
+
 const UserSchema = new mongoose.Schema(
   {
     //Role
     role: {
       type: String,
-      enum: ["carowner","autoshopowner"],
+      enum: ["carowner", "autoshopowner"],
     },
 
     //Profile
     name: { type: String},
     email: { type: String, sparse: true },
-    countryCode:{type: String,},
-    phone:{type: String, default: ""},
-    pincode:{type: String, default: null},
-    address:{type: String, default: null},
-    city: { type: String, default: null }, // <-- Added city field
-    profilePhoto:{type: String, default: null},
+    countryCode: { type: String },
+    phone: { type: String, default: "" },
+    pincode: { type: String, default: null },
+    address: { type: String, default: null },
+    city: { type: String, default: null },
+    profilePhoto: { type: String, default: null },
     isDisabled: { type: Boolean, default: false },
-    isProfileComplete :{type: Boolean, default: false},
+    isProfileComplete: { type: Boolean, default: false },
+
     //Car Owner
     favoriteAutoShops: [{ type: mongoose.Schema.Types.ObjectId, ref: "AutoShop", default: [] }],
     myVehicles: [{ type: mongoose.Schema.Types.ObjectId, ref: "Vehicle", default: [] }],
     onboardedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+
     //Auto Shop Owner
     isAutoShopBusinessProfileComplete: { type: Boolean, default: false },
     businessProfile: { type: mongoose.Schema.Types.ObjectId, ref: "BusinessProfile", default: null },
@@ -42,13 +55,12 @@ const UserSchema = new mongoose.Schema(
       }
     ],
 
-    documents: [
-      {
-        name: { type: String, required: true },
-        // Save image directly as base64 string text format (instead of file path)
-        imageData: { type: String, required: true }, // base64-encoded image string
-      }
-    ].slice(0, 5), // max 5 documents
+    // documents - Array. Each entry = Vehicle's 5 images as base64 fields + vehicleId
+    documents: {
+      type: [VehicleDocumentSchema],
+      default: [],
+      validate: [arr => arr.length <= 5, '{PATH} exceeds the limit of 5 vehicles documents']
+    },
 
     discardedDeals: [{ type: mongoose.Schema.Types.ObjectId, ref: "Deal", default: [] }],
 
@@ -61,7 +73,6 @@ const UserSchema = new mongoose.Schema(
     deviceId: { type: String, default: null },
     fcmToken: { type: String, default: null },
 
-
     thoughtOfTheDayLiked: { type: Boolean, default: false },
 
     phoneVerified: { type: Boolean, default: false },
@@ -72,13 +83,8 @@ const UserSchema = new mongoose.Schema(
       default: "active",
     },
 
-
   },
   { timestamps: true }
 );
-
-
-
-
 
 export const User = mongoose.model("User", UserSchema);
