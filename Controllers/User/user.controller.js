@@ -1817,6 +1817,274 @@ discardDeal = async (req, res) => {
 };
 
 
+/**
+ * Upload vehicle documents for a user.
+ * Receives vehicleId, images (via multer), and associates paths in user.documents array.
+ * If an error occurs, any uploaded files are deleted using deleteUploadedFiles.
+ */
+
+
+/**
+ * Expects body: vehicleId
+ * Expects images as multer fields/files:
+ *   - carOwnershipCertificate: [file]
+ *   - insuranceCertificate: [file]
+ *   - carImage: [file]
+ *   - DrivingLicenseFront: [file]
+ *   - DrivingLicenseBack: [file]
+ *
+ * Max doc count per user: 5 (enforced by schema)
+ */
+async uploadDocuments(req, res) {
+  const userId = req.user.id;
+  const { vehicleId } = req.body;
+
+  try {
+    // Validate vehicleId
+    if (!vehicleId) {
+      deleteUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: "vehicleId is required" });
+    }
+
+    // Validate user
+    const user = await User.findById(userId);
+    if (!user) {
+      deleteUploadedFiles(req.files);
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    // Make sure this vehicle belongs to the user and is not disabled
+    if (!user.myVehicles || !user.myVehicles.some(vId => vId.toString() === vehicleId)) {
+      deleteUploadedFiles(req.files);
+      return res.status(403).json({ success: false, message: "Vehicle does not belong to user." });
+    }
+
+    // Validate vehicle existence and disabled flag
+    const vehicle = await VehicleModel.findById(vehicleId);
+    if (!vehicle) {
+      deleteUploadedFiles(req.files);
+      return res.status(404).json({ success: false, message: "Vehicle not found" });
+    }
+    if (vehicle.disabled) {
+      deleteUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: "Vehicle is disabled and cannot be used." });
+    }
+
+    // Find if a document for this vehicle already exists
+    const existingDocIdx = user.documents.findIndex(
+      doc => doc.vehicleId && doc.vehicleId.toString() === vehicleId
+    );
+
+    // If it's a new document, enforce 5-document limit
+    if (existingDocIdx === -1 && user.documents && user.documents.length >= 5) {
+      deleteUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: "Document limit reached (max 5 vehicles per user)." });
+    }
+
+    // Prepare document fields (always based on uploaded files)
+    const docFields = {
+      vehicleId: vehicleId,
+      carOwnershipCertificate: req.files.carOwnershipCertificate && req.files.carOwnershipCertificate[0]?.path || null,
+      insuranceCertificate: req.files.insuranceCertificate && req.files.insuranceCertificate[0]?.path || null,
+      carImage: req.files.carImage && req.files.carImage[0]?.path || null,
+      drivingLicenseFront: req.files.drivingLicenseFront && req.files.drivingLicenseFront[0]?.path || null,
+      drivingLicenseBack: req.files.drivingLicenseBack && req.files.drivingLicenseBack[0]?.path || null,
+    };
+
+    let oldPathsToDelete = [];
+
+    if (existingDocIdx !== -1) {
+      // Document exists, update the fields for this vehicleId
+      const doc = user.documents[existingDocIdx];
+
+      // Only update fields with new uploads, keep existing otherwise
+      const fields = [
+        "carOwnershipCertificate",
+        "insuranceCertificate",
+        "carImage",
+        "drivingLicenseFront",
+        "drivingLicenseBack"
+      ];
+
+      fields.forEach(field => {
+        if (docFields[field]) {
+          // Save path to old file so we can delete it if it's overwritten
+          if (doc[field]) oldPathsToDelete.push(doc[field]);
+          doc[field] = docFields[field];
+        }
+      });
+
+      // If vehicleId field changed (shouldn't happen), ensure it's correct
+      doc.vehicleId = vehicleId;
+
+      await user.save();
+
+      // Delete any replaced image files
+      if (oldPathsToDelete.length) {
+        deleteUploadedFiles(oldPathsToDelete);
+      }
+
+      return res.status(200).json({ success: true, message: "Document updated for this vehicle.", document: doc });
+    } else {
+      // No existing document for this vehicle, so create a new one as before
+      user.documents.push(docFields);
+      await user.save();
+      return res.status(201).json({ success: true, message: "Document uploaded successfully", document: docFields });
+    }
+  } catch (error) {
+    // Delete any uploaded files on error
+    deleteUploadedFiles(req.files);
+    console.error("[uploadDocuments] error:", error);
+    return res.status(500).json({ success: false, message: "Failed to upload document", error: error.message });
+  }
+}
+
+/**
+ * Get all uploaded vehicle documents for the authenticated user.
+ * Responds with an array of documents (max 5), or empty array if none.
+ */
+async getUploadedDocuments(req, res) {
+  const userId = req.user.id;
+
+  try {
+    // Validate user
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    // We'll populate vehicle details for each document (if possible, otherwise null)
+    // Limit fields as in vehicles.schema.js
+    const documents = user.documents || [];
+    const result = [];
+
+    for (const doc of documents) {
+      let vehicleData = null;
+      if (doc.vehicleId) {
+        vehicleData = await VehicleModel.findById(doc.vehicleId).select(
+          "licensePlateNo vinNo make year odometerReading disabled"
+        ).lean();
+      }
+      result.push({
+        ...doc.toObject ? doc.toObject() : doc,
+        vehicle: vehicleData
+      });
+    }
+
+    return res.status(200).json({ success: true, documents: result });
+  } catch (error) {
+    console.error("[getUploadedDocuments] error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Failed to fetch documents", error: error.message });
+  }
+}
+
+/**
+ * Edit a specific vehicle document (by index) for a user.
+ * Allows replacing images (paths) using multer. Clean up old image files if replaced. Clean up new images if error.
+ *
+ * Expects params: docIdx
+ * Expects files (same names as upload): Only those to replace
+ * Expects body (optional): can only update images, not vehicleId
+ */
+/**
+ * Edit vehicle document(s) for a user based on vehicleId.
+ * For the given vehicleId (in body), update any document image fields present in req.files.
+ * Only the relevant document entry is updated; files not provided are untouched.
+ * Clean up old image files if replaced; clean up new uploads if error.
+ *
+ * Expects: body.vehicleId, and optionally req.files with fields among allowed vehicle fields.
+ */
+async editDocument(req, res) {
+  const userId = req.user.id;
+  const { vehicleId } = req.body;
+
+  // List of valid document image fields, as per VehicleDocumentSchema
+  const imageFields = [
+    "carOwnershipCertificate",
+    "insuranceCertificate",
+    "carImage",
+    "drivingLicenseFront",
+    "drivingLicenseBack"
+  ];
+
+  try {
+    // Validate vehicleId
+    if (
+      !vehicleId ||
+      typeof vehicleId !== 'string' ||
+      vehicleId.trim().length !== 24 // ObjectId length
+    ) {
+      deleteUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: "Invalid or missing vehicleId." });
+    }
+
+    // Validate user
+    const user = await User.findById(userId);
+    if (!user) {
+      deleteUploadedFiles(req.files);
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+
+    // Find the document for the given vehicleId
+    const doc = user.documents.find(
+      d => d.vehicleId && d.vehicleId.toString() === vehicleId
+    );
+    if (!doc) {
+      deleteUploadedFiles(req.files);
+      return res.status(404).json({ success: false, message: "Vehicle document not found." });
+    }
+
+    // Verify user owns this vehicle and it is not disabled
+    if (
+      !user.myVehicles.some(vId => vId.toString() === vehicleId)
+    ) {
+      deleteUploadedFiles(req.files);
+      return res.status(403).json({ success: false, message: "Vehicle does not belong to user." });
+    }
+    const vehicle = await VehicleModel.findById(vehicleId);
+    if (!vehicle) {
+      deleteUploadedFiles(req.files);
+      return res.status(404).json({ success: false, message: "Vehicle not found." });
+    }
+    if (vehicle.disabled) {
+      deleteUploadedFiles(req.files);
+      return res.status(400).json({ success: false, message: "Vehicle is disabled and cannot be used." });
+    }
+
+    // Track old paths for deletion if overwritten
+    const oldPathsToDelete = [];
+
+    // Only update image fields present in req.files
+    for (const field of imageFields) {
+      if (req.files && req.files[field] && req.files[field][0]?.path) {
+        if (doc[field]) {
+          oldPathsToDelete.push(doc[field]);
+        }
+        doc[field] = req.files[field][0].path;
+      }
+    }
+
+    await user.save();
+
+    // Clean up replaced old files
+    if (oldPathsToDelete.length > 0) {
+      deleteUploadedFiles(oldPathsToDelete);
+    }
+
+    return res.status(200).json({ 
+      success: true, 
+      message: "Document(s) updated successfully.", 
+      document: doc 
+    });
+  } catch (error) {
+    // Clean up any newly uploaded files if error occurred
+    deleteUploadedFiles(req.files);
+    console.error("[editDocument] error:", error);
+    return res.status(500).json({ success: false, message: "Failed to update document", error: error.message });
+  }
+}
 
 
 }

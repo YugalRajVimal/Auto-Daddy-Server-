@@ -40,7 +40,7 @@ userRouter.get("/car-companies", (req, res) => {
 userRouter.post(
   "/vehicle",
   jwtAuth,
-  vehicleUploadMiddleware,
+  // vehicleUploadMiddleware,
   (req, res) => {
     userController.addVehicle(req, res);
   }
@@ -105,33 +105,33 @@ userRouter.get("/cities", (req, res) => {
 // Upload/add a car owner document (image as base64, name in body)
 // Upload/add one or more car owner document(s) (images as base64, name(s) in body)
 // Accepts up to 5 files per user, via .array middleware
-userRouter.post(
-  "/documents",
-  jwtAuth,
-  carOwnerUploadMiddleware ,
-  (req, res) => userController.addCarOwnerDocument(req, res)
-);
+// userRouter.post(
+//   "/documents",
+//   jwtAuth,
+//   carOwnerUploadMiddleware ,
+//   (req, res) => userController.addCarOwnerDocument(req, res)
+// );
 
-// Edit a car owner document's name by its index in the documents array
-userRouter.put(
-  "/documents/:docIdx",
-  jwtAuth,
-  (req, res) => userController.editCarOwnerDocument(req, res)
-);
+// // Edit a car owner document's name by its index in the documents array
+// userRouter.put(
+//   "/documents/:docIdx",
+//   jwtAuth,
+//   (req, res) => userController.editCarOwnerDocument(req, res)
+// );
 
-// Delete a car owner document by index
-userRouter.delete(
-  "/documents/:docIdx",
-  jwtAuth,
-  (req, res) => userController.deleteCarOwnerDocument(req, res)
-);
+// // Delete a car owner document by index
+// userRouter.delete(
+//   "/documents/:docIdx",
+//   jwtAuth,
+//   (req, res) => userController.deleteCarOwnerDocument(req, res)
+// );
 
-// Get all car owner documents (names and base64 image) for the authenticated user
-userRouter.get(
-  "/documents",
-  jwtAuth,
-  (req, res) => userController.getCarOwnerDocuments(req, res)
-);
+// // Get all car owner documents (names and base64 image) for the authenticated user
+// userRouter.get(
+//   "/documents",
+//   jwtAuth,
+//   (req, res) => userController.getCarOwnerDocuments(req, res)
+// );
 
 
 // Toggle like/unlike for Thought of the Day (user)
@@ -164,6 +164,32 @@ userRouter.post(
   jwtAuth,
   (req, res) => userController.discardDeal(req, res)
 );
+
+
+// Upload documents for a vehicle (car owner) - any of 5 files per vehicle
+userRouter.post(
+  "/documents",
+  jwtAuth,
+  vehicleUploadMiddleware,
+  (req, res) => userController.uploadDocuments(req, res)
+);
+
+// Edit a specific car owner document (replace any images for that docIdx)
+userRouter.put(
+  "/documents/:vehicleId",
+  jwtAuth,
+  vehicleUploadMiddleware,
+  (req, res) => userController.editDocument(req, res)
+);
+
+// Get all uploaded vehicle documents for the authenticated user
+userRouter.get(
+  "/documents",
+  jwtAuth,
+  (req, res) => userController.getUploadedDocuments(req, res)
+);
+
+
 
 
 
