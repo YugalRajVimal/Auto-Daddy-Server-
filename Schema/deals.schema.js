@@ -69,7 +69,7 @@ const dealSchema = new mongoose.Schema(
       ref: "BusinessProfile",
       required: true,
     },
-    imagePath: {
+    dealImage: {
       type: String,
       required: false,
       trim: true,
