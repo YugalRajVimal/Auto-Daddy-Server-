@@ -660,8 +660,23 @@ class UserController {
             // Find all vehicles whose IDs are in user.myVehicles
             const vehicles = await VehicleModel.find({ _id: { $in: user.myVehicles } }).lean();
 
+            // Attach `carImage` for each vehicle from the user's documents array (see user.schema.js)
+            // Each user.documents item has: { vehicleId, carImage, ... }
+            const vehicleImagesMap = {};
+            if (Array.isArray(user.documents)) {
+                for (const doc of user.documents) {
+                    if (doc && doc.vehicleId && doc.carImage)
+                        vehicleImagesMap[String(doc.vehicleId)] = doc.carImage;
+                }
+            }
+            const vehiclesWithCarImage = vehicles.map(vehicle => {
+                const v = { ...vehicle };
+                v.carImage = vehicleImagesMap[String(vehicle._id)] || null;
+                return v;
+            });
+
             return res.status(200).json({
-                vehicles
+                vehicles: vehiclesWithCarImage
             });
         } catch (error) {
             console.error("[fetchAllVehicles] Error:", error);

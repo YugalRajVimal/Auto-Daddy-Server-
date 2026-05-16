@@ -15,6 +15,7 @@ autoShopRouter.get("/", (req, res) => autoShopController.getAllAutoShops(req, re
 import jwtAuth from "../middlewares/Auth/auth.middleware.js";
 import { upload } from "../middlewares/ImageUploadMiddlewares/fileUpload.middleware.js";
 import { businessAndTeamUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/bussinessUpload.middleware.js";
+import { dealUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/dealUpload.middleware.js";
 
 
 // Route to get dashboard details for the autoshopowner (protected, requires JWT)
@@ -216,7 +217,7 @@ autoShopRouter.get(
 autoShopRouter.post(
   "/my-deals",
   jwtAuth,
-  businessAndTeamUploadMiddleware,
+  dealUploadMiddleware,
   (req, res) => autoShopController.createDeal(req, res)
 );
 
@@ -224,7 +225,7 @@ autoShopRouter.post(
 autoShopRouter.put(
   "/my-deals/:id",
   jwtAuth,
-  businessAndTeamUploadMiddleware,
+  dealUploadMiddleware,
   (req, res) => autoShopController.editDeal(req, res)
 );
 
