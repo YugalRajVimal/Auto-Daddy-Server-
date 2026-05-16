@@ -842,12 +842,16 @@ class UserController {
     // Fetch all auto shops (reuse logic from AutoShopController)
     getAllAutoShops = async (req, res) => {
         try {
-            // Fetch requesting user (to get their city)
+            // Fetch requesting user (to get their city and favorites)
             const userId = req.user?.id;
             let userCity = null;
+            let favoriteAutoShops = [];
             if (userId) {
                 const user = await User.findById(userId).lean();
                 userCity = user?.city?.trim().toLowerCase() || null;
+                if (Array.isArray(user?.favoriteAutoShops)) {
+                    favoriteAutoShops = user.favoriteAutoShops.map(a => a.toString());
+                }
             }
 
             // Extract filter parameters from query
@@ -862,14 +866,12 @@ class UserController {
             // Build service filter array if provided
             let filterServiceIds = [];
             if (typeof service === "string" && service.trim().length > 0) {
-                // Accept comma-separated list or single serviceId as string
                 filterServiceIds = service.split(',').map(s => s.trim()).filter(Boolean);
             }
 
             // Build carCompanies filter array if provided
             let filterCarCompanyIds = [];
             if (typeof carCompanies === "string" && carCompanies.trim().length > 0) {
-                // Accept comma-separated list or single carCompanyId as string
                 filterCarCompanyIds = carCompanies.split(',').map(v => v.trim()).filter(Boolean);
             }
 
@@ -892,7 +894,7 @@ class UserController {
                     businessMapLocation: 1,
                     myServices: 1,
                     ratings: 1,
-                    carCompanies: 1, // <-- expose carCompanies in response
+                    carCompanies: 1,
                     _id: 1
                 })
                 .populate({
@@ -903,30 +905,25 @@ class UserController {
                 .populate({
                     path: 'carCompanies',
                     model: 'CarCompany',
-                    select: 'name'  // populate car company details
+                    select: 'name'
                 })
                 .lean();
 
-            // Compose myServices so ALL services are present,
-            // even if a shop does not have that service, returning with empty subServices array
+            // Compose myServices so ALL services are present for each shop, and mark isFavourite
             autoShops = autoShops.map(shop => {
-                // Build a map of myServices per shop by service _id
                 const existingServicesMap = {};
                 if (Array.isArray(shop.myServices)) {
                     for (const ms of shop.myServices) {
                         if (ms.service && (ms.service._id || ms.service)) {
-                            // Normalize ms.service to string id
                             const serviceId = typeof ms.service === 'object' && ms.service._id ? String(ms.service._id) : String(ms.service);
                             existingServicesMap[serviceId] = ms;
                         }
                     }
                 }
-                // For each service, construct entry, always sending all services
+                // Build allMyServices
                 const allMyServices = allServices.map(svc => {
                     const serviceId = String(svc._id);
-                    // If shop has this service in myServices
                     if (existingServicesMap[serviceId]) {
-                        // Remove price from subServices if present
                         const ms = JSON.parse(JSON.stringify(existingServicesMap[serviceId]));
                         if (Array.isArray(ms.subServices)) {
                             ms.subServices = ms.subServices.map(subSvc => {
@@ -948,7 +945,6 @@ class UserController {
                             subServices: ms.subServices
                         };
                     } else {
-                        // Shop does NOT have this service; return empty subServices
                         return {
                             service: {
                                 _id: svc._id,
@@ -969,6 +965,10 @@ class UserController {
                         avgRating = Number(avgRating.toFixed(2));
                     }
                 }
+                
+                // Determine isFavourite
+                const isFavourite = favoriteAutoShops.includes(shop._id.toString());
+
                 return {
                     _id: shop._id,
                     businessName: shop.businessName,
@@ -985,7 +985,8 @@ class UserController {
                     businessMapLocation: shop.businessMapLocation,
                     myServices: allMyServices,
                     avgRating: avgRating,
-                    carCompanies: shop.carCompanies || []
+                    carCompanies: shop.carCompanies || [],
+                    isFavourite: isFavourite
                 };
             });
 
@@ -993,7 +994,6 @@ class UserController {
             // 1. Filter by Service(s)
             if (filterServiceIds.length > 0) {
                 autoShops = autoShops.filter(shop => {
-                    // If any of the shop's services match requested serviceIds and is actually set (>0 subServices, else it's "empty" service assignment for this shop)
                     for (const ms of shop.myServices) {
                         if (
                             filterServiceIds.includes(String(ms.service._id)) &&
@@ -1007,17 +1007,14 @@ class UserController {
             }
 
             // 2. Filter by Car Company(ies)
-            // shop.carCompanies can be Array of populated objects or ObjectIds
             if (filterCarCompanyIds.length > 0) {
                 autoShops = autoShops.filter(shop => {
                     let shopCarCompanies = Array.isArray(shop.carCompanies) ? shop.carCompanies : [];
-                    // Normalize all carCompany IDs to string for comparison
                     shopCarCompanies = shopCarCompanies.map(cc => {
                         if (cc && typeof cc === "object" && cc._id) return String(cc._id);
                         if (typeof cc === "string") return cc;
                         return String(cc);
                     });
-                    // If any carCompany in this shop matches the filter
                     return filterCarCompanyIds.some(fid => shopCarCompanies.includes(fid));
                 });
             }
@@ -1027,7 +1024,6 @@ class UserController {
                 autoShops = autoShops.filter(shop => {
                     let matched = false;
                     for (const ms of (shop.myServices || [])) {
-                        // Check if service name matches
                         if (
                             ms.service &&
                             typeof ms.service.name === 'string' &&
@@ -1039,7 +1035,6 @@ class UserController {
                             matched = true;
                             break;
                         }
-                        // Check if ANY sub-service matches
                         if (ms.subServices && Array.isArray(ms.subServices) && ms.subServices.length > 0) {
                             for (const subSvc of ms.subServices) {
                                 if (
@@ -1058,22 +1053,39 @@ class UserController {
                 });
             }
 
-            // Sort: matching city shops first if userCity available
-            if (userCity) {
-                const matching = [];
-                const others = [];
-                for (const shop of autoShops) {
-                    const shopCity = shop.city?.trim().toLowerCase() || null;
-                    if (shopCity && shopCity === userCity) {
-                        matching.push(shop);
-                    } else {
-                        others.push(shop);
-                    }
+            // Sort: top favorites first, then remaining (per instruction), keeping city sorting logic within each group if userCity available
+            let favShops = [];
+            let nonFavShops = [];
+            for (const shop of autoShops) {
+                if (shop.isFavourite) {
+                    favShops.push(shop);
+                } else {
+                    nonFavShops.push(shop);
                 }
-                autoShops = matching.concat(others);
             }
 
-            return res.status(200).json({ success: true, data: autoShops });
+            // Now sort within each: if userCity exists, city matches top in each group
+            const sortCityTop = arr => {
+                if (!userCity) return arr;
+                const match = [];
+                const nonmatch = [];
+                for (const shop of arr) {
+                    const shopCity = shop.city?.trim().toLowerCase() || null;
+                    if (shopCity && shopCity === userCity) {
+                        match.push(shop);
+                    } else {
+                        nonmatch.push(shop);
+                    }
+                }
+                return match.concat(nonmatch);
+            };
+
+            favShops = sortCityTop(favShops);
+            nonFavShops = sortCityTop(nonFavShops);
+
+            const sortedShops = favShops.concat(nonFavShops);
+
+            return res.status(200).json({ success: true, data: sortedShops });
         } catch (error) {
             console.error("[getAllAutoShops] Error:", error);
             return res.status(500).json({ success: false, message: 'Failed to fetch auto shops', error: error.message });
@@ -1176,29 +1188,56 @@ class UserController {
             const vehiclePopulate = { 
                 path: 'vehicleId', 
                 model: 'Vehicle', 
-                select: 'make model licensePlateNo' 
+                select: 'make model licensePlateNo carImages carOwnershipCertificate insuranceCertificate' 
             };
             const businessPopulate = { 
                 path: 'business', 
                 model: 'BusinessProfile', 
-                select: 'businessName businessType address contactNumber' 
+                select: 'businessName businessType address contactNumber city' 
             };
+            // Populate for services array - get service name and subServices fully
+            const servicesPopulate = [
+                {
+                    path: 'services.service',
+                    model: 'Services',
+                    select: 'name'
+                }
+            ];
 
             // Find job cards separated by status (filtered by vehicle if provided)
-            const [pendingJobCards, approvedJobCards, rejectedJobCards] = await Promise.all([
-                JobCard.find({ ...baseFilter, status: 'Pending' })
+            const statusList = ['Pending', 'Approved', 'Rejected'];
+            const jobCardPromises = statusList.map(async status => (
+                JobCard.find({ ...baseFilter, status })
                     .populate([businessPopulate, vehiclePopulate])
+                    .populate(servicesPopulate)
                     .sort({ createdAt: -1 })
-                    .lean(),
-                JobCard.find({ ...baseFilter, status: 'Approved' })
-                    .populate([businessPopulate, vehiclePopulate])
-                    .sort({ createdAt: -1 })
-                    .lean(),
-                JobCard.find({ ...baseFilter, status: 'Rejected' })
-                    .populate([businessPopulate, vehiclePopulate])
-                    .sort({ createdAt: -1 })
-                    .lean(),
-            ]);
+                    .lean()
+                    .then(cards => 
+                        cards.map(card => {
+                            // Populate each service object inside card.services
+                            if (Array.isArray(card.services)) {
+                                card.services = card.services.map(serviceObj => {
+                                    // serviceObj.service is now a populated Services doc or null
+                                    const serviceData = serviceObj.service && typeof serviceObj.service === 'object'
+                                        ? { 
+                                            _id: serviceObj.service._id, 
+                                            name: serviceObj.service.name, 
+                                            desc: serviceObj.service.desc 
+                                        }
+                                        : null;
+                                    return {
+                                        ...serviceObj,
+                                        service: serviceData,
+                                        // subServices remains as-is (from schema)
+                                    };
+                                });
+                            }
+                            return card;
+                        })
+                    )
+            ));
+
+            const [pendingJobCards, approvedJobCards, rejectedJobCards] = await Promise.all(jobCardPromises);
 
             return res.status(200).json({
                 success: true,
@@ -1583,11 +1622,11 @@ getVehiclesOdometerReadings = async (req, res) => {
       return res.status(401).json({ success: false, message: "Unauthorized" });
     }
 
-    // Get user and their vehicles, include 'licensePlateNo' from Vehicle
+    // Get user and their vehicles, include required fields from Vehicle
     const user = await User.findById(userId)
       .populate({
         path: "myVehicles",
-        select: "number odometerReading licensePlateNo",
+        select: "number odometerReading licensePlateNo make year carOwnershipCertificate insuranceCertificate carImages",
         model: "Vehicle"
       })
       .lean();
@@ -1621,6 +1660,11 @@ getVehiclesOdometerReadings = async (req, res) => {
           vehicleNumber: veh.number,
           licensePlateNo: veh.licensePlateNo || null,
           odometerReading: veh.odometerReading || null,
+          make: veh.make || null,
+          year: veh.year || null,
+          carOwnershipCertificate: veh.carOwnershipCertificate || null,
+          insuranceCertificate: veh.insuranceCertificate || null,
+          carImages: Array.isArray(veh.carImages) ? veh.carImages : [],
           dueOdometerReading: jobCard?.dueOdometerReading || null,
           latestJobCardAt: jobCard?.createdAt || null
         };

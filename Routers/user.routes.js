@@ -70,7 +70,7 @@ userRouter.get("/deals",jwtAuth, (req, res) => { userController.getAllDeals(req,
 
 
 // Route to get all auto shops (public endpoint)
-userRouter.get("/auto-shops", (req, res) => { userController.getAllAutoShops(req, res) });
+userRouter.get("/auto-shops", jwtAuth,(req, res) => { userController.getAllAutoShops(req, res) });
 
 // Route to rate an auto shop (POST: autoShopId, rating [1-5] in body)
 userRouter.post("/rate-auto-shop", jwtAuth, (req, res) => {
