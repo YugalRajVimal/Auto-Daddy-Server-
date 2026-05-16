@@ -1662,18 +1662,14 @@ getVehiclesOdometerReadings = async (req, res) => {
 };
 
 /**
- * Edit/update odometerReading using vehicle plate number
- * Expected request body: { licensePlateNo: String, odometerReading: Number }
- * Returns updated vehicle document or error
- */
-/**
- * Edit/update odometerReading using vehicle plate number
- * Expected request body: { licensePlateNo: String, odometerReading: Number }
+ * Edit/update odometerReading using vehicleId and trigger FCM to shop if service due.
+ * Expected request body: { vehicleId: String, odometerReading: Number }
  * Returns updated vehicle document or error
  */
 editOdometerById = async (req, res) => {
   try {
     const { vehicleId, odometerReading } = req.body;
+    const currentUserId = req.user?.id;
 
     console.log("[editOdometerById] Input - vehicleId:", vehicleId, "odometerReading:", odometerReading);
 
@@ -1712,6 +1708,107 @@ editOdometerById = async (req, res) => {
       });
     }
 
+    // ===== Service Due Notification Enhancement: Only if odometer > dueOdometerReading =====
+    let JobCard, BusinessProfileModel, firebaseAdmin, UserModel;
+    try {
+      JobCard = (await import("../../Schema/jobCard.schema.js")).default;
+      BusinessProfileModel = (await import("../../Schema/bussiness-profile.js")).default;
+      firebaseAdmin = (await import("../../config/firebase.js")).default;
+      // Here's the user model for FCM to business owner
+      UserModel = (await import("../../Schema/user.schema.js")).User;
+    } catch (e) {
+      // If something is missing, log and continue to allow odometer update
+      console.error("[editOdometerById] Error loading schemas or firebase admin:", e);
+    }
+
+    let latestJobCard = null;
+    let notified = false;
+    let notificationError = null;
+
+    if (JobCard && BusinessProfileModel && firebaseAdmin && UserModel) {
+      try {
+        // Find the latest JobCard for this vehicle & current user
+        latestJobCard = await JobCard.findOne({
+          customerId: currentUserId,
+          vehicleId: vehicleId
+        })
+          .sort({ createdAt: -1 })
+          .select("dueOdometerReading business _id")
+          .lean();
+
+        const dueOdometerReading = latestJobCard?.dueOdometerReading;
+        // If new odometer is greater than due value, notify business shop via FCM
+        if (
+          dueOdometerReading !== null &&
+          dueOdometerReading !== undefined &&
+          odometerReading > dueOdometerReading
+        ) {
+          // Find business owner's (autoshopowner) User fcmToken via BusinessProfile.businessPhone or teamMembers
+          const businessId = latestJobCard?.business;
+          if (businessId) {
+            // Find the business profile
+            const businessDoc = await BusinessProfileModel.findById(businessId)
+              .select("businessName businessPhone businessEmail teamMembers")
+              .populate({
+                path: "teamMembers",
+                select: "phone isActive"
+              })
+              .lean();
+
+            let ownerUser = null;
+            if (businessDoc?.businessPhone) {
+              // Find the user (autoShopOwner) whose phone matches businessPhone and role == 'autoshopowner'
+              ownerUser = await UserModel.findOne({
+                businessProfile: businessDoc._id,
+                role: "autoshopowner"
+              }).lean();
+            }
+            if (!ownerUser && Array.isArray(businessDoc?.teamMembers)) {
+              // Try first active member with phone as fallback
+              const activeMemberWithPhone = businessDoc.teamMembers.find(
+                (tm) => tm.isActive && tm.phone
+              );
+              if (activeMemberWithPhone?.phone) {
+                ownerUser = await UserModel.findOne({
+                  phone: activeMemberWithPhone.phone,
+                  role: "autoshopowner"
+                }).lean();
+              }
+            }
+
+            if (ownerUser && ownerUser.fcmToken) {
+              // Compose the notification
+              const message = {
+                notification: {
+                  title: "Service Due Alert",
+                  body:
+                    `Car owner${req.user && req.user.name ? " " + req.user.name : ""}'s vehicle (Plate: ${vehicle.licensePlateNo || ""}) has crossed the scheduled service odometer (${dueOdometerReading}). Current reading: ${odometerReading}. Please notify the customer.`
+                },
+                token: ownerUser.fcmToken
+              };
+
+              try {
+                await firebaseAdmin.messaging().send(message);
+                notified = true;
+                console.log(
+                  `[editOdometerById] FCM notification sent to business owner fcmToken (${ownerUser.fcmToken}): `,
+                  message
+                );
+              } catch (notifyErr) {
+                notificationError = notifyErr;
+                console.error("[editOdometerById] Failed to send FCM notification:", notifyErr);
+              }
+            } else {
+              console.warn("[editOdometerById] Business owner fcmToken not found for notification.");
+            }
+          }
+        }
+      } catch (jobCardErr) {
+        notificationError = jobCardErr;
+        console.error("[editOdometerById] Error in JobCard FCM notification logic:", jobCardErr);
+      }
+    }
+
     // Update the odometer reading
     const updatedVehicle = await VehicleModel.findByIdAndUpdate(
       vehicleId,
@@ -1723,7 +1820,9 @@ editOdometerById = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Odometer reading updated successfully",
+      message: "Odometer reading updated successfully" +
+        (notified ? " (service due notification sent to business owner)" : "") +
+        (notificationError ? " (notification error: " + notificationError.message + ")" : ""),
       vehicle: updatedVehicle,
     });
   } catch (err) {
