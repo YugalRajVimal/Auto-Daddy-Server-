@@ -2995,7 +2995,7 @@ async createDeal(req, res) {
 
         let {
             dealType,
-            servicesId,
+            serviceId,
             partName,
             description,
             discountedPrice,
@@ -3011,13 +3011,13 @@ async createDeal(req, res) {
         partName = typeof partName === "string" ? partName.trim() : undefined;
         description = typeof description === "string" ? description.trim() : undefined;
         discountedPrice = typeof discountedPrice === "string" ? Number(discountedPrice) : discountedPrice;
-        servicesId = typeof servicesId === "string" ? servicesId.trim() : undefined;
+        serviceId = typeof serviceId === "string" ? serviceId.trim() : undefined;
         vehicleId = typeof vehicleId === "string" ? vehicleId.trim() : undefined;
         vehicleName = typeof vehicleName === "string" ? vehicleName.trim() : undefined;
         vehicleModel = typeof vehicleModel === "string" ? vehicleModel.trim() : undefined;
         vehicleYear = typeof vehicleYear === "string" ? vehicleYear.trim() : vehicleYear;
         console.log("Step 4: Normalized and prepared fields:",
-            { dealType, servicesId, partName, description, discountedPrice, offerEndsOnDate, vehicleId, vehicleName, vehicleModel, vehicleYear }
+            { dealType, serviceId, partName, description, discountedPrice, offerEndsOnDate, vehicleId, vehicleName, vehicleModel, vehicleYear }
         );
 
         // Validate dealType
@@ -3031,18 +3031,18 @@ async createDeal(req, res) {
         // Validate dealType fields
         if (dealType === "Service") {
             console.log("Step 5: Validating Service dealType...");
-            if (!servicesId || !mongoose.Types.ObjectId.isValid(servicesId)) {
-                console.log("Invalid or missing servicesId:", servicesId);
+            if (!serviceId || !mongoose.Types.ObjectId.isValid(serviceId)) {
+                console.log("Invalid or missing servicesId:", serviceId);
                 if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
                 return res.status(400).json({
                     success: false,
                     message: "servicesId is required and must be a valid MongoDB ObjectId for 'Service' deals."
                 });
             }
-            const serviceExists = await Services.exists({ _id: servicesId });
+            const serviceExists = await Services.exists({ _id: serviceId });
             console.log("Service exists check:", serviceExists);
             if (!serviceExists) {
-                console.log("servicesId does not correspond to a valid service.", servicesId);
+                console.log("servicesId does not correspond to a valid service.", serviceId);
                 if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
                 return res.status(404).json({
                     success: false,
@@ -3118,7 +3118,7 @@ async createDeal(req, res) {
             createdBy: businessProfile._id
         };
         if (dealType === "Service") {
-            uniqueQuery.servicesId = servicesId;
+            uniqueQuery.serviceId = serviceId;
         } else {
             uniqueQuery.partName = partName;
             uniqueQuery.vehicle = vehicleId;
@@ -3147,7 +3147,7 @@ async createDeal(req, res) {
         };
 
         if (dealType === "Service") {
-            dealDoc.servicesId = servicesId;
+            dealDoc.serviceId = serviceId;
         } else {
             dealDoc.partName = partName;
             dealDoc.vehicle = vehicleId;
