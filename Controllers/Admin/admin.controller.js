@@ -26,7 +26,6 @@ async getDashboardDetails(req, res) {
     const jobCardsCount = await JobCard.countDocuments({});
 
     // --- Added: JobCards count per day (createdAt) for bar graph data ---
-    // We'll group by date (YYYY-MM-DD) using aggregation
     const jobCardsByDateAggregation = await JobCard.aggregate([
       {
         $group: {
@@ -38,7 +37,6 @@ async getDashboardDetails(req, res) {
       },
       { $sort: { _id: 1 } }
     ]);
-    // Format as { date: '2024-06-04', count: n }
     const jobCardsByDate = jobCardsByDateAggregation.map(item => ({
       date: item._id,
       count: item.count
@@ -59,16 +57,37 @@ async getDashboardDetails(req, res) {
       }
     }
 
+    // Fetch latest DashboardData for thoughtOfTheDay and thoughtOfTheDayLike
+    let thoughtOfTheDay = '';
+    let thoughtOfTheDayLike = 0;
+    try {
+      const dashboardData = await DashboardDataModel.findOne({}, { thoughtOfTheDay: 1, thoughtOfTheDayLike: 1 })
+        .sort({ createdAt: -1 })
+        .lean();
+      if (dashboardData) {
+        if (typeof dashboardData.thoughtOfTheDay === 'string') {
+          thoughtOfTheDay = dashboardData.thoughtOfTheDay;
+        }
+        if (typeof dashboardData.thoughtOfTheDayLike === 'number') {
+          thoughtOfTheDayLike = dashboardData.thoughtOfTheDayLike;
+        }
+      }
+    } catch (e) {
+      // fallback: nothing extra required, send defaults
+    }
+
     return res.status(200).json({
       success: true,
       data: {
         carOwnersCount,
         autoShopOwnersCount,
         jobCardsCount,
-        jobCardsByDate,  // <-- included here
+        jobCardsByDate,
         dealsCount,
         servicesCount,
         subServicesCount,
+        thoughtOfTheDay,     // newly added field
+        thoughtOfTheDayLike, // newly added field
       }
     });
   } catch (err) {
