@@ -452,28 +452,13 @@ class UserController {
             if (!userId) {
                 await session.abortTransaction();
                 session.endSession();
-                deleteUploadedFiles(req.files);
                 return res.status(401).json({ message: "Unauthorized" });
             }
 
-            // Vehicle fields (licensePlateFront/BackImagePath are not mandatory)
+            // Only the text fields for vehicle info
             const { licensePlateNo, vinNo, name, model, year, odometerReading } = req.body;
 
-            // Get uploaded image paths (not mandatory for vehicle creation)
-            const licensePlateFrontImagePath =
-                req.files?.licensePlateFrontImage?.[0]?.path || null;
-            const licensePlateBackImagePath =
-                req.files?.licensePlateBackImage?.[0]?.path || null;
-            const carImages =
-                req.files?.carImages?.map(file => file.path) || [];
-
-            // Optional vehicle documents (not mandatory)
-            const carOwnershipCertificate =
-                req.files?.carOwnershipCertificate?.[0]?.path || null;
-            const insuranceCertificate =
-                req.files?.insuranceCertificate?.[0]?.path || null;
-
-            // Mandatory vehicle info only
+            // Check mandatory fields
             if (
                 !licensePlateNo ||
                 !vinNo ||
@@ -483,7 +468,6 @@ class UserController {
             ) {
                 await session.abortTransaction();
                 session.endSession();
-                deleteUploadedFiles(req.files);
                 return res.status(400).json({ message: "Required vehicle fields missing." });
             }
 
@@ -500,33 +484,21 @@ class UserController {
             if (enabledVehicle) {
                 await session.abortTransaction();
                 session.endSession();
-                deleteUploadedFiles(req.files);
                 return res.status(409).json({
                     success: false,
                     message: "A vehicle with this license plate already exists and is not disabled."
                 });
             }
 
-            // Prepare new vehicle payload
+            // Prepare new vehicle payload with only required fields
             const vehicleData = {
                 licensePlateNo,
                 vinNo,
                 make: { name, model },
                 year,
                 odometerReading: odometerReading || 0,
+                disabled: false,
             };
-
-            // Add non-mandatory image fields if present
-            if (licensePlateFrontImagePath) vehicleData.licensePlateFrontImagePath = licensePlateFrontImagePath;
-            if (licensePlateBackImagePath) vehicleData.licensePlateBackImagePath = licensePlateBackImagePath;
-            if (carImages.length) vehicleData.carImages = carImages;
-            if (carOwnershipCertificate) vehicleData.carOwnershipCertificate = carOwnershipCertificate;
-            if (insuranceCertificate) vehicleData.insuranceCertificate = insuranceCertificate;
-
-            // By default, set disabled: false unless set via body (for completeness)
-            if (!('disabled' in vehicleData)) {
-                vehicleData.disabled = false;
-            }
 
             let newVehicle;
             try {
@@ -535,7 +507,6 @@ class UserController {
             } catch (creationError) {
                 await session.abortTransaction();
                 session.endSession();
-                deleteUploadedFiles(req.files);
                 throw creationError;
             }
 
@@ -550,7 +521,6 @@ class UserController {
             } catch (linkError) {
                 await session.abortTransaction();
                 session.endSession();
-                deleteUploadedFiles(req.files);
                 throw linkError;
             }
 
@@ -567,7 +537,6 @@ class UserController {
         } catch (error) {
             await session.abortTransaction();
             session.endSession();
-            deleteUploadedFiles(req.files);
             console.error("[addVehicle] Error:", error);
             return res.status(500).json({ message: "Internal Server Error" });
         }
@@ -591,18 +560,14 @@ class UserController {
                 return res.status(403).json({ message: "You can only edit your own vehicles." });
             }
 
+            // Only allow non-image vehicle fields to be updated
             const updateFields = {};
             [
                 "licensePlateNo",
-                "licensePlateFrontImagePath",
-                "licensePlateBackImagePath",
-                "carOwnershipCertificate",
-                "insuranceCertificate",
                 "vinNo",
                 "make",
                 "year",
                 "odometerReading",
-                "carImages",
                 "disabled"
             ].forEach(field => {
                 if (req.body[field] !== undefined) updateFields[field] = req.body[field];
