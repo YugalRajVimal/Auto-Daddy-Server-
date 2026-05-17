@@ -2210,13 +2210,14 @@ connectToAutoShopOwner = async (req, res) => {
     }
 
     // Dynamic import for firebaseAdmin to avoid circular/missing deps
+
     let firebaseAdmin;
     try {
       firebaseAdmin = (await import("../../config/firebase.js")).default;
     } catch (e) {
-      console.error("[connectToAutoShopOwner] import error:", e);
-      return res.status(500).json({ success: false, message: "Server error loading dependencies" });
+      console.error("[editOdometerById] Error loading dependencies:", e);
     }
+
 
     // Fetch current user
     let currentUser;
