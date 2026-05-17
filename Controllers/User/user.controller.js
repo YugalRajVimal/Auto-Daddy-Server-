@@ -1673,7 +1673,7 @@ editOdometerById = async (req, res) => {
 
     console.log("[editOdometerById] Input - vehicleId:", vehicleId, "odometerReading:", odometerReading);
 
-    // Check required fields and odometerReading is a finite number
+    // Validate input
     if (
       !vehicleId ||
       odometerReading === undefined ||
@@ -1688,7 +1688,7 @@ editOdometerById = async (req, res) => {
       });
     }
 
-    // Find the current vehicle by _id
+    // Fetch vehicle
     const vehicle = await VehicleModel.findById(vehicleId).lean();
     if (!vehicle) {
       console.log("[editOdometerById] Vehicle not found for vehicleId:", vehicleId);
@@ -1698,7 +1698,7 @@ editOdometerById = async (req, res) => {
       });
     }
 
-    // Check if new odometer reading is greater than previous
+    // Validate odometer progression
     const prevOdometer = vehicle.odometerReading || 0;
     if (odometerReading <= prevOdometer) {
       console.log("[editOdometerById] New odometer reading must be greater than the previous value");
@@ -1708,27 +1708,23 @@ editOdometerById = async (req, res) => {
       });
     }
 
-    // ===== Service Due Notification Enhancement: Only if odometer > dueOdometerReading =====
     let JobCard, BusinessProfileModel, firebaseAdmin, UserModel;
     try {
       JobCard = (await import("../../Schema/jobCard.schema.js")).default;
       BusinessProfileModel = (await import("../../Schema/bussiness-profile.js")).default;
       firebaseAdmin = (await import("../../config/firebase.js")).default;
-      // Here's the user model for FCM to business owner
       UserModel = (await import("../../Schema/user.schema.js")).User;
     } catch (e) {
-      // If something is missing, log and continue to allow odometer update
-      console.error("[editOdometerById] Error loading schemas or firebase admin:", e);
+      console.error("[editOdometerById] Error loading dependencies:", e);
     }
 
-    let latestJobCard = null;
     let notified = false;
     let notificationError = null;
 
     if (JobCard && BusinessProfileModel && firebaseAdmin && UserModel) {
       try {
-        // Find the latest JobCard for this vehicle & current user
-        latestJobCard = await JobCard.findOne({
+        // Find the latest JobCard for this vehicle/user
+        const latestJobCard = await JobCard.findOne({
           customerId: currentUserId,
           vehicleId: vehicleId
         })
@@ -1737,18 +1733,15 @@ editOdometerById = async (req, res) => {
           .lean();
 
         const dueOdometerReading = latestJobCard?.dueOdometerReading;
-        // If new odometer is greater than due value, notify business shop via FCM
         if (
           dueOdometerReading !== null &&
           dueOdometerReading !== undefined &&
           odometerReading > dueOdometerReading
         ) {
-          // Find business owner's (autoshopowner) User fcmToken via BusinessProfile.businessPhone or teamMembers
           const businessId = latestJobCard?.business;
           if (businessId) {
-            // Find the business profile
             const businessDoc = await BusinessProfileModel.findById(businessId)
-              .select("businessName businessPhone businessEmail teamMembers")
+              .select("businessName businessPhone businessEmail teamMembers notifications")
               .populate({
                 path: "teamMembers",
                 select: "phone isActive"
@@ -1757,14 +1750,12 @@ editOdometerById = async (req, res) => {
 
             let ownerUser = null;
             if (businessDoc?.businessPhone) {
-              // Find the user (autoShopOwner) whose phone matches businessPhone and role == 'autoshopowner'
               ownerUser = await UserModel.findOne({
                 businessProfile: businessDoc._id,
                 role: "autoshopowner"
               }).lean();
             }
             if (!ownerUser && Array.isArray(businessDoc?.teamMembers)) {
-              // Try first active member with phone as fallback
               const activeMemberWithPhone = businessDoc.teamMembers.find(
                 (tm) => tm.isActive && tm.phone
               );
@@ -1776,40 +1767,73 @@ editOdometerById = async (req, res) => {
               }
             }
 
+            // Prepare notification message
+            const notificationTitle = "Service Due Alert";
+            const userName = req.user && req.user.name ? req.user.name : "N/A";
+            const userIdToNotify = currentUserId || req.user?._id;
+            const licensePlateNo = vehicle.licensePlateNo || "";
+            const messageBody =
+              `Car owner${userName !== "N/A" ? " " + userName : ""}'s vehicle (Plate: ${licensePlateNo}) has crossed the scheduled service odometer (${dueOdometerReading}). Current reading: ${odometerReading}. Please notify the customer.`;
+
+            // Save notification to businessProfile.notifications array
+            try {
+              await BusinessProfileModel.findByIdAndUpdate(
+                businessDoc._id,
+                {
+                  $push: {
+                    notifications: {
+                      user: userIdToNotify,
+                      message: messageBody,
+                      time: new Date()
+                    }
+                  }
+                },
+                { new: true, useFindAndModify: false }
+              );
+              // Notified via DB
+              notified = true;
+              console.log(`[editOdometerById] Notification saved in businessProfile DB for business: ${businessDoc._id}`);
+            } catch (nerr) {
+              notificationError = nerr;
+              console.error("[editOdometerById] Failed to save notification in businessProfile db:", nerr);
+            }
+
+            // Try FCM push too (optional, as before)
             if (ownerUser && ownerUser.fcmToken) {
-              // Compose the notification
-              const message = {
+              const fcmMessage = {
                 notification: {
-                  title: "Service Due Alert",
-                  body:
-                    `Car owner${req.user && req.user.name ? " " + req.user.name : ""}'s vehicle (Plate: ${vehicle.licensePlateNo || ""}) has crossed the scheduled service odometer (${dueOdometerReading}). Current reading: ${odometerReading}. Please notify the customer.`
+                  title: notificationTitle,
+                  body: messageBody
                 },
                 token: ownerUser.fcmToken
               };
-
               try {
-                await firebaseAdmin.messaging().send(message);
+                await firebaseAdmin.messaging().send(fcmMessage);
                 notified = true;
                 console.log(
                   `[editOdometerById] FCM notification sent to business owner fcmToken (${ownerUser.fcmToken}): `,
-                  message
+                  fcmMessage
                 );
               } catch (notifyErr) {
                 notificationError = notifyErr;
                 console.error("[editOdometerById] Failed to send FCM notification:", notifyErr);
               }
             } else {
-              console.warn("[editOdometerById] Business owner fcmToken not found for notification.");
+              if (!ownerUser) {
+                console.warn("[editOdometerById] Business owner not found for notification.");
+              } else {
+                console.warn("[editOdometerById] Business owner fcmToken not found for notification.");
+              }
             }
           }
         }
       } catch (jobCardErr) {
         notificationError = jobCardErr;
-        console.error("[editOdometerById] Error in JobCard FCM notification logic:", jobCardErr);
+        console.error("[editOdometerById] Error in JobCard/Notification logic:", jobCardErr);
       }
     }
 
-    // Update the odometer reading
+    // Update the odometer reading in the vehicle
     const updatedVehicle = await VehicleModel.findByIdAndUpdate(
       vehicleId,
       { $set: { odometerReading } },
@@ -1821,8 +1845,9 @@ editOdometerById = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Odometer reading updated successfully" +
-        (notified ? " (service due notification sent to business owner)" : "") +
-        (notificationError ? " (notification error: " + notificationError.message + ")" : ""),
+        (notified ? " (service due notification saved in business profile" + (notificationError ? ", notification error: " + notificationError.message + ")" : ")" ) :
+         "") +
+        (notificationError && !notified ? " (notification error: " + notificationError.message + ")" : ""),
       vehicle: updatedVehicle,
     });
   } catch (err) {
@@ -2164,6 +2189,175 @@ async editDocument(req, res) {
     return res.status(500).json({ success: false, message: "Failed to update document", error: error.message });
   }
 }
+
+/**
+ * Controller: connectToAutoShopOwner
+ *
+ * Expects: { businessId: String, serviceId: String }
+ * Sends a push notification to the AutoShop Owner of provided businessId regarding the selected serviceId.
+ *
+ * Returns: { success, message }
+ */
+connectToAutoShopOwner = async (req, res) => {
+  try {
+    const { businessId, serviceId } = req.body;
+
+    if (!businessId || !serviceId) {
+      return res.status(400).json({
+        success: false,
+        message: "Both businessId and serviceId are required."
+      });
+    }
+
+    // Dynamic import for firebaseAdmin to avoid circular/missing deps
+    let firebaseAdmin;
+    try {
+      firebaseAdmin = (await import("../../config/firebase.js")).default;
+    } catch (e) {
+      console.error("[connectToAutoShopOwner] import error:", e);
+      return res.status(500).json({ success: false, message: "Server error loading dependencies" });
+    }
+
+    // Fetch current user
+    let currentUser;
+    try {
+      currentUser = await User.findById(req.user.id).lean();
+      if (!currentUser) {
+        return res.status(404).json({
+          success: false,
+          message: "Current user not found."
+        });
+      }
+    } catch (e) {
+      console.error("[connectToAutoShopOwner] Error fetching current user:", e);
+      return res.status(500).json({
+        success: false,
+        message: "Error fetching current user"
+      });
+    }
+
+    // Find the business profile, now also select serviceWeWorkWith
+    const business = await BusinessProfileModel.findById(businessId)
+      .select("businessPhone businessName serviceWeWorkWith notifications")
+      .lean();
+
+    if (!business) {
+      return res.status(404).json({ success: false, message: "Business not found" });
+    }
+
+    // Check if this business provides this service
+    if (
+      !Array.isArray(business.serviceWeWorkWith) ||
+      !business.serviceWeWorkWith.find(
+        (s) =>
+          (typeof s === "string" && s === serviceId) ||
+          (typeof s === "object" && s?.toString() === serviceId)
+      )
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected business does not offer the requested service."
+      });
+    }
+
+    // Find the user (owner) tied to businessProfile, role 'autoshopowner'
+    let ownerUser = await User.findOne({
+      businessProfile: business._id,
+      role: "autoshopowner"
+    }).lean();
+
+    if (!ownerUser || !ownerUser.fcmToken) {
+      return res.status(404).json({
+        success: false,
+        message: "AutoShop owner or valid FCM token not found for this business"
+      });
+    }
+
+    // Optionally, get service info to include in notification
+    let serviceInfo;
+    if (serviceId) {
+      try {
+        serviceInfo = await servicesSchema.findById(serviceId).lean();
+      } catch (e) {
+        // Silently ignore if error while fetching service
+      }
+    }
+
+    // Build user details for the message
+    const userName = currentUser?.name || "N/A";
+    const userEmail = currentUser?.email || "N/A";
+    const userPhone = currentUser?.phone || currentUser?.mobileNumber || "N/A";
+    const serviceName = serviceInfo?.name || "N/A";
+    const serviceDescription = serviceInfo?.description || "";
+
+    // Compose the notification message
+    const notificationTitle = "Service Request from Customer";
+    let notificationBody = `User details:\n- Name: ${userName}\n- Email: ${userEmail}\n- Phone No.: ${userPhone}\n\nwants this service:\n- Service: ${serviceName}`;
+    if (serviceDescription) {
+      notificationBody += `\n- Details: ${serviceDescription}`;
+    }
+
+    // Add notification to the business profile (using the notifications schema)
+    try {
+      await BusinessProfileModel.findByIdAndUpdate(
+        businessId,
+        {
+          $push: {
+            notifications: {
+              user: currentUser._id,
+              message: notificationBody,
+              time: new Date()
+            }
+          }
+        },
+        { new: true, useFindAndModify: false }
+      );
+    } catch (e) {
+      console.error("[connectToAutoShopOwner] Failed to save notification to business profile:", e);
+      // Not a critical error, proceed to continue FCM send
+    }
+
+    const message = {
+      notification: {
+        title: notificationTitle,
+        body: notificationBody
+      },
+      token: ownerUser.fcmToken,
+      data: {
+        businessId: business._id.toString(),
+        serviceId: serviceId.toString(),
+        customerId: currentUser._id.toString(),
+        type: "connect_request"
+      }
+    };
+
+    // Send FCM push notification
+    try {
+      await firebaseAdmin.messaging().send(message);
+    } catch (err) {
+      console.error("[connectToAutoShopOwner] Failed to send FCM notification:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to send notification to shop owner",
+        error: err.message
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Connection request sent to AutoShop owner via push notification and notification saved to business profile"
+    });
+  } catch (err) {
+    console.error("[connectToAutoShopOwner] Unexpected error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+
+
 
 
 }

@@ -441,6 +441,15 @@ autoShopRouter.delete(
 
 
 
+// Route to fetch paginated notifications for a business profile
+autoShopRouter.get(
+  "/get-notifications",
+  jwtAuth,
+  (req, res) => autoShopController.getNotifications(req, res)
+);
+
+
+
 
 
 export default autoShopRouter;

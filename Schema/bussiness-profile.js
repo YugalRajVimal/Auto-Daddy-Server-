@@ -31,6 +31,23 @@ const ratingSchema = new Schema({
   rating: { type: Number, required: true, min: 1, max: 5 },
 }, { timestamps: true, _id: false });
 
+// Notification Schema: User Details, Message, Time
+const notificationSchema = new Schema({
+  user: { 
+    type: Types.ObjectId, 
+    ref: 'User',
+    required: true 
+  }, // User details reference
+  message: { 
+    type: String, 
+    required: true 
+  }, // Notification message
+  time: { 
+    type: Date, 
+    default: Date.now 
+  } // Time the notification was created
+}, { _id: false });
+
 // Business Profile Schema
 const businessProfileSchema = new Schema({
   businessName: { type: String, required: true },
@@ -70,6 +87,9 @@ const businessProfileSchema = new Schema({
 
   // Add support for linking deals to this business profile
   myDeals: [{ type: Types.ObjectId, ref: "Deal" }],
+
+  // Notifications: Save notification - User Details, Message, Time
+  notifications: [notificationSchema],
 
   createdAt: {
     type: Date,
