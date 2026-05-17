@@ -189,6 +189,14 @@ userRouter.get(
   (req, res) => userController.getUploadedDocuments(req, res)
 );
 
+// Connect to AutoShopOwner: Send push notification to shop owner for a connection request
+userRouter.post(
+  "/connect-autoshopowner",
+  jwtAuth,
+  (req, res) => userController.connectToAutoShopOwner(req, res)
+);
+
+
 
 
 

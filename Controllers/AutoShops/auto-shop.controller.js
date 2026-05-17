@@ -6347,6 +6347,63 @@ async  notifyAutoShopOwnerForService(req, res) {
 }
 
 
+/**
+ * Get paginated notifications for a business profile.
+ * Route: POST /get-notifications
+ * Body: { businessProfileId: String, [page]: Number, [limit]: Number }
+ * Returns: { success, notifications, page, totalPages, totalNotifications }
+ */
+async getNotifications(req, res) {
+  try {
+    // Get page and limit from query params, defaulting if not present
+    const pageNum = Number.isFinite(Number(req.query.page)) && Number(req.query.page) > 0 ? parseInt(req.query.page) : 1;
+    const perPage = Number.isFinite(Number(req.query.limit)) && Number(req.query.limit) > 0 ? parseInt(req.query.limit) : 20;
+
+    // Fetch current authenticated user using req.user.id
+    const userId = req.user && req.user.id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized: Missing user ID" });
+    }
+
+    // Find user, ensure they have a businessProfile reference
+    const user = await User.findById(userId).select("businessProfile");
+    if (!user || !user.businessProfile) {
+      return res.status(404).json({ success: false, message: "User or business profile not found" });
+    }
+
+    // Fetch business profile using user's businessProfile
+    const business = await BusinessProfileModel.findById(user.businessProfile)
+      .select("notifications")
+      .lean();
+
+    if (!business) {
+      return res.status(404).json({ success: false, message: "Business profile not found" });
+    }
+
+    const allNotifs = Array.isArray(business.notifications) ? business.notifications : [];
+    // Sort by time DESC (newest first)
+    const sorted = allNotifs
+      .map((notif, idx) => ({ ...notif, _arrayIdx: idx }))
+      .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+
+    const totalNotifications = sorted.length;
+    const totalPages = Math.ceil(totalNotifications / perPage);
+
+    const paginated = sorted.slice((pageNum - 1) * perPage, pageNum * perPage);
+
+    return res.status(200).json({
+      success: true,
+      notifications: paginated,
+      page: pageNum,
+      totalPages,
+      totalNotifications
+    });
+  } catch (err) {
+    console.error("[getNotifications] Error:", err);
+    return res.status(500).json({ success: false, message: "Failed to fetch notifications", error: err.message });
+  }
+}
+
 
 
 
