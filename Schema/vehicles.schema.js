@@ -11,6 +11,7 @@ const VehicleSchema = new mongoose.Schema(
     },
     year: { type: Number, required: true }, // Model year
     odometerReading: { type: Number, default: 0 }, // Odometer reading (kilometers/miles)
+    dueOdometerReading: { type: Number, default: null }, // Odometer reading for next service due
     vehicleImage: { type: String, default: null }, // URL or path to vehicle image (single image)
     disabled: { type: Boolean, default: false } // Whether the vehicle is disabled (soft-deleted/archived)
   },
