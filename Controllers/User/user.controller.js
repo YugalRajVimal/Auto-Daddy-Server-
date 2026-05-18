@@ -458,7 +458,7 @@ class UserController {
             }
 
             // Only the text fields for vehicle info
-            const { licensePlateNo, vinNo, name, model, year, odometerReading } = req.body;
+            const { licensePlateNo, vinNo, name, model, year, odometerReading, dueOdometerReading } = req.body;
 
             // Check mandatory fields
             if (!licensePlateNo || !vinNo || !name || !model || !year) {
@@ -488,13 +488,14 @@ class UserController {
                 });
             }
 
-            // Prepare new vehicle payload with only required fields
+            // Prepare new vehicle payload with only required fields + dueOdometerReading support
             const vehicleData = {
                 licensePlateNo,
                 vinNo,
                 make: { name, model },
                 year,
                 odometerReading: odometerReading || 0,
+                dueOdometerReading: typeof dueOdometerReading !== "undefined" ? dueOdometerReading : null,
                 disabled: false,
             };
 
@@ -574,7 +575,7 @@ class UserController {
                 return res.status(403).json({ message: "You can only edit your own vehicles." });
             }
 
-            // Only allow non-image vehicle fields to be updated
+            // Include dueOdometerReading as a field that can be updated
             const updateFields = {};
             [
                 "licensePlateNo",
@@ -582,6 +583,7 @@ class UserController {
                 "make",
                 "year",
                 "odometerReading",
+                "dueOdometerReading",
                 "disabled"
             ].forEach(field => {
                 if (req.body[field] !== undefined) updateFields[field] = req.body[field];
