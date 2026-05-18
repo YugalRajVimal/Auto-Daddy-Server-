@@ -1693,7 +1693,8 @@ getVehiclesOdometerReadings = async (req, res) => {
           year: veh.year || null,
           carOwnershipCertificate: veh.carOwnershipCertificate || null,
           insuranceCertificate: veh.insuranceCertificate || null,
-          carImages: Array.isArray(veh.carImages) ? veh.carImages : [],
+          // carImages: Array.isArray(veh.carImages) ? veh.carImages : [],
+          vehicleImage: veh.vehicleImage || null,
           dueOdometerReading: jobCard?.dueOdometerReading || null,
           latestJobCardAt: jobCard?.createdAt || null
         };
