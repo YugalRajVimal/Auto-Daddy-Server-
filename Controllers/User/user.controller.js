@@ -1651,7 +1651,7 @@ getVehiclesOdometerReadings = async (req, res) => {
     const user = await User.findById(userId)
       .populate({
         path: "myVehicles",
-        select: "number odometerReading licensePlateNo make year carOwnershipCertificate insuranceCertificate carImages disabled",
+        select: "number odometerReading licensePlateNo make year carOwnershipCertificate insuranceCertificate vehicleImage disabled",
         model: "Vehicle"
       })
       .lean();
