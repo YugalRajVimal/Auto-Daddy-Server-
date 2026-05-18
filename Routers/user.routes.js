@@ -40,14 +40,21 @@ userRouter.get("/car-companies", (req, res) => {
 userRouter.post(
   "/vehicle",
   jwtAuth,
-  // vehicleUploadMiddleware,
+  vehicleUploadMiddleware,
   (req, res) => {
     userController.addVehicle(req, res);
   }
 );
 
 // Edit/update a vehicle
-userRouter.put("/vehicle/:vehicleId", jwtAuth, (req, res) => { userController.editVehicle(req, res) });
+userRouter.put(
+  "/vehicle/:vehicleId",
+  jwtAuth,
+  vehicleUploadMiddleware,
+  (req, res) => {
+    userController.editVehicle(req, res);
+  }
+);
 
 // Fetch all vehicles for the authenticated user (car owner)
 userRouter.get("/vehicles", jwtAuth, (req, res) => { userController.fetchAllVehicles(req, res) });
