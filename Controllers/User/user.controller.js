@@ -1218,7 +1218,7 @@ class UserController {
             const businessPopulate = { 
                 path: 'business', 
                 model: 'BusinessProfile', 
-                select: 'businessName businessType address contactNumber city' 
+                select: 'businessName businessType address businessPhone businessEmail city' 
             };
             // Populate for services array - get service name and subServices fully
             const servicesPopulate = [
