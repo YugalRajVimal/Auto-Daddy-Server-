@@ -443,7 +443,8 @@ class UserController {
 
     // ---------- VEHICLE CRUD Operations ----------
     // Add a new vehicle for the authenticated user (car owner)
-    // @vehicles.schema.js (8-9): Add carOwnershipCertificate and insuranceCertificate file handling
+    // Handles vehicleImage upload, deletes file on error
+
     addVehicle = async (req, res) => {
         const session = await VehicleModel.startSession();
         session.startTransaction();
@@ -452,6 +453,7 @@ class UserController {
             if (!userId) {
                 await session.abortTransaction();
                 session.endSession();
+                if (req.files?.vehicleImage) deleteUploadedFile(req.files.vehicleImage[0]);
                 return res.status(401).json({ message: "Unauthorized" });
             }
 
@@ -459,15 +461,10 @@ class UserController {
             const { licensePlateNo, vinNo, name, model, year, odometerReading } = req.body;
 
             // Check mandatory fields
-            if (
-                !licensePlateNo ||
-                !vinNo ||
-                !name ||
-                !model ||
-                !year
-            ) {
+            if (!licensePlateNo || !vinNo || !name || !model || !year) {
                 await session.abortTransaction();
                 session.endSession();
+                if (req.files?.vehicleImage) deleteUploadedFile(req.files.vehicleImage[0]);
                 return res.status(400).json({ message: "Required vehicle fields missing." });
             }
 
@@ -484,6 +481,7 @@ class UserController {
             if (enabledVehicle) {
                 await session.abortTransaction();
                 session.endSession();
+                if (req.files?.vehicleImage) deleteUploadedFile(req.files.vehicleImage[0]);
                 return res.status(409).json({
                     success: false,
                     message: "A vehicle with this license plate already exists and is not disabled."
@@ -500,6 +498,13 @@ class UserController {
                 disabled: false,
             };
 
+            // Attach vehicleImage (file path), if uploaded
+            if (req.files && req.files.vehicleImage && req.files.vehicleImage[0]) {
+                vehicleData.vehicleImage = req.files.vehicleImage[0].path;
+            } else {
+                vehicleData.vehicleImage = null;
+            }
+
             let newVehicle;
             try {
                 const created = await VehicleModel.create([vehicleData], { session });
@@ -507,7 +512,10 @@ class UserController {
             } catch (creationError) {
                 await session.abortTransaction();
                 session.endSession();
-                throw creationError;
+                // Delete uploaded file if vehicle creation fails
+                if (vehicleData.vehicleImage) deleteUploadedFile(vehicleData.vehicleImage);
+                console.error("[addVehicle][VehicleModel.create] Error:", creationError);
+                return res.status(500).json({ message: "Failed to add vehicle." });
             }
 
             try {
@@ -521,7 +529,10 @@ class UserController {
             } catch (linkError) {
                 await session.abortTransaction();
                 session.endSession();
-                throw linkError;
+                // Delete uploaded file if user update fails
+                if (vehicleData.vehicleImage) deleteUploadedFile(vehicleData.vehicleImage);
+                console.error("[addVehicle][User.findByIdAndUpdate] Error:", linkError);
+                return res.status(500).json({ message: "Failed to add vehicle to user." });
             }
 
             const updatedUser = await User.findById(userId)
@@ -537,6 +548,9 @@ class UserController {
         } catch (error) {
             await session.abortTransaction();
             session.endSession();
+            // Defensive file cleanup on uncaught error
+            if (req.files?.vehicleImage && req.files.vehicleImage[0])
+                deleteUploadedFile(req.files.vehicleImage[0]);
             console.error("[addVehicle] Error:", error);
             return res.status(500).json({ message: "Internal Server Error" });
         }
@@ -573,9 +587,16 @@ class UserController {
                 if (req.body[field] !== undefined) updateFields[field] = req.body[field];
             });
 
+            // Optionally handle uploaded vehicleImage (update/replace file path)
+            if (req.files && req.files.vehicleImage && req.files.vehicleImage[0]) {
+                updateFields.vehicleImage = req.files.vehicleImage[0].path;
+            }
+
             // Fetch current state of the vehicle
             const existingVehicle = await VehicleModel.findById(vehicleId).lean();
             if (!existingVehicle) {
+                // If uploaded new image, delete it because vehicle doesn't exist
+                if (updateFields.vehicleImage) deleteUploadedFile(updateFields.vehicleImage);
                 return res.status(404).json({ message: "Vehicle not found." });
             }
 
@@ -603,6 +624,8 @@ class UserController {
                     ]
                 });
                 if (enabledVehicle) {
+                    // If uploaded new image, delete it because it won't be used
+                    if (updateFields.vehicleImage) deleteUploadedFile(updateFields.vehicleImage);
                     return res.status(409).json({
                         success: false,
                         message: "A vehicle with this license plate already exists and is not disabled."
@@ -618,13 +641,32 @@ class UserController {
                 updateFields.disabled = false;
             }
 
-            const updatedVehicle = await VehicleModel.findByIdAndUpdate(
-                vehicleId,
-                { $set: updateFields },
-                { new: true }
-            );
+            // If updating vehicleImage: delete previous image file if there was one
+            if (updateFields.vehicleImage && existingVehicle.vehicleImage) {
+                try {
+                    deleteUploadedFile(existingVehicle.vehicleImage);
+                } catch (delErr) {
+                    console.error("[editVehicle] Failed removing old vehicleImage:", delErr);
+                }
+            }
+
+            let updatedVehicle;
+            try {
+                updatedVehicle = await VehicleModel.findByIdAndUpdate(
+                    vehicleId,
+                    { $set: updateFields },
+                    { new: true }
+                );
+            } catch (updateError) {
+                // On update error, delete new uploaded vehicleImage if present
+                if (updateFields.vehicleImage) deleteUploadedFile(updateFields.vehicleImage);
+                console.error("[editVehicle] Error updating vehicle:", updateError);
+                return res.status(500).json({ message: "Internal Server Error" });
+            }
 
             if (!updatedVehicle) {
+                // Defensive: cleanup new image if update failed and result not found
+                if (updateFields.vehicleImage) deleteUploadedFile(updateFields.vehicleImage);
                 return res.status(404).json({ message: "Vehicle not found." });
             }
             return res.status(200).json({
@@ -633,6 +675,9 @@ class UserController {
                 vehicle: updatedVehicle
             });
         } catch (error) {
+            // Defensive cleanup on uncaught error and uploaded new file
+            if (req.files?.vehicleImage && req.files.vehicleImage[0])
+                deleteUploadedFile(req.files.vehicleImage[0]);
             console.error("[editVehicle] Error:", error);
             return res.status(500).json({ message: "Internal Server Error" });
         }
@@ -1606,14 +1651,18 @@ getVehiclesOdometerReadings = async (req, res) => {
     const user = await User.findById(userId)
       .populate({
         path: "myVehicles",
-        select: "number odometerReading licensePlateNo make year carOwnershipCertificate insuranceCertificate carImages",
+        select: "number odometerReading licensePlateNo make year carOwnershipCertificate insuranceCertificate carImages disabled",
         model: "Vehicle"
       })
       .lean();
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
-    const vehicles = Array.isArray(user.myVehicles) ? user.myVehicles : [];
+
+    // Filter out disabled vehicles
+    const vehicles = Array.isArray(user.myVehicles)
+      ? user.myVehicles.filter(v => !v.disabled)
+      : [];
 
     // Import JobCard dynamically
     let JobCard;

@@ -22,6 +22,10 @@ const carCompanySchema = new mongoose.Schema(
       trim: true,
       unique: true
     },
+    brandLogo: {
+      type: String,
+      default: null // URL or path to the brand logo (optional, can be null)
+    },
     models: [carModelSchema],
   },
   {

@@ -1,5 +1,6 @@
 import express from "express";
 import AdminController from "../Controllers/Admin/admin.controller.js";
+import { brandLogoUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/brandLogoUpload.middleware.js";
 
 
 const adminRouter = express.Router();
@@ -90,10 +91,19 @@ adminRouter.delete(
 
 // Car Company CRUD endpoints
 
-// Add a new car company
+
+
 adminRouter.post(
   "/car-company",
+  brandLogoUploadMiddleware,
   (req, res) => adminController.addCarCompany(req, res)
+);
+
+// Edit a car company by ID (with brandLogo image upload support)
+adminRouter.patch(
+  "/car-company/:id",
+  brandLogoUploadMiddleware,
+  (req, res) => adminController.editCarCompany(req, res)
 );
 
 // Fetch all car companies, or filter by companyName
@@ -102,11 +112,7 @@ adminRouter.get(
   (req, res) => adminController.fetchCarCompanies(req, res)
 );
 
-// Edit a car company by ID
-adminRouter.patch(
-  "/car-company/:id",
-  (req, res) => adminController.editCarCompany(req, res)
-);
+
 
 // Delete a car company by ID
 adminRouter.delete(

@@ -1,3 +1,4 @@
+import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
 import CarCompany from "../../Schema/car-company-schema.js";
 import DashboardDataModel from "../../Schema/dashboardData.schema.js";
 import DealModel from "../../Schema/deals.schema.js";
@@ -758,32 +759,137 @@ async deleteDashboardData(req, res) {
 
 
 /**
- * Add a new car company with models and years
+/**
+ * Add a new car company with models and years, and optional brandLogo upload
  * POST /admin/car-company
  * Body: { companyName: string, models: [{ modelName: string, years: [number] }] }
+ * File: brandLogo (optional image upload via multipart/form-data)
  */
 async addCarCompany(req, res) {
+
+
+    let brandLogoPath = null;
     try {
         const { companyName, models } = req.body;
-        if (!companyName || !Array.isArray(models) || models.length === 0) {
+
+        // If form-data, models may come as string
+        let parsedModels = models;
+        if (typeof models === "string") {
+            try {
+                parsedModels = JSON.parse(models);
+            } catch {
+                return res.status(400).json({ message: "models must be a valid JSON array." });
+            }
+        }
+
+        if (!companyName || !Array.isArray(parsedModels) || parsedModels.length === 0) {
+            // Delete uploaded image if relevant
+            if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
             return res.status(400).json({ message: "companyName and models are required." });
+        }
+
+        // brandLogo from req.files
+        if (req.files && req.files.brandLogo && req.files.brandLogo[0]) {
+            brandLogoPath = req.files.brandLogo[0].path;
         }
 
         // Check for duplicate companyName
         const existing = await CarCompany.findOne({ companyName });
         if (existing) {
+            if (brandLogoPath) deleteUploadedFile(brandLogoPath);
             return res.status(409).json({ message: "Car company already exists." });
         }
 
-        const newCompany = new CarCompany({ companyName, models });
+        const newCompany = new CarCompany({
+            companyName,
+            models: parsedModels,
+            brandLogo: brandLogoPath || null
+        });
+
         await newCompany.save();
 
         return res.status(201).json({ success: true, data: newCompany });
+
     } catch (err) {
+        // Clean up uploaded image on error
+        if (brandLogoPath) {
+
+            deleteUploadedFile(brandLogoPath);
+        }
         console.error("[addCarCompany] Error:", err);
         return res.status(500).json({ message: "Failed to add car company", error: err.message });
     }
 }
+
+/**
+ * Edit a car company by ID, including optional update of brandLogo
+ * PATCH /admin/car-company/:id
+ * Body may include any subset of { companyName, models }
+ * File: brandLogo (optional, replaces old if provided)
+ */
+async editCarCompany(req, res) {
+
+
+    let brandLogoPath = null;
+    try {
+        const { id } = req.params;
+        const { companyName, models } = req.body;
+
+        // If form-data, models may come as string
+        let parsedModels = models;
+        if (typeof models === "string") {
+            try {
+                parsedModels = JSON.parse(models);
+            } catch {
+                if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
+                return res.status(400).json({ message: "models must be a valid JSON array." });
+            }
+        }
+
+        if (!companyName && !parsedModels && !req.files?.brandLogo) {
+            if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
+            return res.status(400).json({ message: "Nothing to update." });
+        }
+
+        const updateFields = {};
+        if (companyName) updateFields.companyName = companyName;
+        if (parsedModels) updateFields.models = parsedModels;
+
+        // brandLogo from req.files (new logo uploaded)
+        if (req.files && req.files.brandLogo && req.files.brandLogo[0]) {
+            brandLogoPath = req.files.brandLogo[0].path;
+            updateFields.brandLogo = brandLogoPath;
+        }
+
+        // Check for existing company and handle old logo delete if replacing with new
+        let prevCompany = null;
+        if (brandLogoPath) {
+            prevCompany = await CarCompany.findById(id);
+        }
+
+        const updated = await CarCompany.findByIdAndUpdate(id, updateFields, { new: true });
+        if (!updated) {
+            if (brandLogoPath) deleteUploadedFile(brandLogoPath);
+            return res.status(404).json({ message: "CarCompany not found." });
+        }
+
+        // Delete old logo if replaced by a new one
+        if (brandLogoPath && prevCompany && prevCompany.brandLogo && prevCompany.brandLogo !== brandLogoPath) {
+            deleteUploadedFile(prevCompany.brandLogo);
+        }
+
+        return res.status(200).json({ success: true, data: updated });
+    } catch (err) {
+        // Clean up uploaded image on error
+        if (brandLogoPath) {
+
+            deleteUploadedFile(brandLogoPath);
+        }
+        console.error("[editCarCompany] Error:", err);
+        return res.status(500).json({ message: "Failed to edit car company", error: err.message });
+    }
+}
+
 
 /**
  * Fetch all car companies, or filter by companyName if query provided
@@ -805,33 +911,6 @@ async fetchCarCompanies(req, res) {
     }
 }
 
-/**
- * Edit a car company by ID
- * PATCH /admin/car-company/:id
- * Body may include any subset of { companyName, models }
- */
-async editCarCompany(req, res) {
-    try {
-        const { id } = req.params;
-        const { companyName, models } = req.body;
-        if (!companyName && !models) {
-            return res.status(400).json({ message: "Nothing to update." });
-        }
-
-        const updateFields = {};
-        if (companyName) updateFields.companyName = companyName;
-        if (models) updateFields.models = models;
-
-        const updated = await CarCompany.findByIdAndUpdate(id, updateFields, { new: true });
-        if (!updated) {
-            return res.status(404).json({ message: "CarCompany not found." });
-        }
-        return res.status(200).json({ success: true, data: updated });
-    } catch (err) {
-        console.error("[editCarCompany] Error:", err);
-        return res.status(500).json({ message: "Failed to edit car company", error: err.message });
-    }
-}
 
 /**
  * Delete a car company by ID
