@@ -1995,6 +1995,7 @@ async uploadDocuments(req, res) {
   try {
     // Validate vehicleId
     if (!vehicleId) {
+      console.log("[uploadDocuments] No vehicleId provided in request body");
       deleteUploadedFiles(req.files);
       return res.status(400).json({ success: false, message: "vehicleId is required" });
     }
@@ -2002,12 +2003,14 @@ async uploadDocuments(req, res) {
     // Validate user
     const user = await User.findById(userId);
     if (!user) {
+      console.log(`[uploadDocuments] User not found: ${userId}`);
       deleteUploadedFiles(req.files);
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
     // Make sure this vehicle belongs to the user and is not disabled
     if (!user.myVehicles || !user.myVehicles.some(vId => vId.toString() === vehicleId)) {
+      console.log("[uploadDocuments] Vehicle does not belong to user", { userId, vehicleId });
       deleteUploadedFiles(req.files);
       return res.status(403).json({ success: false, message: "Vehicle does not belong to user." });
     }
@@ -2015,10 +2018,12 @@ async uploadDocuments(req, res) {
     // Validate vehicle existence and disabled flag
     const vehicle = await VehicleModel.findById(vehicleId);
     if (!vehicle) {
+      console.log(`[uploadDocuments] Vehicle not found: ${vehicleId}`);
       deleteUploadedFiles(req.files);
       return res.status(404).json({ success: false, message: "Vehicle not found" });
     }
     if (vehicle.disabled) {
+      console.log(`[uploadDocuments] Vehicle is disabled: ${vehicleId}`);
       deleteUploadedFiles(req.files);
       return res.status(400).json({ success: false, message: "Vehicle is disabled and cannot be used." });
     }
@@ -2030,6 +2035,7 @@ async uploadDocuments(req, res) {
 
     // If it's a new document, enforce 5-document limit
     if (existingDocIdx === -1 && user.documents && user.documents.length >= 5) {
+      console.log(`[uploadDocuments] Document limit reached (5) for user: ${userId}`);
       deleteUploadedFiles(req.files);
       return res.status(400).json({ success: false, message: "Document limit reached (max 5 vehicles per user)." });
     }
@@ -2074,14 +2080,19 @@ async uploadDocuments(req, res) {
 
       // Delete any replaced image files
       if (oldPathsToDelete.length) {
+        console.log("[uploadDocuments] Deleting replaced files:", oldPathsToDelete);
         deleteUploadedFiles(oldPathsToDelete);
+      } else {
+        console.log("[uploadDocuments] No files replaced, nothing to delete");
       }
 
+      console.log(`[uploadDocuments] Document updated for vehicleId: ${vehicleId} (user: ${userId})`);
       return res.status(200).json({ success: true, message: "Document updated for this vehicle.", document: doc });
     } else {
       // No existing document for this vehicle, so create a new one as before
       user.documents.push(docFields);
       await user.save();
+      console.log(`[uploadDocuments] Document uploaded for new vehicleId: ${vehicleId} (user: ${userId})`);
       return res.status(201).json({ success: true, message: "Document uploaded successfully", document: docFields });
     }
   } catch (error) {

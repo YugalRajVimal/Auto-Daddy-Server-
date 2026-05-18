@@ -182,12 +182,12 @@ userRouter.post(
 );
 
 // Edit a specific car owner document (replace any images for that docIdx)
-userRouter.put(
-  "/documents/:vehicleId",
-  jwtAuth,
-  vehicleUploadMiddleware,
-  (req, res) => userController.editDocument(req, res)
-);
+// userRouter.put(
+//   "/documents/:vehicleId",
+//   jwtAuth,
+//   vehicleUploadMiddleware,
+//   (req, res) => userController.editDocument(req, res)
+// );
 
 // Get all uploaded vehicle documents for the authenticated user
 userRouter.get(
