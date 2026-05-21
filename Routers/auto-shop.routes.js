@@ -322,6 +322,14 @@ autoShopRouter.get(
   (req, res) => autoShopController.getAllJobCards(req, res)
 );
 
+// Route to resend job card notification to the customer (by autoshop owner)
+autoShopRouter.post(
+  "/job-cards/:jobCardId/resend-notification",
+  jwtAuth,
+  (req, res) => autoShopController.resendJobCard(req, res)
+);
+
+
 // Route to fetch all payments for the current auto shop's business profile
 autoShopRouter.get(
   "/payments",
