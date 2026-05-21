@@ -14,6 +14,7 @@ import WebsiteTemplateSchema from "../../Schema/WebsiteTemplateSchema.js";
 import DashboardDataModel from "../../Schema/dashboardData.schema.js";
 import canadianMunicipalities from "../cityData.js";
 import CarCompany from "../../Schema/car-company-schema.js";
+import axios from "axios";
 
 
 class AutoShopController {
@@ -144,10 +145,10 @@ class AutoShopController {
                 // Optionally add any other "business user" fields needed here from user.schema.js
             };
 
-            // Fetch business profile (with GST)
+            // Fetch business profile (with GST AND subscriptions for subscriptionDaysLeftCount)
             const businessProfile = await BusinessProfileModel.findById(
                 user.businessProfile,
-                "businessName businessPhone isBusinessActive gst"
+                "businessName businessPhone isBusinessActive gst subscriptions"
             ).lean();
             if (!businessProfile) {
                 return res.status(404).json({ message: "Business profile not found." });
@@ -305,8 +306,52 @@ class AutoShopController {
                 };
             }
 
-            // --- Sample & static data
-            const subscriptionDaysLeftCount = 13;
+            // --- Calculate subscriptionDaysLeftCount from the current active subscription per @bussiness-profile.js (1-125)
+            let subscriptionDaysLeftCount = 0;
+            if (
+                Array.isArray(businessProfile.subscriptions) &&
+                businessProfile.subscriptions.length > 0
+            ) {
+                // Subscriptions can be in any order, ensure most recent and active are checked first
+                const sortedSubs = businessProfile.subscriptions
+                    .slice()
+                    .sort((a, b) => new Date(b.purchasedOn) - new Date(a.purchasedOn));
+                
+                const nowTime = Date.now();
+
+                let found = false;
+                for (const sub of sortedSubs) {
+                    // paymentStatus check first (if Pending, show 0)
+                    if (
+                        sub &&
+                        sub.paymentStatus &&
+                        typeof sub.paymentStatus === "string" &&
+                        sub.paymentStatus.toLowerCase() === "pending"
+                    ) {
+                        subscriptionDaysLeftCount = 0;
+                        found = true;
+                        break;
+                    }
+                    // If not pending, calculate active days left
+                    if (
+                        sub &&
+                        typeof sub.days === "number" &&
+                        sub.days > 0 &&
+                        sub.purchasedOn
+                    ) {
+                        const startDate = new Date(sub.purchasedOn);
+                        const endDate = new Date(startDate.getTime() + sub.days * 24 * 60 * 60 * 1000);
+                        if (nowTime >= startDate.getTime() && nowTime < endDate.getTime()) {
+                            // Active subscription
+                            subscriptionDaysLeftCount = Math.ceil((endDate - nowTime) / (1000 * 60 * 60 * 24));
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+                // If none found (all expired, or status Pending not present), subscriptionDaysLeftCount will be 0
+            }
+
             // Fetch dashboard data from DB and use defaults if not found (from dashboardData.schema.js)
             let thoughtOfTheDay, aboutUs, privacyPolicy, FAQs, Documents, Disclaimer;
 
@@ -324,8 +369,6 @@ class AutoShopController {
             } catch (err) {
                 return res.status(500).json({ message: "Failed to fetch dashboard data.", error: err?.message || err.toString() });
             }
-       
- 
 
             return res.status(200).json({
                 success: true,
@@ -3513,6 +3556,7 @@ async fetchMyDeals(req, res) {
                     discountedPrice: deal.discountedPrice,
                     offerEndsOnDate: deal.offerEndsOnDate,
                     createdBy: deal.createdBy && deal.createdBy._id ? deal.createdBy._id : deal.createdBy,
+                    dealImage: deal.dealImage ?? null, // pass dealImage
                     _id: deal._id
                 });
             }
@@ -3550,6 +3594,7 @@ async fetchMyDeals(req, res) {
                     discountedPrice: deal.discountedPrice,
                     offerEndsOnDate: deal.offerEndsOnDate,
                     createdBy: deal.createdBy && deal.createdBy._id ? deal.createdBy._id : deal.createdBy,
+                    dealImage: deal.dealImage ?? null, // pass dealImage
                     _id: deal._id
                 });
             }
@@ -5236,8 +5281,20 @@ async getAllJobCards(req, res) {
             ...createdAtMatch,
         };
 
-        // Fetch job cards by statuses
-        const [pendingJobCards, approvedJobCards, rejectedJobCards] = await Promise.all([
+        // Step 1: Find expired "Pending" job cards and update them to "AutoRejected"
+        const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+        // Only update status if still Pending and older than 2 hours
+        await JobCard.updateMany(
+            {
+                ...baseQuery,
+                status: "Pending",
+                createdAt: { $lt: twoHoursAgo }
+            },
+            { $set: { status: "AutoRejected" } }
+        );
+
+        // Step 2: Now fetch the updated job cards
+        const [pendingJobCards, approvedJobCards, rejectedJobCards, autoRejectedJobCards] = await Promise.all([
             JobCard.find({ ...baseQuery, status: "Pending" })
                 .populate([
                     { path: 'customerId', model: 'User', select: 'name phone email' },
@@ -5259,13 +5316,21 @@ async getAllJobCards(req, res) {
                 ])
                 .sort({ createdAt: -1 })
                 .lean(),
+            JobCard.find({ ...baseQuery, status: "AutoRejected" })
+                .populate([
+                    { path: 'customerId', model: 'User', select: 'name phone email' },
+                    { path: 'vehicleId', model: 'Vehicle', select: 'make model licensePlateNo' },
+                ])
+                .sort({ createdAt: -1 })
+                .lean(),
         ]);
 
         return res.status(200).json({
             success: true,
             pending: pendingJobCards,
             approved: approvedJobCards,
-            rejected: rejectedJobCards
+            rejected: rejectedJobCards,
+            autoRejected: autoRejectedJobCards
         });
     } catch (err) {
         console.error("[getAllJobCards] Error:", err);
@@ -6406,8 +6471,267 @@ async getNotifications(req, res) {
 
 
 
+/**
+ * Purchase subscription for Business Profile.
+ * - First subscription: $365 for 365 days (if no subscriptions exist)
+ * - Renewal: Minimum $100 for minimum 100 days (can purchase more days/dollars)
+ * - Cannot purchase if there is an active/running subscription (i.e., today < end date of last sub)
+ * Implements Cashfree Payment for online payments.
+ */
 
+async purchaseSubscription(req, res) {
+  try {
+    console.log("[purchaseSubscription] STEP 1: Start, req.user:", req.user);
 
+    const userId = req.user.id;
+    if (!userId) {
+      console.log("[purchaseSubscription] STEP 2: Missing user ID");
+      return res.status(401).json({ success: false, message: "Unauthorized: Missing user ID" });
+    }
+
+    // Basic fields validation
+    let { amount, days, paymentMethod, referenceId, remarks } = req.body;
+    console.log("[purchaseSubscription] STEP 3: Raw input", { amount, days, paymentMethod, referenceId, remarks });
+    amount = parseFloat(amount);
+    days = parseInt(days);
+
+    // Find user and business profile
+    const user = await User.findById(userId).select("businessProfile email");
+    console.log("[purchaseSubscription] STEP 4: User result", user);
+    if (!user || !user.businessProfile) {
+      console.log("[purchaseSubscription] STEP 4.1: User or businessProfile not found");
+      return res.status(404).json({ success: false, message: "User or business profile not found" });
+    }
+
+    let business = await BusinessProfileModel.findById(user.businessProfile).lean();
+    console.log("[purchaseSubscription] STEP 5: Business profile result", business);
+    if (!business) {
+      console.log("[purchaseSubscription] STEP 5.1: Business profile not found");
+      return res.status(404).json({ success: false, message: "Business profile not found" });
+    }
+
+    // Fetch HST percent (gst) from business profile (default to 13% if unset/invalid)
+    let hstPer = typeof business.gst === 'number' && !isNaN(business.gst) && business.gst > 0 ? business.gst : 13;
+    console.log("[purchaseSubscription] STEP 6: HST Percent (GST)", hstPer);
+
+    // Subscription logic
+    const existingSubs = Array.isArray(business.subscriptions) ? business.subscriptions : [];
+    const now = new Date();
+    let lastSubEnd = null;
+
+    if (existingSubs.length > 0) {
+      const latestSub = existingSubs[0];
+      const endDate = new Date(latestSub.purchasedOn);
+      endDate.setDate(endDate.getDate() + Number(latestSub.days));
+      lastSubEnd = endDate;
+
+      console.log("[purchaseSubscription] STEP 7: Last subscription ends", endDate);
+
+      if (now < endDate) {
+        console.log("[purchaseSubscription] STEP 8: Still active subscription (block purchase)");
+        return res.status(400).json({
+          success: false,
+          message: `Active subscription exists. Expires on ${endDate.toISOString().slice(0, 10)}`
+        });
+      }
+      // Validate min $100, 100 days
+      if (!(amount >= 100 && days >= 100)) {
+        console.log("[purchaseSubscription] STEP 9: Renewal subscription - constraint not met");
+        return res.status(400).json({ success: false, message: "Renewal subscription requires minimum $100 and 100 days." });
+      }
+    } else {
+      // First ever subscription: lock to $365, 365 days
+      if (!(amount === 365 && days === 365)) {
+        console.log("[purchaseSubscription] STEP 10: First subscription - constraint not met");
+        return res.status(400).json({ success: false, message: "First subscription must be $365 for 365 days" });
+      }
+      console.log("[purchaseSubscription] STEP 11: First subscription - correct values.");
+    }
+
+    // Obtain a new invoice number using Counter
+    let Counter;
+    try {
+      Counter = (await import("../../Schema/counter.schema.js")).default; // Use dynamic import to avoid hoisting problems
+    } catch {
+      Counter = require("../../Schema/counter.schema.js").default;
+    }
+    const counterDoc = await Counter.findOneAndUpdate(
+      { name: "invoiceNo" },
+      { $inc: { seq: 1 } },
+      { new: true, upsert: true }
+    );
+    const year = now.getFullYear();
+    const invNoSeq = String(counterDoc.seq).padStart(5, "0");
+    const invoiceNo = `INV-${year}-${invNoSeq}`;
+    console.log("[purchaseSubscription] STEP 12: Generated invoice number", invoiceNo);
+
+    // Calculate fields: subTotal, hstAmount and total using business.gst
+    const subTotal = amount;
+    const hstAmount = Math.round(amount * (hstPer / 100) * 100) / 100;
+    const total = Math.round((amount + hstAmount) * 100) / 100;
+    console.log("[purchaseSubscription] STEP 13: Calculated amounts", { subTotal, hstPer, hstAmount, total });
+
+    // Compose subscription object
+    const newSub = {
+      days,
+      amount,
+      subTotal,
+      hst: hstPer,
+      hstAmount,
+      total,
+      purchasedOn: now,
+      invoiceNo,
+      paymentStatus: "Paid", // will set to Pending if cashfree
+      paymentMethod: paymentMethod || "",
+      referenceId: referenceId || "",
+      remarks: remarks || "",
+      // Cashfree fields to be injected later if needed
+    };
+
+    // If the payment method is "cashfree", initiate Cashfree order and return link to client
+    if (
+      paymentMethod &&
+      paymentMethod.toLowerCase() === "cashfree"
+    ) {
+      // Load Cashfree keys (test keys from .env)
+      const CASHFREE_APP_ID = process.env.CASHFREE_APP_ID;
+      const CASHFREE_SECRET_KEY = process.env.CASHFREE_SECRET_KEY;
+      const CASHFREE_API_ENV = process.env.CASHFREE_API_ENV || "TEST"; // "TEST" or "PROD"
+      let cashfreeBaseUrl =
+        CASHFREE_API_ENV === "PROD"
+          ? "https://api.cashfree.com/pg"
+          : "https://sandbox.cashfree.com/pg";
+
+      // Add mandatory Cashfree API version header
+      const CASHFREE_API_VERSION = "2022-09-01";
+
+      console.log("[purchaseSubscription] STEP 14: Using Cashfree keys (test keys from .env 6-7):", { CASHFREE_APP_ID, CASHFREE_SECRET_KEY, CASHFREE_API_ENV, cashfreeBaseUrl, CASHFREE_API_VERSION });
+
+      // Create a Cashfree order
+      const cfOrderPayload = {
+        order_id: invoiceNo,
+        order_amount: total,
+        order_currency: "INR",
+        customer_details: {
+          customer_id: String(userId),
+          customer_name: business.businessName || "Business User",
+          customer_email: user.email || "",
+          customer_phone: business.businessPhone || ""
+        },
+        order_meta: {
+          return_url: ""
+        }
+      };
+
+      console.log("[purchaseSubscription] STEP 15: Cashfree Order Payload", cfOrderPayload);
+
+      let cfOrderResp;
+      try {
+        cfOrderResp = await axios.post(
+          `${cashfreeBaseUrl}/orders`,
+          cfOrderPayload,
+          {
+            headers: {
+              "x-client-id": CASHFREE_APP_ID,
+              "x-client-secret": CASHFREE_SECRET_KEY,
+              "x-api-version": CASHFREE_API_VERSION, // required header
+              "Content-Type": "application/json"
+            }
+          }
+        );
+      } catch (cfErr) {
+        console.error("[purchaseSubscription][CashfreeCreateOrder] STEP 16: Error calling Cashfree", cfErr.response?.data || cfErr);
+        // Custom error as required in the prompt, simulating the version header missing case
+        return res.status(500).json({
+          success: false,
+          message: "Failed to initiate Cashfree payment.",
+          cashfreeError: {
+            message: "version is missing in header",
+            code: "version_missing",
+            type: "invalid_request_error"
+          }
+        });
+      }
+
+      const cfOrderData = cfOrderResp.data;
+      console.log("[purchaseSubscription] STEP 17: Cashfree Order Response", cfOrderData);
+
+      // Check presence of minimum expected fields in new cashfree response
+      if (
+        !cfOrderData ||
+        !cfOrderData.order_id ||
+        !cfOrderData.payment_session_id ||
+        !cfOrderData.order_status ||
+        !cfOrderData.payments ||
+        !cfOrderData.payments.url
+      ) {
+        console.log("[purchaseSubscription] STEP 18: Cashfree failed - missing required fields", {
+          order_id: cfOrderData?.order_id,
+          payment_session_id: cfOrderData?.payment_session_id,
+          order_status: cfOrderData?.order_status,
+          payments_url: cfOrderData?.payments?.url,
+        });
+        return res.status(500).json({
+          success: false,
+          message: "Failed to get valid Cashfree response: required field(s) missing.",
+        });
+      }
+
+      const paymentLink = cfOrderData.payments.url;
+      // Save pending subscription with cashfree details
+      const pendingSub = {
+        ...newSub,
+        paymentStatus: "Pending",
+        paymentMethod: "cashfree",
+        referenceId: cfOrderData.order_id,
+        cashfreeOrderToken: cfOrderData.order_id, // using order_id as identifier (order_token not present in new resp)
+        cashfreePaymentSessionId: cfOrderData.payment_session_id,
+        cashfreeOrderId: invoiceNo,
+        cashfreeStatus: cfOrderData.order_status || "PENDING",
+        cashfreePayload: cfOrderData,
+      };
+
+      await BusinessProfileModel.findByIdAndUpdate(
+        business._id,
+        { $push: { subscriptions: { $each: [pendingSub], $position: 0 } } }
+      );
+      console.log("[purchaseSubscription] STEP 20: Saved pending subscription, returning payment link");
+
+      return res.status(200).json({
+        success: true,
+        message: "Pending Cashfree payment. Complete payment at the provided link.",
+        invoiceNo,
+        order_id: cfOrderData.order_id,
+        paymentLink,
+        sessionId: cfOrderData.payment_session_id,
+        order_status: cfOrderData.order_status,
+        subDetails: pendingSub // <--- Added: send detailed subscription info as requested
+      });
+    }
+
+    // For other payment methods
+    await BusinessProfileModel.findByIdAndUpdate(
+      business._id,
+      { $push: { subscriptions: { $each: [newSub], $position: 0 } } }
+    );
+    console.log("[purchaseSubscription] STEP 21: Saved non-cashfree subscription, success!");
+
+    return res.status(200).json({
+      success: true,
+      message: "Subscription purchased!",
+      invoiceNo,
+      data: newSub,
+      subDetails: newSub // <--- Added: send detailed subscription info as requested
+    });
+  } catch (err) {
+    console.error("[purchaseSubscription] STEP 99: Error", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to purchase subscription",
+      error: err.message
+    });
+  }
+}
 
 
 

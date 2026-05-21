@@ -12,43 +12,77 @@ const teamMemberSchema = new Schema({
   isActive: { type: Boolean, default: true } // Active status of the team member
 });
 
-// SubService Selection Schema: Each subservice is referenced by ObjectId (since subservices are embedded in Services)
+// SubService Selection Schema
 const selectedSubServiceSchema = new Schema({
   name: { type: String, required: true },
   desc: { type: String },
   price: { type: Number }
 }, { _id: false });
 
-// MyService Schema: Each entry references a main Service, and contains selected sub-services as ObjectIds
+// MyService Schema
 const myServiceSchema = new Schema({
   service: { type: Types.ObjectId, ref: 'Services', required: true }, // Reference to Services collection
-  subServices: [selectedSubServiceSchema] // List of subService ObjectIds for this service
+  subServices: [selectedSubServiceSchema] // List of subService fields for this service
 }, { _id: false });
 
-// Rating Schema: UserId and rating value 
+// Rating Schema
 const ratingSchema = new Schema({
   userId: { type: Types.ObjectId, ref: 'User', required: true },
   rating: { type: Number, required: true, min: 1, max: 5 },
 }, { timestamps: true, _id: false });
 
-// Notification Schema: User Details, Message, Time
+// Notification Schema
 const notificationSchema = new Schema({
   user: { 
     type: Types.ObjectId, 
     ref: 'User',
     required: true 
-  }, // User details reference
+  },
   message: { 
     type: String, 
     required: true 
-  }, // Notification message
+  },
   time: { 
     type: Date, 
     default: Date.now 
-  } // Time the notification was created
+  }
 }, { _id: false });
 
-// Business Profile Schema
+// --- Subscription Schema ---
+/**
+ * Subscription details schema:
+ * - days: number of days for the subscription
+ * - amount: base amount (without tax)
+ * - subTotal: calculated as amount * qty (if any), or same as amount
+ * - hst: HST tax amount
+ * - total: grand total after taxes
+ * - purchasedOn: date when subscription was purchased
+ * - invoiceNo: string, resolved from Counter (see counter.schema.js: name="invoiceNo")
+ * - [other fields as needed, easily extendable]
+ */
+const subscriptionSchema = new Schema({
+  days: { type: Number, required: true },
+  amount: { type: Number, required: true },
+  subTotal: { type: Number, required: true },
+  hst: { type: Number, required: true },
+  hstAmount: { type: Number, required: true },
+  total: { type: Number, required: true },
+  purchasedOn: { type: Date, default: Date.now },
+  invoiceNo: { type: String, required: true }, // Example: "INV-2024-00001"
+  paymentStatus: { type: String, enum: ["Paid", "Pending", "Failed"], default: "Paid" },
+  paymentMethod: { type: String }, // e.g., "Credit Card", "Cash", "cashfree", etc.
+  referenceId: { type: String }, // e.g., payment reference/transaction id, also cashfree order_token if used
+  remarks: { type: String },
+
+  // Cashfree-specific fields (only filled if paymentMethod is "cashfree")
+  cashfreeOrderToken: { type: String }, // Cashfree's order_token
+  cashfreePaymentSessionId: { type: String }, // Cashfree's payment_session_id
+  cashfreeOrderId: { type: String }, // Cashfree's order_id (should match invoiceNo, but kept for clarity)
+  cashfreeStatus: { type: String }, // Last seen status (e.g. "PENDING", "ACTIVE", "PAID", etc.)
+  cashfreePayload: { type: Schema.Types.Mixed }, // For storing any response blob from Cashfree if needed
+}, { _id: false, timestamps: false });
+
+// --- Business Profile Schema ---
 const businessProfileSchema = new Schema({
   businessName: { type: String, required: true },
   businessAddress: { type: String, required: true },
@@ -56,45 +90,34 @@ const businessProfileSchema = new Schema({
   pincode: { type: String, required: true },
   businessMapLocation: {
     type: {
-      lat: { type: Number }, // Latitude
-      lng: { type: Number }  // Longitude
+      lat: { type: Number },
+      lng: { type: Number }
     },
     required: false
   },
   businessPhone: { type: String, required: true },
   businessEmail: { type: String, required: true },
   businessHSTNumber: { type: String },
-  gst: { type: Number }, // GST field added
-  openHours: { type: String },         // e.g., "08:00-20:00"
-  openDays: { type: [String] },        // e.g., ["Monday", "Tuesday", ...]
+  gst: { type: Number },
+
+  openHours: { type: String },
+  openDays: { type: [String] },
   closedDays: { type: [String] },
   teamMembers: [teamMemberSchema],
-  businessLogo: { type: String },      // URL or file path to the logo
-
-  // Add car companies this business works with
+  businessLogo: { type: String },
   carCompanies: [{ type: Types.ObjectId, ref: 'CarCompany' }],
-
-  // Business active status
   isBusinessActive: { type: Boolean, default: true },
 
-  // Nested myServices array, each containing a reference to a main service and selected subservices (nested like services schema)
   myServices: [myServiceSchema],
-
   serviceWeWorkWith: [{ type: Types.ObjectId, ref: 'Services' }],
-
-  // Ratings array: each rating with userId
   ratings: [ratingSchema],
-
-  // Add support for linking deals to this business profile
   myDeals: [{ type: Types.ObjectId, ref: "Deal" }],
-
-  // Notifications: Save notification - User Details, Message, Time
   notifications: [notificationSchema],
 
-  createdAt: {
-    type: Date,
-    default: Date.now
-  }
+  // Subscription details (most recent/current subscription at index 0, or push new on renewal)
+  subscriptions: [subscriptionSchema],
+
+  createdAt: { type: Date, default: Date.now }
 }, { timestamps: true });
 
 const BusinessProfileModel = mongoose.model("BusinessProfile", businessProfileSchema);
