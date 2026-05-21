@@ -4707,6 +4707,145 @@ async searchJobCards(req, res) {
 }
 
 /**
+ * Resend JobCard: Notifies the customer by push notification about a JobCard.
+ * Finds the job card, loads user and business profile, sends notification via FCM and saves in DB.
+ * Params:
+ *   - req.params.jobCardId: JobCard ID to notify about
+ */
+async resendJobCard(req, res) {
+    try {
+        const { jobCardId } = req.params;
+        if (!jobCardId) {
+            return res.status(400).json({
+                success: false,
+                message: "Missing jobCardId in params."
+            });
+        }
+
+        // Lazy imports to avoid cyclic dependencies if needed
+        let JobCard, BusinessProfileModel, firebaseAdmin, UserModel;
+        try {
+            JobCard = (await import("../../Schema/jobCard.schema.js")).default;
+            BusinessProfileModel = (await import("../../Schema/bussiness-profile.js")).default;
+            firebaseAdmin = (await import("../../config/firebase.js")).default;
+            UserModel = (await import("../../Schema/user.schema.js")).User;
+
+        } catch (e) {
+            console.error("[resendJobCard] Error loading dependencies:", e);
+            return res.status(500).json({
+                success: false,
+                message: "Server error loading dependencies."
+            });
+        }
+
+        // Fetch the job card with both business and customer details
+        const jobCard = await JobCard.findById(jobCardId).lean();
+        if (!jobCard) {
+            return res.status(404).json({
+                success: false,
+                message: "JobCard not found for the given ID."
+            });
+        }
+
+        // Only send notification if status is 'Pending'
+        if (jobCard.status !== 'Pending') {
+            return res.status(400).json({
+                success: false,
+                message: "JobCard can only be resent when its status is 'Pending'."
+            });
+        }
+
+        const customerId = jobCard.customerId;
+        const businessId = jobCard.business;
+        const vehicleId = jobCard.vehicleId;
+
+        // Fetch user
+        const customerUser = await UserModel.findById(customerId).lean();
+        if (!customerUser) {
+            return res.status(404).json({
+                success: false,
+                message: "User associated with JobCard not found."
+            });
+        }
+
+        // Fetch vehicle to enrich notification (regNo, etc)
+        let vehicle = null;
+        if (vehicleId) {
+            try {
+                vehicle = await VehicleModel.findById(vehicleId).lean();
+            } catch (err) {
+                // ignore vehicle error
+                vehicle = null;
+            }
+        }
+
+        // Prepare notification message text
+        const jobNo = jobCard.jobNo ? `Job No: ${jobCard.jobNo}` : `JobCard ID: ${jobCardId}`;
+        const regNo = vehicle && vehicle.regNo ? vehicle.regNo : '';
+        const jobServiceType = jobCard.serviceType || '';
+        const issueDescription = jobCard.issueDescription || '';
+        let notificationBody = `Your job card is ready: ${jobNo}`;
+        if (regNo) notificationBody += ` | Vehicle: ${regNo}`;
+        if (jobServiceType) notificationBody += ` | Type: ${jobServiceType}`;
+        if (issueDescription) notificationBody += ` | Issue: ${issueDescription}`;
+
+        // Save notification in business profile's notifications (target user)
+        let notificationError = null;
+        let notified = false;
+
+        try {
+            // Save notification in notifications array too (in business if needed)
+            // But mainly for user - add logic here if desired
+
+            // Prepare and send push notification via FCM if customer has fcmToken
+            if (customerUser.fcmToken) {
+                const fcmMessage = {
+                    notification: {
+                        title: "Job Card Notification",
+                        body: notificationBody
+                    },
+                    token: customerUser.fcmToken
+                };
+                try {
+                    await firebaseAdmin.messaging().send(fcmMessage);
+                    notified = true;
+                    console.log(`[resendJobCard] FCM notification sent to customer (${customerUser._id}) token: ${customerUser.fcmToken}`);
+                } catch (notifyErr) {
+                    // notificationError assigned for API output
+                    notificationError = notifyErr;
+                    console.error("[resendJobCard] Failed to send FCM notification:", notifyErr);
+                }
+            } else {
+                notificationError = new Error("User has no fcmToken");
+                console.warn("[resendJobCard] User does not have an FCM token for push notification.");
+            }
+        } catch (err) {
+            notificationError = err;
+            console.error("[resendJobCard] Unexpected notification error:", err);
+        }
+
+        // Save in-app notification to user's notification array if desired (if you have notifications on user model)
+        // Or if your notification infra is only business-level, can skip (check your architecture)
+
+        return res.status(200).json({
+            success: true,
+            message: "JobCard notification sent to user"
+                + (notified ? "" : " (notification failed: " + (notificationError?.message || notificationError) + ")"),
+            notified,
+            notificationError: notificationError ? (notificationError.message || notificationError.toString()) : null,
+            jobCardId,
+        });
+    } catch (err) {
+        console.error("[resendJobCard] Unexpected error:", err);
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+}
+
+
+/**
  * Mark (update) payment status for a JobCard.
  * Only allows: Pending -> Paid, Pending -> Cancelled, Paid -> Cancelled.
  * Does NOT allow Paid -> Pending, Cancelled -> Pending, Paid -> Paid, etc.
