@@ -449,6 +449,12 @@ autoShopRouter.get(
 );
 
 
+// Route to purchase/renew business profile subscription
+autoShopRouter.post(
+  "/purchase-subscription",
+  jwtAuth,
+  (req, res) => autoShopController.purchaseSubscription(req, res)
+);
 
 
 

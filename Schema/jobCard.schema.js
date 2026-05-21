@@ -79,7 +79,7 @@ const JobCardSchema = new Schema({
     labourDuration: { type: String }, // Labour duration for the job
     status: {
         type: String,
-        enum: ['Pending', 'Approved', 'Rejected'],
+        enum: ['Pending', 'Approved', 'Rejected', 'AutoRejected'],
         default: 'Pending',
         description: 'Stores if the job card is approved from customer or not'
     },

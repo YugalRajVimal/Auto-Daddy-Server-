@@ -1212,6 +1212,17 @@ class UserController {
                 baseFilter.vehicleId = vehicleId.trim();
             }
 
+            // --- Auto-reject job cards that have been pending for more than 2 hours ---
+            const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+            await JobCard.updateMany(
+                {
+                    ...baseFilter,
+                    status: "Pending",
+                    createdAt: { $lt: twoHoursAgo }
+                },
+                { $set: { status: "AutoRejected" } }
+            );
+
             const vehiclePopulate = { 
                 path: 'vehicleId', 
                 model: 'Vehicle', 
@@ -1232,7 +1243,7 @@ class UserController {
             ];
 
             // Find job cards separated by status (filtered by vehicle if provided)
-            const statusList = ['Pending', 'Approved', 'Rejected'];
+            const statusList = ['Pending', 'Approved', 'Rejected', 'AutoRejected'];
             const jobCardPromises = statusList.map(async status => (
                 JobCard.find({ ...baseFilter, status })
                     .populate([businessPopulate, vehiclePopulate])
@@ -1264,14 +1275,15 @@ class UserController {
                     )
             ));
 
-            const [pendingJobCards, approvedJobCards, rejectedJobCards] = await Promise.all(jobCardPromises);
+            const [pendingJobCards, approvedJobCards, rejectedJobCards, autoRejectedJobCards] = await Promise.all(jobCardPromises);
 
             return res.status(200).json({
                 success: true,
                 data: {
                     pending: pendingJobCards,
                     approved: approvedJobCards,
-                    rejected: rejectedJobCards
+                    rejected: rejectedJobCards,
+                    autoRejected: autoRejectedJobCards
                 }
             });
         } catch (error) {
