@@ -373,7 +373,9 @@ class AuthController {
 
       // Generate JWT
       const tokenPayload = { id: user._id };
-      const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "1d" });
+      const token = jwt.sign(tokenPayload, process.env.JWT_SECRET);
+ 
+ 
 
       await ExpiredTokenModel.create({
         token,
@@ -782,6 +784,7 @@ class AuthController {
       };
 
       const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "1d" });
+ 
 
       // NOTE: Do NOT log tokens for admin into ExpiredTokenModel at creation time (that would immediately revoke),
       // only mark them expired on signout. So this is omitted here.

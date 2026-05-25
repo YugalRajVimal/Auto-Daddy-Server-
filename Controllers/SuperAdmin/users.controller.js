@@ -56,7 +56,7 @@ async loginAsUser(req, res) {
         };
 
         // Set token to expire in 1 day
-        const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "1d" });
+        const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "30d" });
 
         // Optionally store the token and expiry in ExpiredTokenModel (as in auth controller)
         // await ExpiredTokenModel.create({
