@@ -10,6 +10,8 @@ const app = express();
 
 const allowedOrigins = [
   "http://localhost:5173", // Vite
+  "http://localhost:5174", // Vite
+
   "http://localhost:3000", // optional
   "https://auto-daddy-admin.onrender.com",
   "https://www.auto-daddy-admin.onrender.com",
