@@ -131,7 +131,6 @@ class AutoShopController {
             }
 
             // Prepare business user details according to schema/user.schema.js (1-70)
-            // Including: name, email, countryCode, phone, pincode, address, profilePhoto, isDisabled, isProfileComplete
             const businessUserDetails = {
                 name: user.name || null,
                 email: user.email || null,
@@ -145,10 +144,24 @@ class AutoShopController {
                 // Optionally add any other "business user" fields needed here from user.schema.js
             };
 
-            // Fetch business profile (with GST AND subscriptions for subscriptionDaysLeftCount)
+            // Fetch business profile with additional fields as per request
             const businessProfile = await BusinessProfileModel.findById(
                 user.businessProfile,
-                "businessName businessPhone isBusinessActive gst subscriptions"
+                [
+                    // Core
+                    "businessName",
+                    "businessPhone",
+                    "isBusinessActive",
+                    "gst",
+                    "subscriptions",
+                    // Additional requested
+                    "businessMapLocation",
+                    "city",
+                    "openHours",
+                    "openDays",
+                    "closedDays",
+                    "myServices"
+                ].join(" ")
             ).lean();
             if (!businessProfile) {
                 return res.status(404).json({ message: "Business profile not found." });
@@ -157,6 +170,61 @@ class AutoShopController {
             const businessName = businessProfile.businessName || null;
             const businessContactNo = businessProfile.businessPhone || null;
             const idBusinessActive = businessProfile.isBusinessActive || null;
+            const city = businessProfile.city || null;
+
+            // --- Add lat long
+            let businessLat = null, businessLng = null;
+            if (
+                businessProfile.businessMapLocation &&
+                typeof businessProfile.businessMapLocation === "object"
+            ) {
+                businessLat = businessProfile.businessMapLocation.lat || null;
+                businessLng = businessProfile.businessMapLocation.lng || null;
+            }
+
+            // --- Handle openHours, openDays, closedDays
+            const openHours = businessProfile.openHours || null;
+            const openDays = Array.isArray(businessProfile.openDays) ? businessProfile.openDays : null;
+            const closedDays = Array.isArray(businessProfile.closedDays) ? businessProfile.closedDays : null;
+
+            // --- Business services (need to populate .myServices[].service for name, desc from Services)
+            let services = [];
+            if (Array.isArray(businessProfile.myServices) && businessProfile.myServices.length > 0) {
+                // Populate service ref fields by querying Services schema
+                // @services.schema.js (1-10)
+                const serviceIds = businessProfile.myServices.map(s => s.service).filter(s => !!s);
+                let serviceDocs = [];
+                if (serviceIds.length > 0) {
+                    // Use distinct to avoid duplicate queries
+                    const uniqueServiceIds = [...new Set(serviceIds.map(id => id.toString()))];
+                    serviceDocs = await Services.find({
+                        _id: { $in: uniqueServiceIds }
+                    }).select("name desc").lean();
+                }
+                // Map serviceId => doc for lookup
+                const servicesById = {};
+                for (const doc of serviceDocs) {
+                    servicesById[doc._id.toString()] = doc;
+                }
+                // Compose output array with name, desc, any subService
+                services = businessProfile.myServices.map(ms => {
+                    const sid = ms.service?.toString?.();
+                    const serviceDoc = sid && servicesById[sid] ? servicesById[sid] : {};
+                    return {
+                        id: sid || null,
+                        name: serviceDoc.name || null,
+                        desc: serviceDoc.desc || null,
+                        // Optionally attach sub-services (with name/desc/price)
+                        subServices: Array.isArray(ms.subServices)
+                            ? ms.subServices.map(ss => ({
+                                  name: ss.name || null,
+                                  desc: ss.desc || null,
+                                  price: typeof ss.price === 'number' ? ss.price : null
+                              }))
+                            : []
+                    }
+                });
+            }
 
             // Get the GST rate if exists and is numeric, else 0
             let businessGst = 0;
@@ -375,6 +443,13 @@ class AutoShopController {
                 businessName,
                 businessContactNo,
                 idBusinessActive,
+                city,
+                latitude: businessLat,
+                longitude: businessLng,
+                openHours,
+                openDays,
+                closedDays,
+                services,
                 incomeOverview,
                 subscriptionDaysLeftCount,
                 thoughtOfTheDay,
@@ -383,7 +458,7 @@ class AutoShopController {
                 FAQs,
                 Documents,
                 Disclaimer,
-                businessUserDetails // <-- Added to output
+                businessUserDetails
             });
 
         } catch (error) {
