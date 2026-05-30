@@ -167,9 +167,10 @@ class AutoShopController {
                 return res.status(404).json({ message: "Business profile not found." });
             }
 
+            console.log(businessProfile)
+
             const businessName = businessProfile.businessName || null;
             const businessContactNo = businessProfile.businessPhone || null;
-            const idBusinessActive = businessProfile.isBusinessActive || null;
             const city = businessProfile.city || null;
 
             // --- Add lat long
@@ -442,7 +443,7 @@ class AutoShopController {
                 success: true,
                 businessName,
                 businessContactNo,
-                idBusinessActive,
+                idBusinessActive:businessProfile.isBusinessActive,
                 city,
                 latitude: businessLat,
                 longitude: businessLng,

@@ -12,7 +12,7 @@ const dashboardDataSchema = new mongoose.Schema({
   aboutUs: {
     heading: {
       type: String,
-      default: 'About Our Auto Shop'
+      default: 'Shop Overview'
     },
     desc: {
       type: String,
