@@ -82,6 +82,17 @@ const subscriptionSchema = new Schema({
   cashfreePayload: { type: Schema.Types.Mixed }, // For storing any response blob from Cashfree if needed
 }, { _id: false, timestamps: false });
 
+// --- PerDayHours Schema ---
+/**
+ * For each day, specify open/close time and optionally if it's closed.
+ */
+const perDayTimingSchema = new Schema({
+  day: { type: String, required: true }, // e.g., "Monday"
+  open: { type: String }, // e.g., "09:00"
+  close: { type: String }, // e.g., "18:00"
+  isClosed: { type: Boolean, default: false } // true if business is closed this day
+}, { _id: false });
+
 // --- Business Profile Schema ---
 const businessProfileSchema = new Schema({
   businessName: { type: String, required: true },
@@ -100,11 +111,12 @@ const businessProfileSchema = new Schema({
   businessHSTNumber: { type: String },
   gst: { type: Number },
 
-  openHours: { type: String },
-  openDays: { type: [String] },
-  closedDays: { type: [String] },
+  // Remove old openHours, openDays, closedDays; use perDayOpenHours instead
+  perDayOpenHours: { type: [perDayTimingSchema], default: [] },
+
   teamMembers: [teamMemberSchema],
   businessLogo: { type: String },
+  bannerImage: { type: String }, // URL or file path to the banner image
   carCompanies: [{ type: Types.ObjectId, ref: 'CarCompany' }],
   isBusinessActive: { type: Boolean, default: true },
 

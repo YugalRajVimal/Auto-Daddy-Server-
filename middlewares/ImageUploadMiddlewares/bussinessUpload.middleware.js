@@ -17,6 +17,7 @@ export const businessAndTeamUploadMiddleware = (req, res, next) => {
     { name: "businessLogo", maxCount: 1 },
     { name: "teamMemberPhoto", maxCount: 1 },
     { name: "productImage", maxCount: 1 },
+    { name: "bannerImage", maxCount: 1 },
     { name: "vehiclePhotos", maxCount: 5 }
   ])(req, res, (err) => {
     if (err instanceof multer.MulterError) {
