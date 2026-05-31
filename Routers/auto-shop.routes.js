@@ -16,6 +16,7 @@ import jwtAuth from "../middlewares/Auth/auth.middleware.js";
 import { upload } from "../middlewares/ImageUploadMiddlewares/fileUpload.middleware.js";
 import { businessAndTeamUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/bussinessUpload.middleware.js";
 import { dealUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/dealUpload.middleware.js";
+import { onboardCarOwnerUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/onboardCustomerImageUpload.middleware.js";
 
 
 // Route to get dashboard details for the autoshopowner (protected, requires JWT)
@@ -146,9 +147,11 @@ autoShopRouter.get(
 
 
 // Route to onboard (create) a new car owner from the auto shop panel (by the autoshop owner)
+
 autoShopRouter.post(
   "/onboard-carowner",
   jwtAuth,
+  onboardCarOwnerUploadMiddleware,
   (req, res) => autoShopController.onboardCarOwner(req, res)
 );
 
@@ -156,6 +159,7 @@ autoShopRouter.post(
 autoShopRouter.put(
   "/my-customers",
   jwtAuth,
+  onboardCarOwnerUploadMiddleware,
   (req, res) => autoShopController.editCustomer(req, res)
 );
 

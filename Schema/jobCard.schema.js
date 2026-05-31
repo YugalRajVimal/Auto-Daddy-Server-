@@ -9,7 +9,7 @@ const { Schema, Types } = mongoose;
  * - issueDescription: String
  * - serviceType: Enum (Repair, Maintenance, Inspection)
  * - priorityLevel: Enum (Normal, Urgent)
- * - services: Array of { id: ObjectId (Service), subServices: [{ id: ObjectId (subService), price: Number }] }
+ * - services: Array of { id: ObjectId (Service), subServices: [{ id: ObjectId (subService), price: Number, labourCharge: Number, labourDuration: String }] }
  * - additionalNotes: String
  * - vehiclePhotos: Array of file paths or URLs (multiple vehicle photos)
  * - technicalRemarks: String
@@ -23,6 +23,8 @@ const selectedSubServiceSchema = new Schema({
   name: { type: String, required: true },
   desc: { type: String },
   price: { type: Number },
+  labourCharge: { type: Number }, // Added individual labourCharge for subService
+  labourDuration: { type: String }, // Added individual labourDuration for subService
 }, { _id: false });
 
 const jobServiceSchema = new Schema({
@@ -90,6 +92,11 @@ const JobCardSchema = new Schema({
         index: true,
         description: 'Auto-incremented job number in format like J00001'
     }, // Unique Job Number (to be generated on creation)
+images: {
+    type: [String],
+    default: [],
+    validate: [arr => arr.length <= 5, '{PATH} exceeds the limit of 5 images']
+}, // Array of up to 5 image URLs or file paths
 }, { timestamps: true });
 
 const JobCard = mongoose.model("JobCard", JobCardSchema);
