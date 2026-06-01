@@ -17,6 +17,7 @@ import CarCompany from "../../Schema/car-company-schema.js";
 import axios from "axios";
 
 
+
 class AutoShopController {
 
 
@@ -676,7 +677,7 @@ class AutoShopController {
                 businessPhone,
                 businessEmail,
                 businessHSTNumber,
-                openHours,
+                openHours, // per-day timings
                 serviceWeWorkWith,
                 lat,
                 lng,
@@ -709,54 +710,63 @@ class AutoShopController {
                 return res.status(400).json({ message: "gst must be a number." });
             }
 
-            // ----- NEW: openHours with per-day timings -----
+            // Save openHours as perDayOpenHours, like in @auto-shop.controller.js (879-1146)
             const WEEK_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+            let perDayOpenHoursClean;
 
-            // Parse openHours from string if necessary
-            if (typeof openHours === "string") {
-                try {
-                    openHours = JSON.parse(openHours);
-                } catch {
+            // Parse openHours - flexible format support, as in editBusinessProfile
+            if (openHours !== undefined) {
+                if (typeof openHours === "string") {
+                    // Try parsing as JSON
+                    try {
+                        openHours = JSON.parse(openHours);
+                    } catch (e) {
+                        if (
+                            openHours.trim().startsWith('[') &&
+                            openHours.trim().indexOf("{") > -1
+                        ) {
+                            try {
+                                openHours = JSON.parse(openHours);
+                            } catch (e2) {
+                                if (req.files) deleteUploadedFiles(req.files);
+                                return res.status(400).json({ message: "Invalid openHours JSON format." });
+                            }
+                        } else {
+                            if (req.files) deleteUploadedFiles(req.files);
+                            return res.status(400).json({ message: "Invalid openHours format: Not JSON and not parsable." });
+                        }
+                    }
+                }
+                if (!Array.isArray(openHours)) {
                     if (req.files) deleteUploadedFiles(req.files);
-                    return res.status(400).json({ message: "Invalid openHours JSON format." });
+                    return res.status(400).json({ message: "openHours must be an array, with each day as an object with timings." });
+                }
+                // Validate and clean perDayOpenHours
+                perDayOpenHoursClean = [];
+                for (const item of openHours) {
+                    if (!item || typeof item !== "object" || typeof item.day !== "string") {
+                        if (req.files) deleteUploadedFiles(req.files);
+                        return res.status(400).json({ message: "Each entry in openHours must be an object with 'day', 'open', and 'close' properties." });
+                    }
+                    const { day, open, close } = item;
+                    if (!WEEK_DAYS.includes(day)) {
+                        if (req.files) deleteUploadedFiles(req.files);
+                        return res.status(400).json({ message: `Invalid day in openHours: "${day}". Allowed: ${WEEK_DAYS.join(", ")}` });
+                    }
+                    if (
+                        typeof open !== "string" ||
+                        typeof close !== "string" ||
+                        !open.match(/^\d{2}:\d{2}$/) ||
+                        !close.match(/^\d{2}:\d{2}$/)
+                    ) {
+                        if (req.files) deleteUploadedFiles(req.files);
+                        return res.status(400).json({
+                            message: `Invalid open or close time for ${day}. Required "HH:MM" string format.`
+                        });
+                    }
+                    perDayOpenHoursClean.push({ day, open, close });
                 }
             }
-
-            // openHours must be an array of objects: [{ day: "Monday", open: "09:00", close: "17:00" }, ...]
-            if (!Array.isArray(openHours)) {
-                if (req.files) deleteUploadedFiles(req.files);
-                return res.status(400).json({ message: "openHours must be an array, with each day as an object with timings." });
-            }
-
-            // Validate each openHours entry and build openDays/closedDays using its content
-            const openDaysSet = new Set();
-            const openHoursClean = [];
-            for (const item of openHours) {
-                // Each item must contain day, open, close
-                if (!item || typeof item !== "object") continue;
-                const { day, open, close } = item;
-                if (!WEEK_DAYS.includes(day)) {
-                    if (req.files) deleteUploadedFiles(req.files);
-                    return res.status(400).json({ message: `Invalid day in openHours: "${day}". Allowed: ${WEEK_DAYS.join(", ")}` });
-                }
-                if (
-                    typeof open !== "string" ||
-                    typeof close !== "string" ||
-                    !open.match(/^\d{2}:\d{2}$/) ||
-                    !close.match(/^\d{2}:\d{2}$/)
-                ) {
-                    if (req.files) deleteUploadedFiles(req.files);
-                    return res.status(400).json({
-                        message: `Invalid open or close time for ${day}. Required "HH:MM" string format.`
-                    });
-                }
-                openDaysSet.add(day);
-                openHoursClean.push({ day, open, close });
-            }
-
-            // Final openDays and closedDays arrays
-            const openDays = Array.from(openDaysSet);
-            const closedDays = WEEK_DAYS.filter(d => !openDaysSet.has(d));
 
             // Validate and parse serviceWeWorkWith
             if (typeof serviceWeWorkWith === "string") {
@@ -816,7 +826,7 @@ class AutoShopController {
                     businessMapLocation = undefined;
             }
 
-            // This is the actual object we'll persist to DB
+            // Business profile document to persist - use perDayOpenHours!
             const businessProfileDoc = {
                 businessName,
                 businessAddress,
@@ -826,9 +836,7 @@ class AutoShopController {
                 businessPhone,
                 businessEmail,
                 businessHSTNumber,
-                openHours: openHoursClean,
-                openDays,
-                closedDays,
+                perDayOpenHours: perDayOpenHoursClean, // Note: this is where we now store daily hours!
                 businessLogo,
                 bannerImage,
                 gst,
@@ -881,6 +889,10 @@ class AutoShopController {
      * Edit (update) business profile for autoshopowner.
      * Only allows editing of certain fields: (cannot edit name or HST number)
      * Each day in openHours array will have its own timings.
+     /**
+     * Edit (update) business profile for autoshopowner.
+     * Only allows editing of certain fields: (cannot edit name or HST number)
+     * Each day in perDayOpenHours array will have its own timings.
      */
     async editBusinessProfile(req, res) {
         let filesToDelete = [];
@@ -890,6 +902,7 @@ class AutoShopController {
             // Validate user authentication
             if (!userId) {
                 if (req.files) deleteUploadedFiles(req.files);
+                console.log("[editBusinessProfile] Unauthorized: userId missing from auth context.");
                 return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
             }
 
@@ -897,17 +910,20 @@ class AutoShopController {
             const user = await User.findById(userId);
             if (!user) {
                 if (req.files) deleteUploadedFiles(req.files);
+                console.log(`[editBusinessProfile] User not found for userId: ${userId}`);
                 return res.status(404).json({ message: "User not found." });
             }
 
             if (user.role !== "autoshopowner") {
                 if (req.files) deleteUploadedFiles(req.files);
+                console.log(`[editBusinessProfile] Forbidden: User role is not 'autoshopowner', got: ${user.role}`);
                 return res.status(403).json({ message: "Only users with role 'autoshopowner' can edit a business profile." });
             }
 
             // Must have an existing business profile
             if (!user.businessProfile) {
                 if (req.files) deleteUploadedFiles(req.files);
+                console.log(`[editBusinessProfile] Business profile not found for userId: ${userId}`);
                 return res.status(404).json({ message: "Business profile not found." });
             }
 
@@ -915,6 +931,7 @@ class AutoShopController {
             let businessProfile = await BusinessProfileModel.findById(user.businessProfile);
             if (!businessProfile) {
                 if (req.files) deleteUploadedFiles(req.files);
+                console.log(`[editBusinessProfile] Business profile document not found for id: ${user.businessProfile}`);
                 return res.status(404).json({ message: "Business profile not found." });
             }
 
@@ -947,38 +964,57 @@ class AutoShopController {
             }
             if (gst !== undefined && typeof gst !== "number") {
                 if (req.files) deleteUploadedFiles(req.files);
+                console.log("[editBusinessProfile] Invalid GST: Not a number.", gst);
                 return res.status(400).json({ message: "gst must be a number." });
             }
 
-            // ------- NEW: openHours per day validation and calculation ---------
+            // ------- openHours flexible validation (array or JSON string or week array string) ---------
             const WEEK_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-
-            // Parse openHours if necessary
-            let openHoursClean, openDays, closedDays, openDaysSet;
+            let perDayOpenHoursClean;
             if (openHours !== undefined) {
-                // Parse if string
+                // Accept format: array or string (JSON or custom days array string)
                 if (typeof openHours === "string") {
+                    // Try parsing as JSON
                     try {
                         openHours = JSON.parse(openHours);
-                    } catch {
-                        if (req.files) deleteUploadedFiles(req.files);
-                        return res.status(400).json({ message: "Invalid openHours JSON format." });
+                    } catch (e) {
+                        // Try: does it look like an array string with objects
+                        if (
+                            openHours.trim().startsWith('[') &&
+                            openHours.trim().indexOf("{") > -1
+                        ) {
+                            try {
+                                openHours = JSON.parse(openHours);
+                            } catch (e2) {
+                                if (req.files) deleteUploadedFiles(req.files);
+                                console.log("[editBusinessProfile] Invalid openHours JSON format. Error:", e2);
+                                return res.status(400).json({ message: "Invalid openHours JSON format." });
+                            }
+                        } else {
+                            // Not parsable
+                            if (req.files) deleteUploadedFiles(req.files);
+                            console.log("[editBusinessProfile] Invalid openHours format: Not JSON and not parsable.");
+                            return res.status(400).json({ message: "Invalid openHours format." });
+                        }
                     }
                 }
-                // Validation
+                // Now it should be an array
                 if (!Array.isArray(openHours)) {
                     if (req.files) deleteUploadedFiles(req.files);
-                    return res.status(400).json({ message: "openHours must be an array, with each day as an object with timings." });
+                    console.log("[editBusinessProfile] openHours is not an array after parse.", openHours);
+                    return res.status(400).json({ message: "openHours must be an array of objects with keys: day, open, close" });
                 }
-                openDaysSet = new Set();
-                openHoursClean = [];
+                perDayOpenHoursClean = [];
                 for (const item of openHours) {
                     if (!item || typeof item !== "object") continue;
                     const { day, open, close } = item;
+                    // Validate day
                     if (!WEEK_DAYS.includes(day)) {
                         if (req.files) deleteUploadedFiles(req.files);
+                        console.log(`[editBusinessProfile] Invalid day in openHours: "${day}"`);
                         return res.status(400).json({ message: `Invalid day in openHours: "${day}". Allowed: ${WEEK_DAYS.join(", ")}` });
                     }
+                    // Validate open/close: must be "HH:MM" string
                     if (
                         typeof open !== "string" ||
                         typeof close !== "string" ||
@@ -986,15 +1022,16 @@ class AutoShopController {
                         !close.match(/^\d{2}:\d{2}$/)
                     ) {
                         if (req.files) deleteUploadedFiles(req.files);
+                        console.log(`[editBusinessProfile] Invalid open/close time for day "${day}". open:`, open, "close:", close);
                         return res.status(400).json({
                             message: `Invalid open or close time for ${day}. Required "HH:MM" string format.`
                         });
                     }
-                    openDaysSet.add(day);
-                    openHoursClean.push({ day, open, close });
+                    perDayOpenHoursClean.push({ day, open, close });
                 }
-                openDays = Array.from(openDaysSet);
-                closedDays = WEEK_DAYS.filter(d => !openDaysSet.has(d));
+
+                // Print perDayOpenHours after cleaning/validation
+                console.log("[editBusinessProfile] perDayOpenHours (parsed/validated):", JSON.stringify(perDayOpenHoursClean, null, 2));
             }
 
             // Parse and validate serviceWeWorkWith field if present
@@ -1013,10 +1050,12 @@ class AutoShopController {
                 }
                 if (!Array.isArray(serviceWeWorkWith)) {
                     if (req.files) deleteUploadedFiles(req.files);
+                    console.log("[editBusinessProfile] serviceWeWorkWith is not array after parse:", serviceWeWorkWith);
                     return res.status(400).json({ message: "serviceWeWorkWith must be an array of service IDs." });
                 }
                 if (serviceWeWorkWith.some(id => typeof id !== "string" || !id.match(/^[a-f\d]{24}$/i))) {
                     if (req.files) deleteUploadedFiles(req.files);
+                    console.log("[editBusinessProfile] Invalid ObjectId in serviceWeWorkWith:", serviceWeWorkWith);
                     return res.status(400).json({ message: "Each entry in serviceWeWorkWith must be a valid ObjectId string." });
                 }
             }
@@ -1031,6 +1070,7 @@ class AutoShopController {
             ) {
                 businessLogo = req.files.businessLogo[0].path;
                 filesToDelete.push(req.files.businessLogo[0]);
+                console.log("[editBusinessProfile] Uploaded/updated businessLogo:", businessLogo);
             }
 
             // Handle bannerImage (multer upload, allow replacement)
@@ -1043,8 +1083,10 @@ class AutoShopController {
             ) {
                 bannerImage = req.files.bannerImage[0].path;
                 filesToDelete.push(req.files.bannerImage[0]);
+                console.log("[editBusinessProfile] Uploaded/updated bannerImage:", bannerImage);
             } else if (typeof req.body.bannerImage === "string") {
                 bannerImage = req.body.bannerImage;
+                console.log("[editBusinessProfile] bannerImage string in body:", bannerImage);
             }
 
             // Prepare map location (overwrites prev if either lat/lng given)
@@ -1057,6 +1099,7 @@ class AutoShopController {
                 if (latDefined) businessMapLocation.lat = lat;
                 if (lngDefined) businessMapLocation.lng = lng;
                 if (Object.keys(businessMapLocation).length === 0) businessMapLocation = undefined;
+                console.log("[editBusinessProfile] Updated businessMapLocation:", businessMapLocation);
             }
 
             // Prepare update object (only allowed fields)
@@ -1068,14 +1111,12 @@ class AutoShopController {
             if (latDefined || lngDefined) updateData.businessMapLocation = businessMapLocation;
             if (businessPhone !== undefined) updateData.businessPhone = businessPhone;
             if (businessEmail !== undefined) updateData.businessEmail = businessEmail;
-            // Per-day openHours and days
+            // Use perDayOpenHours according to @file_context_0 schema
             if (openHours !== undefined) {
-                updateData.openHours = openHoursClean; // validated and cleaned above
-                updateData.openDays = openDays;
-                updateData.closedDays = closedDays;
+                updateData.perDayOpenHours = perDayOpenHoursClean;
             }
             if (businessLogo !== undefined) updateData.businessLogo = businessLogo;
-            if (bannerImage !== undefined) updateData.bannerImage = bannerImage; // <-- new field
+            if (bannerImage !== undefined) updateData.bannerImage = bannerImage;
             if (gst !== undefined) updateData.gst = gst;
             if (serviceWeWorkWith !== undefined) updateData.serviceWeWorkWith = serviceWeWorkWith;
 
@@ -1089,6 +1130,8 @@ class AutoShopController {
 
             await session.commitTransaction();
             session.endSession();
+
+            console.log("[editBusinessProfile] Business profile updated for userId:", userId, "Updated fields:", Object.keys(updateData));
 
             return res.status(200).json({
                 success: true,
@@ -1105,6 +1148,7 @@ class AutoShopController {
             }
             if (req.files) deleteUploadedFiles(req.files);
 
+            console.error("[editBusinessProfile] Error:", error);
             return res.status(500).json({ message: "Internal Server Error" });
         }
     }
@@ -1994,347 +2038,624 @@ async fetchCarCompanies(req, res) {
  * Onboard car owner: uploads profile photo (optional) and vehicle images (optional).
  * Cleans up files if onboarding fails at any stage.
  */
+// onboardCarOwner = async (req, res) => {
+//     let uploadedProfilePhoto = null;
+//     let uploadedVehicleImagePaths = [];
+
+//     // Use mongoose transaction/session
+
+//     const session = await mongoose.startSession();
+//     session.startTransaction();
+
+//     try {
+//         const {
+//             name,
+//             email,
+//             phone,
+//             countryCode,
+//             pincode,
+//             role,
+//             address,
+//             vehicles // Expect an array of vehicle objects or undefined
+//         } = req.body;
+
+//         // Parse vehicles from JSON if sent as a string (common in multipart/form-data with file upload)
+//         let vehiclesArray = vehicles;
+//         if (typeof vehicles === "string") {
+//             try {
+//                 vehiclesArray = JSON.parse(vehicles);
+//             } catch (e) {
+//                 vehiclesArray = undefined;
+//             }
+//         }
+
+//         // Only require main fields for car owner, NOT vehicle
+//         if (
+//             !name ||
+//             !email ||
+//             !phone ||
+//             !countryCode ||
+//             !pincode ||
+//             !role ||
+//             !address
+//         ) {
+//             // Delete uploaded profilePhoto and all uploaded vehicleImages if any
+//             if (req.file?.path) await deleteUploadedFile(req.file.path);
+//             if (req.files && Array.isArray(req.files["carImages"])) {
+//                 for (const file of req.files["carImages"]) {
+//                     if (file?.path) await deleteUploadedFile(file.path);
+//                 }
+//             }
+//             await session.abortTransaction();
+//             session.endSession();
+//             return res.status(400).json({
+//                 message: "All owner fields (name, email, phone, countryCode, pincode, role, address) are required.",
+//             });
+//         }
+
+//         // Only allow the specified country codes
+//         const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
+//         if (!allowedCountryCodes.includes(countryCode)) {
+//             if (req.file?.path) await deleteUploadedFile(req.file.path);
+//             if (req.files && Array.isArray(req.files["carImages"])) {
+//                 for (const file of req.files["carImages"]) {
+//                     if (file?.path) await deleteUploadedFile(file.path);
+//                 }
+//             }
+//             await session.abortTransaction();
+//             session.endSession();
+//             return res.status(400).json({
+//                 message:
+//                     "Invalid country code. Allowed: +1 (Canada/United States), +61 (Australia), +44 (United Kingdom), +91 (India).",
+//             });
+//         }
+
+//         // Only allow role carowner
+//         if (role !== "carowner") {
+//             if (req.file?.path) await deleteUploadedFile(req.file.path);
+//             if (req.files && Array.isArray(req.files["carImages"])) {
+//                 for (const file of req.files["carImages"]) {
+//                     if (file?.path) await deleteUploadedFile(file.path);
+//                 }
+//             }
+//             await session.abortTransaction();
+//             session.endSession();
+//             return res.status(400).json({
+//                 message: "Only role 'carowner' is allowed for onboarding via this endpoint.",
+//             });
+//         }
+
+//         // Check if ANY user exists with this email or phone/countryCode
+//         if (email) {
+//             const existingEmailUser = await User.findOne({ email }).session(session);
+//             if (existingEmailUser) {
+//                 if (req.file?.path) await deleteUploadedFile(req.file.path);
+//                 if (req.files && Array.isArray(req.files["carImages"])) {
+//                     for (const file of req.files["carImages"]) {
+//                         if (file?.path) await deleteUploadedFile(file.path);
+//                     }
+//                 }
+//                 await session.abortTransaction();
+//                 session.endSession();
+//                 return res.status(409).json({
+//                     message: "A user with this email already exists.",
+//                     userId: existingEmailUser._id
+//                 });
+//             }
+//         }
+//         if (phone && countryCode) {
+//             const existingPhoneUser = await User.findOne({ phone, countryCode }).session(session);
+//             if (existingPhoneUser) {
+//                 if (req.file?.path) await deleteUploadedFile(req.file.path);
+//                 if (req.files && Array.isArray(req.files["carImages"])) {
+//                     for (const file of req.files["carImages"]) {
+//                         if (file?.path) await deleteUploadedFile(file.path);
+//                     }
+//                 }
+//                 await session.abortTransaction();
+//                 session.endSession();
+//                 return res.status(409).json({
+//                     message: "A user with this phone and country code already exists.",
+//                     userId: existingPhoneUser._id,
+//                     phone: existingPhoneUser.phone,
+//                     countryCode: existingPhoneUser.countryCode,
+//                     name: existingPhoneUser.name,
+//                     email: existingPhoneUser.email,
+//                     // Add any additional fields as needed
+//                 });
+//             }
+//         }
+
+//         // Default OTP
+//         const otp = "000000";
+//         const expiresInMs = 1000 * 600;
+//         const otpExpiresAt = new Date(Date.now() + expiresInMs);
+
+//         // Profile photo
+//         let profilePhotoPath = null;
+//         if (req.file?.path) {
+//             profilePhotoPath = req.file.path;
+//             uploadedProfilePhoto = profilePhotoPath;
+//         }
+
+//         // Get autoshop owner ID from the JWT-authenticated user
+//         const onboardedBy = req.user?.id || null;
+
+//         // -- Create the CAROWNER first
+//         let carOwnerPayload = {
+//             name,
+//             email,
+//             phone,
+//             countryCode,
+//             pincode,
+//             role,
+//             address,
+//             isProfileComplete: true,
+//             otp,
+//             otpExpiresAt,
+//             otpGeneratedAt: new Date(),
+//             otpAttempts: 0,
+//             onboardedBy
+//         };
+//         if (profilePhotoPath) carOwnerPayload.profilePhoto = profilePhotoPath;
+
+//         let newCarOwner;
+//         try {
+//             newCarOwner = await User.create([carOwnerPayload], { session });
+//             newCarOwner = newCarOwner[0];
+//         } catch (err) {
+//             if (profilePhotoPath) await deleteUploadedFile(profilePhotoPath);
+//             if (req.files && Array.isArray(req.files["carImages"])) {
+//                 for (const file of req.files["carImages"]) {
+//                     if (file?.path) await deleteUploadedFile(file.path);
+//                 }
+//             }
+//             await session.abortTransaction();
+//             session.endSession();
+//             return res.status(500).json({ message: "Failed to create car owner profile." });
+//         }
+
+//         let newVehicles = [];
+
+//         // -- Utility: checks for existing NOT disabled vehicle with the same licensePlateNo
+//         async function isDuplicateNotDisabledPlate(licensePlateNo) {
+//             if (!licensePlateNo) return false;
+//             const existing = await VehicleModel.findOne({
+//                 licensePlateNo: licensePlateNo,
+//                 $or: [{ disabled: false }, { disabled: { $exists: false } }]
+//             }).session(session);
+//             return !!existing;
+//         }
+
+//         // Prepare any carImages from req.files as a flat array if available
+//         let carImagesFromFiles = [];
+//         if (req.files && Array.isArray(req.files["carImages"])) {
+//             carImagesFromFiles = req.files["carImages"].map(f => f.path);
+//         }
+
+//         // --- Handle vehicles array (now parsed from JSON or req.body.vehicles OR req.body fields - backward compat) ---
+//         const cleanUpVehicleFileRefs = [];
+
+//         const inputVehiclesArray = Array.isArray(vehiclesArray) ? vehiclesArray :
+//             (req.body.licensePlateNo || req.body.vinNo || req.body.vehicleName || req.body.model || req.body.year
+//                 ? [{
+//                     licensePlateNo: req.body.licensePlateNo,
+//                     vinNo: req.body.vinNo,
+//                     vehicleName: req.body.vehicleName,
+//                     model: req.body.model,
+//                     year: req.body.year,
+//                     odometerReading: req.body.odometerReading,
+//                     disabled: req.body.disabled
+//                 }]
+//                 : []);
+
+//         if (Array.isArray(inputVehiclesArray) && inputVehiclesArray.length > 0) {
+//             // Support for field-based vehicle image upload: assign each carImages[] to vehicles in same order
+//             let imagesByVehicle = [];
+//             if (carImagesFromFiles.length > 0) {
+//                 if (inputVehiclesArray.length === 1) {
+//                     imagesByVehicle = [carImagesFromFiles];
+//                 } else {
+//                     imagesByVehicle = carImagesFromFiles.map(f => [f]);
+//                 }
+//             }
+
+//             for (let i = 0; i < inputVehiclesArray.length; i++) {
+//                 const veh = inputVehiclesArray[i] || {};
+
+//                 const {
+//                     licensePlateNo,
+//                     vinNo,
+//                     vehicleName,
+//                     model,
+//                     year,
+//                     odometerReading,
+//                     disabled
+//                 } = veh;
+
+//                 let toAssignCarImages = [];
+//                 if (imagesByVehicle.length > i) {
+//                     toAssignCarImages = imagesByVehicle[i];
+//                 } else if (imagesByVehicle.length === 1) {
+//                     toAssignCarImages = imagesByVehicle[0];
+//                 }
+
+//                 let vehiclePayload = {};
+//                 if (licensePlateNo !== undefined) vehiclePayload.licensePlateNo = licensePlateNo;
+//                 if (vinNo !== undefined) vehiclePayload.vinNo = vinNo;
+//                 if (vehicleName !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), name: vehicleName };
+//                 if (model !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), model: model };
+//                 if (year !== undefined) vehiclePayload.year = year;
+//                 if (odometerReading !== undefined) vehiclePayload.odometerReading = odometerReading;
+//                 if (typeof disabled !== "undefined") vehiclePayload.disabled = disabled; // only sets if supplied
+
+//                 // Vehicle images: Attach carImages from uploaded file or field
+//                 if (toAssignCarImages && toAssignCarImages.length > 0) {
+//                     vehiclePayload.carImages = toAssignCarImages;
+//                     cleanUpVehicleFileRefs.push(...toAssignCarImages);
+//                 } else if (veh.carImages) {
+//                     if (typeof veh.carImages === "string") {
+//                         try {
+//                             let imgs = JSON.parse(veh.carImages);
+//                             if (Array.isArray(imgs)) {
+//                                 vehiclePayload.carImages = imgs;
+//                             }
+//                         } catch (e) { }
+//                     } else if (Array.isArray(veh.carImages)) {
+//                         vehiclePayload.carImages = veh.carImages;
+//                     } else if (typeof veh.carImages === "object" && veh.carImages?.path) {
+//                         vehiclePayload.carImages = [veh.carImages.path];
+//                         cleanUpVehicleFileRefs.push(veh.carImages.path);
+//                     }
+//                 }
+
+//                 if (
+//                     vehiclePayload.licensePlateNo &&
+//                     vehiclePayload.vinNo &&
+//                     vehiclePayload.make &&
+//                     vehiclePayload.make.name &&
+//                     vehiclePayload.make.model &&
+//                     vehiclePayload.year
+//                 ) {
+//                     let willBeDisabled = !!vehiclePayload.disabled;
+//                     if (!willBeDisabled) {
+//                         const plateExists = await isDuplicateNotDisabledPlate(vehiclePayload.licensePlateNo);
+//                         if (plateExists) {
+//                             // Cleanup
+//                             if (profilePhotoPath) await deleteUploadedFile(profilePhotoPath);
+//                             for (const img of cleanUpVehicleFileRefs) {
+//                                 await deleteUploadedFile(img);
+//                             }
+//                             await session.abortTransaction();
+//                             session.endSession();
+//                             return res.status(409).json({
+//                                 message: `A vehicle with license plate "${vehiclePayload.licensePlateNo}" already exists and is not disabled. Only one enabled vehicle per license plate is allowed.`,
+//                                 licensePlateNo: vehiclePayload.licensePlateNo
+//                             });
+//                         }
+//                     }
+//                     try {
+//                         const createdVehicleArr = await VehicleModel.create([vehiclePayload], { session });
+//                         const createdVehicle = createdVehicleArr[0];
+//                         newCarOwner.myVehicles = newCarOwner.myVehicles || [];
+//                         newCarOwner.myVehicles.push(createdVehicle._id);
+//                         newVehicles.push(createdVehicle);
+//                     } catch (err) {
+//                         // Cleanup
+//                         if (profilePhotoPath) await deleteUploadedFile(profilePhotoPath);
+//                         for (const img of cleanUpVehicleFileRefs) {
+//                             await deleteUploadedFile(img);
+//                         }
+//                         await session.abortTransaction();
+//                         session.endSession();
+//                         return res.status(500).json({ message: "Failed to create vehicle." });
+//                     }
+//                 }
+//             }
+//             // Save car owner .myVehicles if any were created
+//             if (newVehicles.length > 0) {
+//                 try {
+//                     await newCarOwner.save({ session });
+//                 } catch (saveErr) {
+//                     // Cleanup
+//                     if (profilePhotoPath) await deleteUploadedFile(profilePhotoPath);
+//                     for (const img of cleanUpVehicleFileRefs) {
+//                         await deleteUploadedFile(img);
+//                     }
+//                     await session.abortTransaction();
+//                     session.endSession();
+//                     return res.status(500).json({ message: "Failed to update car owner with vehicles." });
+//                 }
+//             }
+//         }
+
+//         await session.commitTransaction();
+//         session.endSession();
+
+//         return res.status(201).json({
+//             message: "Car owner onboarded successfully. OTP sent.",
+//             otp: otp,
+//             carOwner: {
+//                 id: newCarOwner._id,
+//                 name: newCarOwner.name,
+//                 email: newCarOwner.email,
+//                 phone: newCarOwner.phone,
+//                 countryCode: newCarOwner.countryCode,
+//                 pincode: newCarOwner.pincode,
+//                 role: newCarOwner.role,
+//                 address: newCarOwner.address,
+//                 isProfileComplete: newCarOwner.isProfileComplete,
+//                 status: newCarOwner.status,
+//                 onboardedBy: newCarOwner.onboardedBy,
+//                 profilePhoto: newCarOwner.profilePhoto,
+//                 vehicles: newVehicles.map(v => ({
+//                     id: v._id,
+//                     licensePlateNo: v.licensePlateNo,
+//                     vinNo: v.vinNo,
+//                     name: v.make?.name,
+//                     model: v.make?.model,
+//                     year: v.year,
+//                     odometerReading: v.odometerReading,
+//                     carImages: v.carImages
+//                 }))
+//             },
+//         });
+//     } catch (error) {
+//         // On ANY error, cleanup uploads (profile photo and vehicle files)
+//         if (req.file?.path) await deleteUploadedFile(req.file.path);
+//         if (req.files && Array.isArray(req.files["carImages"])) {
+//             for (const file of req.files["carImages"]) {
+//                 if (file?.path) await deleteUploadedFile(file.path);
+//             }
+//         }
+//         try {
+//             await session.abortTransaction();
+//         } catch (e) {}
+//         session.endSession();
+//         console.error("[onboardCarOwner] Error:", error);
+//         return res.status(500).json({ message: "Internal Server Error" });
+//     }
+// };
+
 onboardCarOwner = async (req, res) => {
-    let uploadedProfilePhoto = null;
-    let uploadedVehicleImagePaths = [];
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    // ✅ FIX 3: single helper replaces six identical copy-paste cleanup blocks
+    const cleanupUploads = async () => {
+        const profilePhoto = req.files?.["profilePhoto"]?.[0]?.path;
+        if (profilePhoto) await deleteUploadedFile(profilePhoto);
+        const carImage = req.files?.["carImage"]?.[0]?.path;
+        if (carImage) await deleteUploadedFile(carImage);
+    };
 
     try {
-        // Destructure as before, but accept 'profilePhoto' and possible 'carImages' via multer/req.files
         const {
-            name,
-            email,
-            phone,
-            countryCode,
-            pincode,
-            role,
-            address,
-            vehicles // Expect an array of vehicle objects or undefined
+            name, email, phone, countryCode, pincode, role, address, vehicles
         } = req.body;
 
-        // Parse vehicles from JSON if sent as a string (common in multipart/form-data with file upload)
         let vehiclesArray = vehicles;
         if (typeof vehicles === "string") {
-            try {
-                vehiclesArray = JSON.parse(vehicles);
-            } catch (e) {
-                vehiclesArray = undefined;
-            }
+            try { vehiclesArray = JSON.parse(vehicles); }
+            catch (e) { vehiclesArray = undefined; }
         }
 
-        // Only require main fields for car owner, NOT vehicle
-        if (
-            !name ||
-            !email ||
-            !phone ||
-            !countryCode ||
-            !pincode ||
-            !role ||
-            !address
-        ) {
-            // Delete uploaded profilePhoto and all uploaded vehicleImages if any
-            if (req.file?.path) await deleteUploadedFile(req.file.path);
-            if (req.files && Array.isArray(req.files["carImages"])) {
-                for (const file of req.files["carImages"]) {
-                    if (file?.path) await deleteUploadedFile(file.path);
-                }
-            }
+        if (!name || !email || !phone || !countryCode || !pincode || !role || !address) {
+            await cleanupUploads();
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({
                 message: "All owner fields (name, email, phone, countryCode, pincode, role, address) are required.",
             });
         }
 
-        // Only allow the specified country codes
         const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
         if (!allowedCountryCodes.includes(countryCode)) {
-            if (req.file?.path) await deleteUploadedFile(req.file.path);
-            if (req.files && Array.isArray(req.files["carImages"])) {
-                for (const file of req.files["carImages"]) {
-                    if (file?.path) await deleteUploadedFile(file.path);
-                }
-            }
+            await cleanupUploads();
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({
-                message:
-                    "Invalid country code. Allowed: +1 (Canada/United States), +61 (Australia), +44 (United Kingdom), +91 (India).",
+                message: "Invalid country code. Allowed: +1 (Canada/United States), +61 (Australia), +44 (United Kingdom), +91 (India).",
             });
         }
 
-        // Only allow role carowner
         if (role !== "carowner") {
-            if (req.file?.path) await deleteUploadedFile(req.file.path);
-            if (req.files && Array.isArray(req.files["carImages"])) {
-                for (const file of req.files["carImages"]) {
-                    if (file?.path) await deleteUploadedFile(file.path);
-                }
-            }
+            await cleanupUploads();
+            await session.abortTransaction();
+            session.endSession();
             return res.status(400).json({
                 message: "Only role 'carowner' is allowed for onboarding via this endpoint.",
             });
         }
 
-        // Check if ANY user exists with this email or phone/countryCode
         if (email) {
-            const existingEmailUser = await User.findOne({ email });
+            const existingEmailUser = await User.findOne({ email }).session(session);
             if (existingEmailUser) {
-                if (req.file?.path) await deleteUploadedFile(req.file.path);
-                if (req.files && Array.isArray(req.files["carImages"])) {
-                    for (const file of req.files["carImages"]) {
-                        if (file?.path) await deleteUploadedFile(file.path);
-                    }
-                }
+                await cleanupUploads();
+                await session.abortTransaction();
+                session.endSession();
                 return res.status(409).json({
                     message: "A user with this email already exists.",
-                    userId: existingEmailUser._id
+                    userId: existingEmailUser._id,
                 });
             }
         }
+
         if (phone && countryCode) {
-            const existingPhoneUser = await User.findOne({ phone, countryCode });
+            const existingPhoneUser = await User.findOne({ phone, countryCode }).session(session);
             if (existingPhoneUser) {
-                if (req.file?.path) await deleteUploadedFile(req.file.path);
-                if (req.files && Array.isArray(req.files["carImages"])) {
-                    for (const file of req.files["carImages"]) {
-                        if (file?.path) await deleteUploadedFile(file.path);
-                    }
-                }
+                await cleanupUploads();
+                await session.abortTransaction();
+                session.endSession();
                 return res.status(409).json({
                     message: "A user with this phone and country code already exists.",
-                    userId: existingPhoneUser._id
+                    userId: existingPhoneUser._id,
+                    phone: existingPhoneUser.phone,
+                    countryCode: existingPhoneUser.countryCode,
+                    name: existingPhoneUser.name,
+                    email: existingPhoneUser.email,
                 });
             }
         }
 
-        // Default OTP
         const otp = "000000";
-        const expiresInMs = 1000 * 600; 
-        const otpExpiresAt = new Date(Date.now() + expiresInMs);
+        const otpExpiresAt = new Date(Date.now() + 1000 * 600);
 
-        // Profile photo
-        let profilePhotoPath = null;
-        if (req.file?.path) {
-            profilePhotoPath = req.file.path;
-            uploadedProfilePhoto = profilePhotoPath;
-        }
+        // ✅ FIX 3: .fields() → req.files[name][0], never req.file
+        const profilePhotoPath = req.files?.["profilePhoto"]?.[0]?.path || null;
+        const vehicleImagePath  = req.files?.["carImage"]?.[0]?.path     || null;
 
-        // Get autoshop owner ID from the JWT-authenticated user
         const onboardedBy = req.user?.id || null;
 
-        // -- Create the CAROWNER first
-        let carOwnerPayload = {
-            name,
-            email,
-            phone,
-            countryCode,
-            pincode,
-            role,
-            address,
+        const carOwnerPayload = {
+            name, email, phone, countryCode, pincode, role, address,
             isProfileComplete: true,
-            otp,
-            otpExpiresAt,
-            otpGeneratedAt: new Date(),
-            otpAttempts: 0,
-            onboardedBy
+            otp, otpExpiresAt, otpGeneratedAt: new Date(), otpAttempts: 0,
+            onboardedBy,
+            ...(profilePhotoPath ? { profilePhoto: profilePhotoPath } : {}),
         };
-        if (profilePhotoPath) carOwnerPayload.profilePhoto = profilePhotoPath;
 
         let newCarOwner;
         try {
-            newCarOwner = await User.create(carOwnerPayload);
+            [newCarOwner] = await User.create([carOwnerPayload], { session });
         } catch (err) {
-            if (profilePhotoPath) await deleteUploadedFile(profilePhotoPath);
-            if (req.files && Array.isArray(req.files["carImages"])) {
-                for (const file of req.files["carImages"]) {
-                    if (file?.path) await deleteUploadedFile(file.path);
-                }
-            }
+            await cleanupUploads();
+            await session.abortTransaction();
+            session.endSession();
             return res.status(500).json({ message: "Failed to create car owner profile." });
         }
 
-        let newVehicles = [];
+        const newVehicles = [];
 
-        // -- Utility: checks for existing NOT disabled vehicle with the same licensePlateNo
         async function isDuplicateNotDisabledPlate(licensePlateNo) {
             if (!licensePlateNo) return false;
-            const existing = await VehicleModel.findOne({ 
-                licensePlateNo: licensePlateNo,
-                $or: [{disabled: false}, {disabled: { $exists: false }}]
-            });
-            return !!existing;
+            return !!(await VehicleModel.findOne({
+                licensePlateNo,
+                $or: [{ disabled: false }, { disabled: { $exists: false } }],
+            }).session(session));
         }
 
-        // Prepare any carImages from req.files as a flat array if available
-        let carImagesFromFiles = [];
-        if (req.files && Array.isArray(req.files["carImages"])) {
-            carImagesFromFiles = req.files["carImages"].map(f => f.path);
-        }
-
-        // --- Handle vehicles array (now parsed from JSON or req.body.vehicles OR req.body fields - backward compat) ---
-        // vehicleImages tracked for later deletion
-        const cleanUpVehicleFileRefs = [];
-
-        // Case 1: Array of vehicles sent as 'vehicles'
-        const inputVehiclesArray = Array.isArray(vehiclesArray) ? vehiclesArray :
-            // Case 2: Single vehicle object in fields form
-            (req.body.licensePlateNo || req.body.vinNo || req.body.vehicleName || req.body.model || req.body.year
-                ? [{ 
-                    licensePlateNo: req.body.licensePlateNo,
-                    vinNo: req.body.vinNo,
-                    vehicleName: req.body.vehicleName,
-                    model: req.body.model,
-                    year: req.body.year,
+        const inputVehiclesArray = Array.isArray(vehiclesArray)
+            ? vehiclesArray
+            : (req.body.licensePlateNo || req.body.vinNo || req.body.vehicleName || req.body.model || req.body.year
+                ? [{
+                    licensePlateNo:  req.body.licensePlateNo,
+                    vinNo:           req.body.vinNo,
+                    vehicleName:     req.body.vehicleName,
+                    model:           req.body.model,
+                    year:            req.body.year,
                     odometerReading: req.body.odometerReading,
-                    disabled: req.body.disabled
+                    disabled:        req.body.disabled,
                 }]
                 : []);
 
-        if (Array.isArray(inputVehiclesArray) && inputVehiclesArray.length > 0) {
-            // Support for field-based vehicle image upload: assign each carImages[] to vehicles in same order
-            let imagesByVehicle = [];
-            if (carImagesFromFiles.length > 0) {
-                // Attempt to group carImages[] files by each vehicle:
-                // Attach all of them to the 1st vehicle if #vehicles=1, else spread as array-of-arrays (must be mapped by frontend)
-                if (inputVehiclesArray.length === 1) {
-                    imagesByVehicle = [carImagesFromFiles];
-                } else {
-                    // TODO: If needed, match carImages by vehicle index or an uploaded mapping field
-                    imagesByVehicle = carImagesFromFiles.map(f => [f]);
-                    // Not reliably mappable without explicit request-payload linkage
+        for (let i = 0; i < inputVehiclesArray.length; i++) {
+            const veh = inputVehiclesArray[i] || {};
+            const { licensePlateNo, vinNo, vehicleName, model, year, odometerReading, disabled } = veh;
+
+            const vehiclePayload = {};
+            if (licensePlateNo  !== undefined) vehiclePayload.licensePlateNo  = licensePlateNo;
+            if (vinNo           !== undefined) vehiclePayload.vinNo           = vinNo;
+            if (vehicleName     !== undefined) vehiclePayload.make            = { ...(vehiclePayload.make || {}), name: vehicleName };
+            if (model           !== undefined) vehiclePayload.make            = { ...(vehiclePayload.make || {}), model };
+            if (year            !== undefined) vehiclePayload.year            = year;
+            if (odometerReading !== undefined) vehiclePayload.odometerReading = odometerReading;
+            if (disabled        !== undefined) vehiclePayload.disabled        = disabled;
+
+            // ✅ Attach the uploaded image to VehicleModel.carImages (first vehicle only)
+            if (i === 0 && vehicleImagePath) {
+                vehiclePayload.carImages = [vehicleImagePath];
+            }
+
+            const hasAllRequired =
+                vehiclePayload.licensePlateNo &&
+                vehiclePayload.vinNo &&
+                vehiclePayload.make?.name &&
+                vehiclePayload.make?.model &&
+                vehiclePayload.year;
+
+            if (!hasAllRequired) continue; // skip incomplete vehicle entries
+
+            if (!vehiclePayload.disabled) {
+                const plateExists = await isDuplicateNotDisabledPlate(vehiclePayload.licensePlateNo);
+                if (plateExists) {
+                    await cleanupUploads();
+                    await session.abortTransaction();
+                    session.endSession();
+                    return res.status(409).json({
+                        message: `A vehicle with license plate "${vehiclePayload.licensePlateNo}" already exists and is not disabled.`,
+                        licensePlateNo: vehiclePayload.licensePlateNo,
+                    });
                 }
             }
 
-            for (let i = 0; i < inputVehiclesArray.length; i++) {
-                const veh = inputVehiclesArray[i] || {};
+            try {
+                const [createdVehicle] = await VehicleModel.create([vehiclePayload], { session });
 
-                const {
-                    licensePlateNo,
-                    vinNo,
-                    vehicleName,
-                    model,
-                    year,
-                    odometerReading,
-                    disabled
-                } = veh;
+                newCarOwner.myVehicles.push(createdVehicle._id);
 
-                // For file uploads, see if there's an imagesByVehicle[i]
-                let toAssignCarImages = [];
-                if (imagesByVehicle.length > i) {
-                    toAssignCarImages = imagesByVehicle[i];
-                } else if (imagesByVehicle.length === 1) {
-                    toAssignCarImages = imagesByVehicle[0];
-                }
+                // ✅ FIX 4: write VehicleDocumentSchema entry into User.documents
+                const vehicleDoc = { vehicleId: createdVehicle._id };
+                if (i === 0 && vehicleImagePath) vehicleDoc.carImage = vehicleImagePath;
+                newCarOwner.documents.push(vehicleDoc);
 
-                let vehiclePayload = {};
-                if (licensePlateNo !== undefined) vehiclePayload.licensePlateNo = licensePlateNo;
-                if (vinNo !== undefined) vehiclePayload.vinNo = vinNo;
-                if (vehicleName !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), name: vehicleName };
-                if (model !== undefined) vehiclePayload.make = { ...(vehiclePayload.make || {}), model: model };
-                if (year !== undefined) vehiclePayload.year = year;
-                if (odometerReading !== undefined) vehiclePayload.odometerReading = odometerReading;
-                if (typeof disabled !== "undefined") vehiclePayload.disabled = disabled; // only sets if supplied
-
-                // Vehicle images: Attach carImages from uploaded file or field
-                if (toAssignCarImages && toAssignCarImages.length > 0) {
-                    vehiclePayload.carImages = toAssignCarImages;
-                    cleanUpVehicleFileRefs.push(...toAssignCarImages);
-                } else if (veh.carImages) {
-                    // carImages sent as stringified JSON or as path(s)
-                    if (typeof veh.carImages === "string") {
-                        try {
-                            let imgs = JSON.parse(veh.carImages);
-                            if (Array.isArray(imgs)) {
-                                vehiclePayload.carImages = imgs;
-                                // Not deleting these since they may be legacy references (not newly uploaded!)
-                            } 
-                        } catch (e) {}
-                    } else if (Array.isArray(veh.carImages)) {
-                        vehiclePayload.carImages = veh.carImages;
-                    } else if (typeof veh.carImages === "object" && veh.carImages?.path) {
-                        vehiclePayload.carImages = [veh.carImages.path];
-                        // Probably multer upload - add to delete refs
-                        cleanUpVehicleFileRefs.push(veh.carImages.path);
-                    }
-                }
-
-                if (
-                    vehiclePayload.licensePlateNo &&
-                    vehiclePayload.vinNo &&
-                    vehiclePayload.make &&
-                    vehiclePayload.make.name &&
-                    vehiclePayload.make.model &&
-                    vehiclePayload.year
-                ) {
-                    let willBeDisabled = !!vehiclePayload.disabled;
-                    // If vehicle to be created is not disabled OR disabled=false, check for duplicate
-                    if (!willBeDisabled) {
-                        const plateExists = await isDuplicateNotDisabledPlate(vehiclePayload.licensePlateNo);
-                        if (plateExists) {
-                            // On error, cleanup car owner profile image and all uploaded vehicle images
-                            if (profilePhotoPath) await deleteUploadedFile(profilePhotoPath);
-                            for (const img of cleanUpVehicleFileRefs) {
-                                await deleteUploadedFile(img);
-                            }
-                            return res.status(409).json({
-                                message: `A vehicle with license plate "${vehiclePayload.licensePlateNo}" already exists and is not disabled. Only one enabled vehicle per license plate is allowed.`,
-                                licensePlateNo: vehiclePayload.licensePlateNo
-                            });
-                        }
-                    }
-                    try {
-                        const createdVehicle = await VehicleModel.create(vehiclePayload);
-                        // Record for myVehicles array, and for output
-                        newCarOwner.myVehicles = newCarOwner.myVehicles || [];
-                        newCarOwner.myVehicles.push(createdVehicle._id);
-                        newVehicles.push(createdVehicle);
-                    } catch (err) {
-                        // On error, cleanup all uploaded files
-                        if (profilePhotoPath) await deleteUploadedFile(profilePhotoPath);
-                        for (const img of cleanUpVehicleFileRefs) {
-                            await deleteUploadedFile(img);
-                        }
-                        return res.status(500).json({ message: "Failed to create vehicle." });
-                    }
-                }
-            }
-            if (newVehicles.length > 0) {
-                await newCarOwner.save();
+                newVehicles.push(createdVehicle);
+            } catch (err) {
+                await cleanupUploads();
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(500).json({ message: "Failed to create vehicle." });
             }
         }
+
+        if (newVehicles.length > 0) {
+            try {
+                await newCarOwner.save({ session });
+            } catch (saveErr) {
+                await cleanupUploads();
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(500).json({ message: "Failed to update car owner with vehicles." });
+            }
+        }
+
+        await session.commitTransaction();
+        session.endSession();
 
         return res.status(201).json({
             message: "Car owner onboarded successfully. OTP sent.",
-            otp: otp,
+            otp,
             carOwner: {
-                id: newCarOwner._id,
-                name: newCarOwner.name,
-                email: newCarOwner.email,
-                phone: newCarOwner.phone,
-                countryCode: newCarOwner.countryCode,
-                pincode: newCarOwner.pincode,
-                role: newCarOwner.role,
-                address: newCarOwner.address,
+                id:                newCarOwner._id,
+                name:              newCarOwner.name,
+                email:             newCarOwner.email,
+                phone:             newCarOwner.phone,
+                countryCode:       newCarOwner.countryCode,
+                pincode:           newCarOwner.pincode,
+                role:              newCarOwner.role,
+                address:           newCarOwner.address,
                 isProfileComplete: newCarOwner.isProfileComplete,
-                status: newCarOwner.status,
-                onboardedBy: newCarOwner.onboardedBy,
-                profilePhoto: newCarOwner.profilePhoto,
+                status:            newCarOwner.status,
+                onboardedBy:       newCarOwner.onboardedBy,
+                profilePhoto:      newCarOwner.profilePhoto,
+                documents:         newCarOwner.documents, // ✅ includes vehicleId + carImage
                 vehicles: newVehicles.map(v => ({
-                    id: v._id,
+                    id:             v._id,
                     licensePlateNo: v.licensePlateNo,
-                    vinNo: v.vinNo,
-                    name: v.make?.name,
-                    model: v.make?.model,
-                    year: v.year,
-                    odometerReading: v.odometerReading,
-                    carImages: v.carImages
-                }))
+                    vinNo:          v.vinNo,
+                    name:           v.make?.name,
+                    model:          v.make?.model,
+                    year:           v.year,
+                    odometerReading:v.odometerReading,
+                    carImages:      v.carImages,
+                })),
             },
         });
+
     } catch (error) {
-        // On ANY error, cleanup uploads (profile photo and vehicle files)
-        if (req.file?.path) await deleteUploadedFile(req.file.path);
-        if (req.files && Array.isArray(req.files["carImages"])) {
-            for (const file of req.files["carImages"]) {
-                if (file?.path) await deleteUploadedFile(file.path);
-            }
-        }
+        await cleanupUploads();
+        try { await session.abortTransaction(); } catch (_) {}
+        session.endSession();
         console.error("[onboardCarOwner] Error:", error);
         return res.status(500).json({ message: "Internal Server Error" });
     }
