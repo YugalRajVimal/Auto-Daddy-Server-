@@ -1633,11 +1633,11 @@ fetchMyCustomers = async (req, res) => {
         }
 
         if (filteredCustomerIds.length === 0) {
+            // No customers match filter, return empty array
             return res.status(200).json({ myCustomers: [] });
         }
 
-        // Build DB query for User customers ("carowner"s owned by this shop, plus filters)
-        // Multi-field "search" filter: matches name, phone, numberPlate (via myVehicles)
+        // Build DB query for User customers
         let customersQueryConditions = [
             { _id: { $in: filteredCustomerIds } }
         ];
@@ -1657,7 +1657,6 @@ fetchMyCustomers = async (req, res) => {
         if (
             search &&
             search.trim() !== "" &&
-            // Only for search as numberPlate, i.e. if vehicle search attempted
             vehicleIdsForSearch.length === 0 && (
                 false
             )
@@ -1665,13 +1664,14 @@ fetchMyCustomers = async (req, res) => {
             return res.status(200).json({ myCustomers: [] });
         }
 
+        // Select all document fields related to vehicles per user
         let customersQuery = User.find({ $and: customersQueryConditions })
-            .select("name email phone countryCode status isDisabled myVehicles address pincode profilePhoto") // <--- profilePhoto added here
+            .select("name email phone countryCode status isDisabled myVehicles address pincode profilePhoto documents") // <-- "documents" is important!
             .populate({
                 path: "myVehicles",
                 model: "Vehicle",
                 select: "-carImages -licensePlateFrontImagePath -licensePlateBackImagePath",
-                match: { disabled: { $ne: true } }  // <-- Do not fetch disabled vehicles
+                match: { disabled: { $ne: true } }
             });
 
         const myCustomers = await customersQuery.lean();
@@ -1691,19 +1691,42 @@ fetchMyCustomers = async (req, res) => {
             };
         };
 
-        // For all customers, fetch recent job card
+        // For all customers, fetch recent job card AND for each vehicle, map their document info
         const result = [];
         for (const cust of myCustomers) {
+            // - Map vehicleId => vehicleDoc for fast lookup
+            const vehicleMap = {};
+            if (Array.isArray(cust.myVehicles)) {
+                for (const veh of cust.myVehicles) {
+                    vehicleMap[veh._id.toString()] = veh;
+                }
+            }
+
+            // Group documents by vehicleId, enrich with vehicle info
+            const vehicleDocumentsDetailed = [];
+            if (Array.isArray(cust.documents)) {
+                for (const doc of cust.documents) {
+                    const vId = doc.vehicleId && doc.vehicleId.toString();
+                    const vehicleData = vehicleMap[vId] || null;
+
+                    vehicleDocumentsDetailed.push({
+                        ...doc,
+                        vehicleData: vehicleData
+                    });
+                }
+            }
+
+            // Fetch recent job card
             let recentJobCard = await JobCard.findOne({
                 customerId: cust._id,
                 business: autoshopOwner.businessProfile ? autoshopOwner.businessProfile : undefined
             })
-                .sort({ createdAt: -1 }) // most recent
+                .sort({ createdAt: -1 })
                 .lean();
 
             let jobCardSummary = null;
             if (recentJobCard) {
-                // Only send subServices name list (flattened) -- not service names!
+                // Only send subServices name list (flattened)
                 let subServiceNames = [];
                 if (Array.isArray(recentJobCard.services) && recentJobCard.services.length) {
                     for (const svc of recentJobCard.services) {
@@ -1725,7 +1748,7 @@ fetchMyCustomers = async (req, res) => {
                             .select("licensePlateNo")
                             .lean();
                         vehicleNumberPlate = vehicleDoc ? vehicleDoc.licensePlateNo : null;
-                    } catch (e) { }
+                    } catch (e) {}
                 }
 
                 const formatted = formatDate(recentJobCard.createdAt);
@@ -1740,6 +1763,7 @@ fetchMyCustomers = async (req, res) => {
 
             result.push({
                 ...cust,
+                documents: vehicleDocumentsDetailed, // replaces the documents field: each with vehicleData
                 recentJobCard: jobCardSummary
             });
         }
