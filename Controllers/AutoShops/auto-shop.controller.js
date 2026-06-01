@@ -1666,7 +1666,7 @@ fetchMyCustomers = async (req, res) => {
         }
 
         let customersQuery = User.find({ $and: customersQueryConditions })
-            .select("name email phone countryCode status isDisabled myVehicles address pincode")
+            .select("name email phone countryCode status isDisabled myVehicles address pincode profilePhoto") // <--- profilePhoto added here
             .populate({
                 path: "myVehicles",
                 model: "Vehicle",
