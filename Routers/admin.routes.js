@@ -26,11 +26,16 @@ adminRouter.get("/services", (req, res) => adminController.fetchServices(req, re
 adminRouter.put("/services/:id", (req, res) => adminController.editService(req, res));
 adminRouter.delete("/services/:id", (req, res) => adminController.deleteService(req, res));
 
+
 // Get all car owners (with job cards & populated vehicles/shops)
 adminRouter.get("/carowners", (req, res) => adminController.getAllCarOwners(req, res));
 
 // Get all auto shop owners
 adminRouter.get("/autoshopowners", (req, res) => adminController.getAllAutoShopOwners(req, res));
+
+// Enable or disable an AutoShopOwner (and their linked businessProfile)
+adminRouter.post("/autoshopowners/toggle-status", (req, res) => adminController.toggleAutoShopOwnerStatus(req, res));
+
 
 // Vehicle Type endpoints
 adminRouter.get("/vehicletypes", (req, res) => adminController.fetchVehicleTypes(req, res));
