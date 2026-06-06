@@ -4,8 +4,6 @@ import AutoShopController from "../Controllers/AutoShops/auto-shop.controller.js
 
 
 const autoShopRouter = express.Router();
-
-
 const autoShopController = new AutoShopController();
 
 // Route to get all auto shops

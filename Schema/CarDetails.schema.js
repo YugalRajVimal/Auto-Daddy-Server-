@@ -1,5 +1,15 @@
 import mongoose from 'mongoose';
 
+// Helper to generate array of years from 1990 to current year
+const getYears1990ToCurrent = () => {
+  const currentYear = new Date().getFullYear();
+  const years = [];
+  for (let year = 1990; year <= currentYear; year++) {
+    years.push(year);
+  }
+  return years;
+};
+
 const yearSchema = new mongoose.Schema({
   year: {
     type: Number,
@@ -15,8 +25,7 @@ const modelSchema = new mongoose.Schema({
   },
   years: {
     type: [Number],
-    required: true,
-    default: []
+    default: getYears1990ToCurrent
   }
 }, { _id: false });
 

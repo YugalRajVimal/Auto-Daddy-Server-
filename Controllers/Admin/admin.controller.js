@@ -219,10 +219,12 @@ async getAllCarOwners(req, res) {
       .lean();
 
     console.log(`[getAllCarOwners] Step 1 result: Found ${carOwners.length} car owners`);
-    // Gather all owner ids
+
+    // Gather all owner ids for job card lookup
     const ownerIds = carOwners.map(owner => owner._id);
     console.log(`[getAllCarOwners] Step 2: Owner IDs -`, ownerIds);
 
+    // Get all JobCards for these car owners
     console.log("[getAllCarOwners] Step 3: Fetching all JobCards for car owners...");
     const allJobCards = await JobCard.find({ customerId: { $in: ownerIds } })
       .populate({
@@ -238,55 +240,68 @@ async getAllCarOwners(req, res) {
         model: 'User',
         select: 'name email'
       })
-     
       .lean();
 
     console.log(`[getAllCarOwners] Step 3 result: Found ${allJobCards.length} job cards for given car owners`);
 
-    // Log job cards details for debugging at every step if not production
-    if (process.env.NODE_ENV !== 'production') {
-      allJobCards.forEach((jobCard, idx) => {
-        console.log(`[getAllCarOwners][JobCard ${idx}] _id:`, jobCard._id);
-        console.log('  business:', jobCard.business?._id, jobCard.business?.businessName);
-        console.log('  vehicleId:', jobCard.vehicleId?._id);
-        console.log('  customerId:', jobCard.customerId?._id, jobCard.customerId?.name);
-        if (Array.isArray(jobCard.services)) {
-          jobCard.services.forEach((serviceObj, sidx) => {
-            console.log(`    Service[${sidx}]:`, serviceObj.id?._id, serviceObj.id?.serviceName);
-          });
-        }
-      });
-    }
-
-    console.log("[getAllCarOwners] Step 4: Grouping job cards by owner");
+    // Helper: group job cards by car owner
     const jobCardsByOwner = {};
     for (const jobCard of allJobCards) {
       const ownerId = jobCard.customerId?._id
         ? jobCard.customerId._id.toString()
         : jobCard.customerId?.toString();
-      if (!ownerId) {
-        console.log("[getAllCarOwners][Warning] JobCard missing valid owner _id.", jobCard);
-        continue;
-      }
+      if (!ownerId) continue;
       if (!jobCardsByOwner[ownerId]) {
         jobCardsByOwner[ownerId] = [];
       }
       jobCardsByOwner[ownerId].push(jobCard);
     }
-    console.log("[getAllCarOwners] Step 4 result: Grouped JobCards by owner", Object.keys(jobCardsByOwner).length);
 
-    // Attach jobCards for each owner
-    console.log("[getAllCarOwners] Step 5: Attaching jobs to respective owners...");
+    // For each owner, build list of all distinct autoshops they received service from,
+    // and for each, also indicate isFav: true/false (present in favoriteAutoShops)
     carOwners = carOwners.map(owner => {
-      const jobCards = jobCardsByOwner[owner._id.toString()] || [];
-      console.log(`[getAllCarOwners] Attaching ${jobCards.length} job cards to owner:`, owner._id);
+      const ownerId = owner._id.toString();
+      const jobCards = jobCardsByOwner[ownerId] || [];
+
+      // Get the set of unique autoshop IDs from jobCards
+      const serviceAutoshopIds = new Set();
+      const serviceAutoshopsMap = {};
+      for (const jobCard of jobCards) {
+        const business = jobCard.business;
+        if (business && business._id) {
+          const _idStr = business._id.toString();
+          if (!serviceAutoshopsMap[_idStr]) {
+            serviceAutoshopsMap[_idStr] = business;
+            serviceAutoshopIds.add(_idStr);
+          }
+        }
+      }
+
+      // For quicker lookup of "favorite" autoshop IDs
+      const favShopIds = new Set(
+        Array.isArray(owner.favoriteAutoShops)
+          ? owner.favoriteAutoShops.map(fav =>
+            typeof fav === "string" ? fav : fav?._id?.toString?.() || fav?.toString?.() || ''
+          ).filter(Boolean)
+          : []
+      );
+
+      // List all received-service autoshops with isFav property
+      const autoshopsUsed = Array.from(serviceAutoshopIds).map(shopId => {
+        const shop = serviceAutoshopsMap[shopId];
+        return {
+          ...shop,
+          isFav: favShopIds.has(shopId),
+        };
+      });
+
       return {
         ...owner,
-        jobCards
+        jobCards,
+        autoshopsReceivedServiceFrom: autoshopsUsed,
       };
     });
 
-    console.log("[getAllCarOwners] Step 6: Returning final data - carOwners with jobCards");
     res.status(200).json({ success: true, data: carOwners });
   } catch (err) {
     console.log("[getAllCarOwners][Error]", err);
@@ -423,6 +438,83 @@ async getAllAutoShopOwners(req, res) {
   }
 }
 
+// --- Enable/Disable AutoShopOwner (with transaction support) ---
+
+/**
+ * Enable or disable an AutoShopOwner (and their linked businessProfile).
+ * - Updates User's isDisabled field.
+ * - Updates businessProfile's isBusinessActive.
+ * - Accepts { userId, disable } in req.body.
+ * - Uses MongoDB transactions for safety (when supported).
+ */
+async toggleAutoShopOwnerStatus(req, res) {
+  let session = null;
+  try {
+    const { userId, disable } = req.body;
+    if (!userId || typeof disable !== 'boolean') {
+      return res.status(400).json({ success: false, message: "userId and disable (boolean) are required." });
+    }
+
+    // Dynamic import for User and BusinessProfile models
+    const { User } = await import('../../Schema/user.schema.js');
+    const BusinessProfileModel = (await import('../../Schema/bussiness-profile.js')).default;
+
+    // Start transaction session
+    session = await User.startSession();
+    session.startTransaction();
+
+    // 1. Find and update User (must be autoshopowner)
+    const user = await User.findOne({ _id: userId, role: 'autoshopowner' }).session(session);
+    if (!user) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({ success: false, message: "AutoShopOwner not found." });
+    }
+
+    user.isDisabled = disable;
+    await user.save({ session });
+
+    // 2. Update associated BusinessProfile (if any)
+    let businessUpdated = null;
+    if (user.businessProfile) {
+      businessUpdated = await BusinessProfileModel.findByIdAndUpdate(
+        user.businessProfile,
+        { isBusinessActive: !disable },
+        { new: true, session }
+      );
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.status(200).json({
+      success: true,
+      message: `AutoShopOwner ${disable ? "disabled" : "enabled"} successfully.`,
+      updated: {
+        user: {
+          _id: user._id,
+          isDisabled: user.isDisabled,
+        },
+        businessProfile: businessUpdated ? {
+          _id: businessUpdated._id,
+          isBusinessActive: businessUpdated.isBusinessActive
+        } : null
+      }
+    });
+  } catch (err) {
+    if (session) {
+      try { await session.abortTransaction(); session.endSession(); } catch (e) {}
+    }
+    res.status(500).json({
+      success: false,
+      message: "Error toggling auto shop owner status",
+      error: err.message
+    });
+  }
+}
+
+
+
 
 
 // --- VEHICLE TYPE CONTROLLERS (CRUD) ---
@@ -504,30 +596,30 @@ async deleteVehicleType  (req, res) {
 };
 
 
-    /**
-     * Create a new website template.
-     * POST /api/autoshop/website-templates
-     */
-    async createWebsiteTemplate(req, res) {
-      try {
-          const { name, desc, templateLink } = req.body;
-          if (!name || !desc || !templateLink) {
-              return res.status(400).json({ message: "name, desc, and templateLink are required." });
-          }
+  /**
+   * Create a new website template.
+   * POST /api/autoshop/website-templates
+   */
+  async createWebsiteTemplate(req, res) {
+    try {
+        const { name, desc, templateLink } = req.body;
+        if (!name || !desc || !templateLink) {
+            return res.status(400).json({ message: "name, desc, and templateLink are required." });
+        }
 
-          // Check for duplicate name
-          const existing = await WebsiteTemplateSchema.findOne({ name });
-          if (existing) {
-              return res.status(409).json({ message: "A template with this name already exists." });
-          }
+        // Check for duplicate name
+        const existing = await WebsiteTemplateSchema.findOne({ name });
+        if (existing) {
+            return res.status(409).json({ message: "A template with this name already exists." });
+        }
 
-          const newTemplate = await WebsiteTemplateSchema.create({ name, desc, templateLink });
-          return res.status(201).json({ success: true, data: newTemplate });
-      } catch (err) {
-          console.error("[createWebsiteTemplate] Error:", err);
-          return res.status(500).json({ message: "Failed to create website template", error: err.message });
-      }
-  }
+        const newTemplate = await WebsiteTemplateSchema.create({ name, desc, templateLink });
+        return res.status(201).json({ success: true, data: newTemplate });
+    } catch (err) {
+        console.error("[createWebsiteTemplate] Error:", err);
+        return res.status(500).json({ message: "Failed to create website template", error: err.message });
+    }
+}
 
   /**
    * Edit an existing website template.
@@ -759,15 +851,12 @@ async deleteDashboardData(req, res) {
 
 
 /**
-/**
- * Add a new car company with models and years, and optional brandLogo upload
+ * Add a new car company with models and optional years, and optional brandLogo upload
  * POST /admin/car-company
- * Body: { companyName: string, models: [{ modelName: string, years: [number] }] }
+ * Body: { companyName: string, models: [{ modelName: string, years?: [number] }] }
  * File: brandLogo (optional image upload via multipart/form-data)
  */
 async addCarCompany(req, res) {
-
-
     let brandLogoPath = null;
     try {
         const { companyName, models } = req.body;
@@ -786,6 +875,15 @@ async addCarCompany(req, res) {
             // Delete uploaded image if relevant
             if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
             return res.status(400).json({ message: "companyName and models are required." });
+        }
+
+        // Ensure models elements at least have modelName, years optional
+        for (const model of parsedModels) {
+            if (!model.modelName) {
+                if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
+                return res.status(400).json({ message: "Each model must have a modelName." });
+            }
+            // years is OPTIONAL, no need to check for it
         }
 
         // brandLogo from req.files
@@ -813,7 +911,6 @@ async addCarCompany(req, res) {
     } catch (err) {
         // Clean up uploaded image on error
         if (brandLogoPath) {
-
             deleteUploadedFile(brandLogoPath);
         }
         console.error("[addCarCompany] Error:", err);
@@ -828,8 +925,6 @@ async addCarCompany(req, res) {
  * File: brandLogo (optional, replaces old if provided)
  */
 async editCarCompany(req, res) {
-
-
     let brandLogoPath = null;
     try {
         const { id } = req.params;
@@ -849,6 +944,17 @@ async editCarCompany(req, res) {
         if (!companyName && !parsedModels && !req.files?.brandLogo) {
             if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
             return res.status(400).json({ message: "Nothing to update." });
+        }
+
+        // If models provided, ensure each model has a modelName, years are optional
+        if (parsedModels) {
+            for (const model of parsedModels) {
+                if (!model.modelName) {
+                    if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
+                    return res.status(400).json({ message: "Each model must have a modelName." });
+                }
+                // years is OPTIONAL, no need to check for it
+            }
         }
 
         const updateFields = {};
@@ -882,7 +988,6 @@ async editCarCompany(req, res) {
     } catch (err) {
         // Clean up uploaded image on error
         if (brandLogoPath) {
-
             deleteUploadedFile(brandLogoPath);
         }
         console.error("[editCarCompany] Error:", err);
