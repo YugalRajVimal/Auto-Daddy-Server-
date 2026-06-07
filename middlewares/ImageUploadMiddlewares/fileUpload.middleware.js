@@ -155,6 +155,9 @@ const storage = multer.diskStorage({
     else if (file.fieldname === "profilePhoto") {
       uploadPath = "./Uploads/UserProfiles";
     }
+    else if (file.fieldname === "adsImage") {
+      uploadPath = "./Uploads/AdsImages";
+    }
 
     console.log("[MULTER] Storing file:", {
       destination: uploadPath,
@@ -195,6 +198,7 @@ const fileFilter = (req, file, cb) => {
     "insuranceCertificate",
     "drivingLicenseFront",
     "drivingLicenseBack",
+    "adsImage", // Add adsImage to accepted image fields
   ];
 
   // ✅ Accept carImage_0 ... carImage_4 as image fields
