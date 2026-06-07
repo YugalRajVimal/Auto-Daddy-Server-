@@ -8,8 +8,7 @@ import DealModel from "../../Schema/deals.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
 import Services from "../../Schema/services.schema.js";
 import counterSchema from "../../Schema/counter.schema.js";
-import VehicleType from "../../Schema/vehicle-type.schema.js";
-import CarDetailsModel from "../../Schema/CarDetails.schema.js";
+// import CarDetailsModel from "../../Schema/CarDetails.schema.js";
 import WebsiteTemplateSchema from "../../Schema/WebsiteTemplateSchema.js";
 import DashboardDataModel from "../../Schema/dashboardData.schema.js";
 import canadianMunicipalities from "../cityData.js";
@@ -4122,48 +4121,43 @@ async editMyServices(req, res) {
    */
   async getAllVehicleTypesAndServices(req, res) {
     try {
-      const [vehicleTypes, services, carDetails] = await Promise.all([
-        VehicleType.find({}).sort({ createdAt: -1 }).lean(),
+      // Use CarCompany as the single source for all vehicle data
+      const [carCompanies, services] = await Promise.all([
+        CarCompany.find({}).sort({ createdAt: -1 }).lean(),
         Services.find({}).sort({ createdAt: -1 }).lean(),
-        CarDetailsModel.find({}).lean()
       ]);
 
-      // Group car details by company, then for each company 
-      // generate objects of {id, model, year}
-      const carDetailsGrouped = [];
-      for (const company of carDetails) {
-        if (company?.companyName && Array.isArray(company.models)) {
-          const modelsList = [];
-          for (const model of company.models) {
-            if (model?.modelName && Array.isArray(model.years)) {
-              for (const year of model.years) {
-                modelsList.push({
-                  id: company._id?.toString?.() ?? undefined,
-                  name:company.companyName,
-                  model: model.modelName,
-                  year: year
-                });
-              }
-            }
-          }
-          carDetailsGrouped.push({
-            company: company.companyName,
-            id:company._id,
-            models: modelsList
-          });
-        }
-      }
+      // vehicleTypes = array of { companyName, id, brandLogo }
+    //   const vehicleTypes = carCompanies.map(company => ({
+    //     companyName: company.companyName,
+    //     id: company._id?.toString?.() ?? undefined,
+    //     brandLogo: company.brandLogo ?? null
+    //   }));
+
+      // carCompanyData: all info from carCompany, including models/years
+      // Each company item: { id, companyName, brandLogo, models: [ { modelName, years: [...] }, ... ] }
+      const carCompanyData = carCompanies.map(company => ({
+        id: company._id?.toString?.() ?? undefined,
+        companyName: company.companyName,
+        brandLogo: company.brandLogo ?? null,
+        models: Array.isArray(company.models)
+          ? company.models.map(model => ({
+              modelName: model.modelName,
+              years: Array.isArray(model.years) ? model.years : []
+            }))
+          : []
+      }));
 
       return res.status(200).json({
         success: true,
         services,
-        carDetails: carDetailsGrouped
+        carDetails: carCompanyData
       });
     } catch (error) {
       console.error("[getAllVehicleTypesAndServices] Error:", error);
       return res.status(500).json({
         success: false,
-        message: "Failed to fetch vehicle types, services, and car details"
+        message: "Failed to fetch vehicle types, services, and car companies"
       });
     }
   }
@@ -7293,133 +7287,133 @@ async collectPayment(req, res) {
 
 
 
-    /**
-     * Create a new car details entry
-     * POST /api/autoshop/car-details
-     * Body: { companyName: string, models: [{ modelName: string, years: number[] }] }
-     */
-    async createCarDetails(req, res) {
-        try {
-            const { companyName, models } = req.body;
-            // Check for required fields
-            if (!companyName || !Array.isArray(models)) {
-                console.log("[createCarDetails] Validation failed: companyName or models missing or invalid");
-                return res.status(400).json({ message: "companyName and models are required" });
-            }
-            // Validate each model
-            for (const model of models) {
-                if (
-                    (typeof model.modelName !== 'string' && typeof model.modelName !== 'number') ||
-                    !Array.isArray(model.years) ||
-                    !model.years.every(y => typeof y === 'number' || typeof y === 'string')
-                ) {
-                    console.log(`[createCarDetails] Validation failed for model:`, model);
-                    return res.status(400).json({ message: "Each model must have modelName (string or number) and years (number[] or string[])" });
-                }
-            }
+    // /**
+    //  * Create a new car details entry
+    //  * POST /api/autoshop/car-details
+    //  * Body: { companyName: string, models: [{ modelName: string, years: number[] }] }
+    //  */
+    // async createCarDetails(req, res) {
+    //     try {
+    //         const { companyName, models } = req.body;
+    //         // Check for required fields
+    //         if (!companyName || !Array.isArray(models)) {
+    //             console.log("[createCarDetails] Validation failed: companyName or models missing or invalid");
+    //             return res.status(400).json({ message: "companyName and models are required" });
+    //         }
+    //         // Validate each model
+    //         for (const model of models) {
+    //             if (
+    //                 (typeof model.modelName !== 'string' && typeof model.modelName !== 'number') ||
+    //                 !Array.isArray(model.years) ||
+    //                 !model.years.every(y => typeof y === 'number' || typeof y === 'string')
+    //             ) {
+    //                 console.log(`[createCarDetails] Validation failed for model:`, model);
+    //                 return res.status(400).json({ message: "Each model must have modelName (string or number) and years (number[] or string[])" });
+    //             }
+    //         }
     
 
-            const carDetails = new (await import("../../Schema/CarDetails.schema.js")).default({
-                companyName: companyName.trim(),
-                models
-            });
-            await carDetails.save();
-            console.log("[createCarDetails] Car details created successfully:", carDetails);
-            return res.status(201).json({ success: true, data: carDetails });
-        } catch (err) {
-            console.log("[createCarDetails] Error:", err);
-            return res.status(500).json({ message: "Failed to create car details", error: err.message });
-        }
-    }
+    //         const carDetails = new (await import("../../Schema/CarDetails.schema.js")).default({
+    //             companyName: companyName.trim(),
+    //             models
+    //         });
+    //         await carDetails.save();
+    //         console.log("[createCarDetails] Car details created successfully:", carDetails);
+    //         return res.status(201).json({ success: true, data: carDetails });
+    //     } catch (err) {
+    //         console.log("[createCarDetails] Error:", err);
+    //         return res.status(500).json({ message: "Failed to create car details", error: err.message });
+    //     }
+    // }
 
-    /**
-     * Edit/Update car details entry by ID
-     * PATCH /api/autoshop/car-details/:id
-     * Body: { companyName?: string, models?: [{ modelName: string, years: number[] }] }
-     */
-    async editCarDetails(req, res) {
-        try {
-            const id = req.params.id;
-            const { companyName, models } = req.body;
-            if (!id || (!companyName && !models)) {
-                return res.status(400).json({ message: "id and some data to update are required" });
-            }
+    // /**
+    //  * Edit/Update car details entry by ID
+    //  * PATCH /api/autoshop/car-details/:id
+    //  * Body: { companyName?: string, models?: [{ modelName: string, years: number[] }] }
+    //  */
+    // async editCarDetails(req, res) {
+    //     try {
+    //         const id = req.params.id;
+    //         const { companyName, models } = req.body;
+    //         if (!id || (!companyName && !models)) {
+    //             return res.status(400).json({ message: "id and some data to update are required" });
+    //         }
 
-            const update = {};
-            if (companyName) update.companyName = companyName.trim();
-            if (models) {
-                if (!Array.isArray(models)) {
-                    return res.status(400).json({ message: "models must be an array" });
-                }
-                for (const model of models) {
-                    if (
-                        typeof model.modelName !== 'string' ||
-                        !Array.isArray(model.years) ||
-                        !model.years.every(y => typeof y === 'number')
-                    ) {
-                        return res.status(400).json({ message: "Each model must have modelName (string) and years (number[])" });
-                    }
-                }
-                update.models = models;
-            }
-            const CarDetailsModel = (await import("../../Schema/CarDetails.schema.js")).default;
-            const carDetails = await CarDetailsModel.findByIdAndUpdate(
-                id,
-                { $set: update },
-                { new: true }
-            );
-            if (!carDetails) {
-                return res.status(404).json({ message: "Car details entry not found" });
-            }
-            return res.status(200).json({ success: true, data: carDetails });
-        } catch (err) {
-            console.error("[editCarDetails] Error:", err);
-            return res.status(500).json({ message: "Failed to update car details", error: err.message });
-        }
-    }
+    //         const update = {};
+    //         if (companyName) update.companyName = companyName.trim();
+    //         if (models) {
+    //             if (!Array.isArray(models)) {
+    //                 return res.status(400).json({ message: "models must be an array" });
+    //             }
+    //             for (const model of models) {
+    //                 if (
+    //                     typeof model.modelName !== 'string' ||
+    //                     !Array.isArray(model.years) ||
+    //                     !model.years.every(y => typeof y === 'number')
+    //                 ) {
+    //                     return res.status(400).json({ message: "Each model must have modelName (string) and years (number[])" });
+    //                 }
+    //             }
+    //             update.models = models;
+    //         }
+    //         const CarDetailsModel = (await import("../../Schema/CarDetails.schema.js")).default;
+    //         const carDetails = await CarDetailsModel.findByIdAndUpdate(
+    //             id,
+    //             { $set: update },
+    //             { new: true }
+    //         );
+    //         if (!carDetails) {
+    //             return res.status(404).json({ message: "Car details entry not found" });
+    //         }
+    //         return res.status(200).json({ success: true, data: carDetails });
+    //     } catch (err) {
+    //         console.error("[editCarDetails] Error:", err);
+    //         return res.status(500).json({ message: "Failed to update car details", error: err.message });
+    //     }
+    // }
 
-    /**
-     * Delete car details entry by ID
-     * DELETE /api/autoshop/car-details/:id
-     */
-    async deleteCarDetails(req, res) {
-        try {
-            const id = req.params.id;
-            if (!id) {
-                return res.status(400).json({ message: "id parameter is required" });
-            }
-            const CarDetailsModel = (await import("../../Schema/CarDetails.schema.js")).default;
-            const deleted = await CarDetailsModel.findByIdAndDelete(id);
-            if (!deleted) {
-                return res.status(404).json({ message: "Car details entry not found" });
-            }
-            return res.status(200).json({ success: true, message: "Car details entry deleted" });
-        } catch (err) {
-            console.error("[deleteCarDetails] Error:", err);
-            return res.status(500).json({ message: "Failed to delete car details", error: err.message });
-        }
-    }
+    // /**
+    //  * Delete car details entry by ID
+    //  * DELETE /api/autoshop/car-details/:id
+    //  */
+    // async deleteCarDetails(req, res) {
+    //     try {
+    //         const id = req.params.id;
+    //         if (!id) {
+    //             return res.status(400).json({ message: "id parameter is required" });
+    //         }
+    //         const CarDetailsModel = (await import("../../Schema/CarDetails.schema.js")).default;
+    //         const deleted = await CarDetailsModel.findByIdAndDelete(id);
+    //         if (!deleted) {
+    //             return res.status(404).json({ message: "Car details entry not found" });
+    //         }
+    //         return res.status(200).json({ success: true, message: "Car details entry deleted" });
+    //     } catch (err) {
+    //         console.error("[deleteCarDetails] Error:", err);
+    //         return res.status(500).json({ message: "Failed to delete car details", error: err.message });
+    //     }
+    // }
 
-    /**
-     * Fetch car details entries.
-     * GET /api/autoshop/car-details
-     * Optional query params: companyName
-     */
-    async fetchCarDetails(req, res) {
-        try {
-            const { companyName } = req.query;
-            const CarDetailsModel = (await import("../../Schema/CarDetails.schema.js")).default;
-            const filter = {};
-            if (companyName) {
-                filter.companyName = { $regex: new RegExp(companyName, 'i') };
-            }
-            const results = await CarDetailsModel.find(filter).lean();
-            return res.status(200).json({ success: true, data: results });
-        } catch (err) {
-            console.error("[fetchCarDetails] Error:", err);
-            return res.status(500).json({ message: "Failed to fetch car details", error: err.message });
-        }
-    }
+    // /**
+    //  * Fetch car details entries.
+    //  * GET /api/autoshop/car-details
+    //  * Optional query params: companyName
+    //  */
+    // async fetchCarDetails(req, res) {
+    //     try {
+    //         const { companyName } = req.query;
+    //         const CarDetailsModel = (await import("../../Schema/CarDetails.schema.js")).default;
+    //         const filter = {};
+    //         if (companyName) {
+    //             filter.companyName = { $regex: new RegExp(companyName, 'i') };
+    //         }
+    //         const results = await CarDetailsModel.find(filter).lean();
+    //         return res.status(200).json({ success: true, data: results });
+    //     } catch (err) {
+    //         console.error("[fetchCarDetails] Error:", err);
+    //         return res.status(500).json({ message: "Failed to fetch car details", error: err.message });
+    //     }
+    // }
 
 
 
@@ -7793,10 +7787,16 @@ async purchaseSubscription(req, res) {
     }
 
     // Basic fields validation
-    let { amount, days, paymentMethod, referenceId, remarks } = req.body;
-    console.log("[purchaseSubscription] STEP 3: Raw input", { amount, days, paymentMethod, referenceId, remarks });
+    let { amount, days, paymentMethod, referenceId, remarks, websiteTemplateId } = req.body;
+    console.log("[purchaseSubscription] STEP 3: Raw input", { amount, days, paymentMethod, referenceId, remarks, websiteTemplateId });
     amount = parseFloat(amount);
     days = parseInt(days);
+
+    // websiteTemplateId REQUIRED
+    if (!websiteTemplateId) {
+      console.log("[purchaseSubscription] STEP 3.1: websiteTemplateId missing");
+      return res.status(400).json({ success: false, message: "websiteTemplateId is required." });
+    }
 
     // Find user and business profile
     const user = await User.findById(userId).select("businessProfile email");
@@ -7994,9 +7994,15 @@ async purchaseSubscription(req, res) {
         cashfreePayload: cfOrderData,
       };
 
+      // Prepare update object
+      let updateObj = {
+        $push: { subscriptions: { $each: [pendingSub], $position: 0 } },
+        $set: { websiteTemplateId }
+      };
+
       await BusinessProfileModel.findByIdAndUpdate(
         business._id,
-        { $push: { subscriptions: { $each: [pendingSub], $position: 0 } } }
+        updateObj
       );
       console.log("[purchaseSubscription] STEP 20: Saved pending subscription, returning payment link");
 
@@ -8013,9 +8019,14 @@ async purchaseSubscription(req, res) {
     }
 
     // For other payment methods
+    let updateObj = {
+      $push: { subscriptions: { $each: [newSub], $position: 0 } },
+      $set: { websiteTemplateId }
+    };
+
     await BusinessProfileModel.findByIdAndUpdate(
       business._id,
-      { $push: { subscriptions: { $each: [newSub], $position: 0 } } }
+      updateObj
     );
     console.log("[purchaseSubscription] STEP 21: Saved non-cashfree subscription, success!");
 

@@ -126,6 +126,9 @@ const businessProfileSchema = new Schema({
   myDeals: [{ type: Types.ObjectId, ref: "Deal" }],
   notifications: [notificationSchema],
 
+  websiteTemplateId: { type: Types.ObjectId, ref: 'WebsiteTemplate', default: null },
+  domainName: { type: String, default: null }, // Business custom domain name (if connected)
+
   // Subscription details (most recent/current subscription at index 0, or push new on renewal)
   subscriptions: [subscriptionSchema],
 
@@ -133,4 +136,5 @@ const businessProfileSchema = new Schema({
 }, { timestamps: true });
 
 const BusinessProfileModel = mongoose.model("BusinessProfile", businessProfileSchema);
+
 export default BusinessProfileModel;

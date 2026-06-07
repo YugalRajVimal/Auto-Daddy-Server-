@@ -382,32 +382,32 @@ autoShopRouter.post(
 // Car Details Management Routes
 
 // Create a new car details entry
-autoShopRouter.post(
-  "/car-details",
-  jwtAuth,
-  (req, res) => autoShopController.createCarDetails(req, res)
-);
+// autoShopRouter.post(
+//   "/car-details",
+//   jwtAuth,
+//   (req, res) => autoShopController.createCarDetails(req, res)
+// );
 
-// Edit/Update car details entry by ID
-autoShopRouter.patch(
-  "/car-details/:id",
-  jwtAuth,
-  (req, res) => autoShopController.editCarDetails(req, res)
-);
+// // Edit/Update car details entry by ID
+// autoShopRouter.patch(
+//   "/car-details/:id",
+//   jwtAuth,
+//   (req, res) => autoShopController.editCarDetails(req, res)
+// );
 
-// Delete car details entry by ID
-autoShopRouter.delete(
-  "/car-details/:id",
-  jwtAuth,
-  (req, res) => autoShopController.deleteCarDetails(req, res)
-);
+// // Delete car details entry by ID
+// autoShopRouter.delete(
+//   "/car-details/:id",
+//   jwtAuth,
+//   (req, res) => autoShopController.deleteCarDetails(req, res)
+// );
 
-// Fetch car details entries (optionally filtered by companyName)
-autoShopRouter.get(
-  "/car-details",
-  jwtAuth,
-  (req, res) => autoShopController.fetchCarDetails(req, res)
-);
+// // Fetch car details entries (optionally filtered by companyName)
+// autoShopRouter.get(
+//   "/car-details",
+//   jwtAuth,
+//   (req, res) => autoShopController.fetchCarDetails(req, res)
+// );
 
 
 // Website Template Management Routes

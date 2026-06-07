@@ -1,6 +1,7 @@
 import express from "express";
 import AdminController from "../Controllers/Admin/admin.controller.js";
 import { brandLogoUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/brandLogoUpload.middleware.js";
+import { adsUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/adsUpload.middleware.js";
 
 
 const adminRouter = express.Router();
@@ -124,6 +125,79 @@ adminRouter.delete(
   "/car-company/:id",
   (req, res) => adminController.deleteCarCompany(req, res)
 );
+
+// Fetch website page list for businesses, with subscription info
+adminRouter.get(
+  "/website-page",
+  (req, res) => adminController.getWebsitePage(req, res)
+);
+
+// --- Cities CRUD Endpoints ---
+
+// Add a new city
+adminRouter.post(
+  "/cities",
+  (req, res) => adminController.addCity(req, res)
+);
+
+// Fetch all cities
+adminRouter.get(
+  "/cities",
+  (req, res) => adminController.fetchCities(req, res)
+);
+
+// Edit a city by ID
+adminRouter.patch(
+  "/cities/:id",
+  (req, res) => adminController.editCity(req, res)
+);
+
+// Delete a city by ID
+adminRouter.delete(
+  "/cities/:id",
+  (req, res) => adminController.deleteCity(req, res)
+);
+
+
+// -----------------------------
+// Ads CRUD Endpoints
+
+
+
+// Get all ads
+adminRouter.get(
+  "/ads",
+  (req, res) => adminController.getAllAds(req, res)
+);
+
+// Create a new ad (with image upload)
+adminRouter.post(
+  "/ads",
+  adsUploadMiddleware,
+  (req, res) => adminController.createAd(req, res)
+);
+
+// Edit an ad by ID (with optional image upload)
+adminRouter.patch(
+  "/ads/:id",
+  adsUploadMiddleware,
+  (req, res) => adminController.editAd(req, res)
+);
+
+// Delete an ad by ID
+adminRouter.delete(
+  "/ads/:id",
+  (req, res) => adminController.deleteAd(req, res)
+);
+
+// Get all currently running deals (whose offerEndsOnDate is in the future)
+adminRouter.get(
+  "/deals/running",
+  (req, res) => adminController.getAllRunningDeals(req, res)
+);
+
+
+
 
 
 
