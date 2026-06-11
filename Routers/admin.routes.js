@@ -134,27 +134,50 @@ adminRouter.get(
 
 // --- Cities CRUD Endpoints ---
 
-// Add a new city
+// --- Provinces & Cities within Provinces ---
+// Province CRUD
+
+// Add a new province
 adminRouter.post(
-  "/cities",
+  "/provinces",
+  (req, res) => adminController.addProvince(req, res)
+);
+
+// Fetch all provinces and their cities
+adminRouter.get(
+  "/provinces",
+  (req, res) => adminController.fetchProvinces(req, res)
+);
+
+// Edit a province by ID
+adminRouter.patch(
+  "/provinces/:provinceId",
+  (req, res) => adminController.editProvince(req, res)
+);
+
+// Delete a province by ID
+adminRouter.delete(
+  "/provinces/:provinceId",
+  (req, res) => adminController.deleteProvince(req, res)
+);
+
+// --- Cities CRUD within province ---
+
+// Add a city to a province
+adminRouter.post(
+  "/provinces/:provinceId/cities",
   (req, res) => adminController.addCity(req, res)
 );
 
-// Fetch all cities
-adminRouter.get(
-  "/cities",
-  (req, res) => adminController.fetchCities(req, res)
-);
-
-// Edit a city by ID
+// Edit a city's name in a province (by city name, case-insensitive)
 adminRouter.patch(
-  "/cities/:id",
+  "/provinces/:provinceId/cities/:cityName",
   (req, res) => adminController.editCity(req, res)
 );
 
-// Delete a city by ID
+// Delete a city from a province (by city name, case-insensitive)
 adminRouter.delete(
-  "/cities/:id",
+  "/provinces/:provinceId/cities/:cityName",
   (req, res) => adminController.deleteCity(req, res)
 );
 
@@ -164,30 +187,32 @@ adminRouter.delete(
 
 
 
-// Get all ads
+// ------------- BUSINESS PROFILE ADS (business-specific ads under a profile) -------------
+
+// Get all ads for a specific business profile
 adminRouter.get(
-  "/ads",
-  (req, res) => adminController.getAllAds(req, res)
+  "/business-profiles/:businessId/ads",
+  (req, res) => adminController.getAllBusinessAds(req, res)
 );
 
-// Create a new ad (with image upload)
+// Create (add) a new ad to a specific business profile (with image upload)
 adminRouter.post(
-  "/ads",
+  "/business-profiles/:businessId/ads",
   adsUploadMiddleware,
-  (req, res) => adminController.createAd(req, res)
+  (req, res) => adminController.createBusinessAd(req, res)
 );
 
-// Edit an ad by ID (with optional image upload)
+// Edit an ad in a business profile by adId (with optional image upload)
 adminRouter.patch(
-  "/ads/:id",
+  "/business-profiles/:businessId/ads/:adId",
   adsUploadMiddleware,
-  (req, res) => adminController.editAd(req, res)
+  (req, res) => adminController.editBusinessAd(req, res)
 );
 
-// Delete an ad by ID
+// Delete an ad by adId from a specific business profile
 adminRouter.delete(
-  "/ads/:id",
-  (req, res) => adminController.deleteAd(req, res)
+  "/business-profiles/:businessId/ads/:adId",
+  (req, res) => adminController.deleteBusinessAd(req, res)
 );
 
 // Get all currently running deals (whose offerEndsOnDate is in the future)
@@ -198,6 +223,28 @@ adminRouter.get(
 
 
 
+
+// Get job card payments details (with optional filtering/search)
+// Route: GET /admin/job-cards/payments
+adminRouter.get(
+  "/job-cards/payments",
+  (req, res) => adminController.getAllPaymentDetailsOfAllJobCards(req, res)
+);
+
+
+// Send a custom push notification to a specific user
+// Route: POST /admin/notification/custom/send
+adminRouter.post(
+  "/notification/custom/send",
+  (req, res) => adminController.sendCustomNotificationToUser(req, res)
+);
+
+// Route: GET /admin/invite-help
+// Get all InviteHelp documents sent to Admin, populate user and businessProfile, optionally filter by serviceId
+adminRouter.get(
+  "/invite-help",
+  (req, res) => adminController.getInviteHelpToAdmin(req, res)
+);
 
 
 

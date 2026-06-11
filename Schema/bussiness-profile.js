@@ -131,6 +131,11 @@ const businessProfileSchema = new Schema({
 
   // Subscription details (most recent/current subscription at index 0, or push new on renewal)
   subscriptions: [subscriptionSchema],
+  /**
+   * Reference to ads associated with this business profile.
+   * Stores array of Ads document ObjectIds.
+   */
+  ads: [{ type: Types.ObjectId, ref: "Ads" }],
 
   createdAt: { type: Date, default: Date.now }
 }, { timestamps: true });

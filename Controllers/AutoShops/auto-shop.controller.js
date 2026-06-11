@@ -14,6 +14,7 @@ import DashboardDataModel from "../../Schema/dashboardData.schema.js";
 import canadianMunicipalities from "../cityData.js";
 import CarCompany from "../../Schema/car-company-schema.js";
 import axios from "axios";
+import InviteHelpSchema from "../../Schema/InviteHelp.schema.js";
 
 
 
@@ -8048,6 +8049,73 @@ async purchaseSubscription(req, res) {
 }
 
 
+
+
+/**
+ * AutoShop owner sends an invite help audio to the Admin.
+ * Expects multipart/form-data:
+ *   - audioBlob: binary/mp3/wav audio file (field)
+ *   - serviceId: string
+ *   - serviceName: string
+ *   - userId: sender - ObjectId as string
+ * 
+ * req.user is assumed to be the autoshopowner (from authentication)
+ */
+async inviteHelpAutoShopToAdmin(req, res) {
+  try {
+    // Ensure file uploaded
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "Audio blob (file) is required",
+      });
+    }
+
+    const userId = req.user && req.user.id;
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing userId in authenticated request."
+      });
+    }
+
+    const { serviceId, serviceName } = req.body;
+
+    if (!serviceId || !serviceName) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing one or more required fields: serviceId, serviceName, userId"
+      });
+    }
+
+    // Save InviteHelp document in DB
+    const inviteHelp = new InviteHelpSchema({
+      serviceId,
+      serviceName,
+      audioBlob: req.file.buffer,
+      userId,
+      role: "autoshopowner",
+      to: "Admin"
+    });
+
+    await inviteHelp.save();
+
+    return res.status(201).json({
+      success: true,
+      message: "Invite for help sent to Admin",
+      data: {
+        id: inviteHelp._id
+      }
+    });
+  } catch (err) {
+    console.error("[InviteHelpAutoShopToAdmin] Error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to send invite help to Admin",
+      error: err.message
+    });
+  }
+}
 
 
 
