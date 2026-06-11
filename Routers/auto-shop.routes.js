@@ -16,6 +16,10 @@ import { businessAndTeamUploadMiddleware } from "../middlewares/ImageUploadMiddl
 import { dealUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/dealUpload.middleware.js";
 import { onboardCarOwnerUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/onboardCustomerImageUpload.middleware.js";
 
+import multer from "multer";
+
+const uploadAudio = multer({ storage: multer.memoryStorage() });
+
 
 // Route to get dashboard details for the autoshopowner (protected, requires JWT)
 autoShopRouter.get(
@@ -465,6 +469,17 @@ autoShopRouter.post(
   jwtAuth,
   (req, res) => autoShopController.purchaseSubscription(req, res)
 );
+
+// Endpoint for sending an invite help audio to the Admin (autoshopowner only)
+autoShopRouter.post(
+  "/invite-help-admin",
+  jwtAuth,
+  uploadAudio.single("audio"),
+  async (req, res) => {
+    await autoShopController.inviteHelpAutoShopToAdmin(req, res);
+  }
+);
+
 
 
 
