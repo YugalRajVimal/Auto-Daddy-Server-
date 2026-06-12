@@ -2,12 +2,19 @@ import express from "express";
 import AdminController from "../Controllers/Admin/admin.controller.js";
 import { brandLogoUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/brandLogoUpload.middleware.js";
 import { adsUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/adsUpload.middleware.js";
+import { subAdminManagementRouter } from "./subadmin.routes.js";
 
 
 const adminRouter = express.Router();
 
 
 const adminController = new AdminController();
+
+
+
+// Mount subAdmin management routes under /admin/subadmins
+adminRouter.use("/subadmins", subAdminManagementRouter);
+
 
 
 adminRouter.get("/", (req, res) => {
@@ -251,3 +258,320 @@ adminRouter.get(
 
 
 export default adminRouter;
+
+
+// // Routers/admin.routes.js  — FIXED VERSION
+// //
+// // BUG FIXES applied vs the version you shared:
+// //
+// //  1. Upload middlewares (brandLogoUploadMiddleware, adsUploadMiddleware) are
+// //     now placed AFTER auth+permission middlewares, not before.
+// //     Multer must never run before auth — it consumes the request body,
+// //     so req.body is empty when your auth/permission middleware reads it.
+// //
+// //  2. /admin/subadmins is mounted WITHOUT an extra adminOrSubAdminAuth wrapper
+// //     because subAdminManagementRouter already applies its own auth internally
+// //     via router.use(adminOrSubAdminAuth, requireAdmin). Double-wrapping caused
+// //     the middleware chain to run auth twice and set req.user twice.
+// //
+// //  3. Notification route permission changed from ads→"add" to users→"view"
+// //     (sending notifications is a user-management action, not an ads action).
+
+// import express from "express";
+// import AdminController from "../Controllers/Admin/admin.controller.js";
+// import { brandLogoUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/brandLogoUpload.middleware.js";
+// import { adsUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/adsUpload.middleware.js";
+// import { subAdminManagementRouter } from "./subadmin.routes.js";
+// import { adminOrSubAdminAuth, requirePermission } from "../middlewares/Auth/permission.middleware.js";
+
+// const adminRouter = express.Router();
+// const adminController = new AdminController();
+
+// // ─── Sub Admin Management ─────────────────────────────────────────────────────
+// // NOTE: NO extra adminOrSubAdminAuth here — subAdminManagementRouter applies
+// // its own auth+requireAdmin internally. Adding it again causes double-auth.
+// adminRouter.use("/subadmins", subAdminManagementRouter);
+
+// // ─── Health check ─────────────────────────────────────────────────────────────
+// adminRouter.get("/", (req, res) => {
+//   res.send("Welcome to Auto Daddy Admin APIs");
+// });
+
+// // ─── Dashboard ────────────────────────────────────────────────────────────────
+// adminRouter.get(
+//   "/dashboard",
+//   adminOrSubAdminAuth,
+//   requirePermission("dashboard", "view"),
+//   (req, res) => adminController.getDashboardDetails(req, res)
+// );
+
+// // ─── Services ─────────────────────────────────────────────────────────────────
+// adminRouter.post(
+//   "/services",
+//   adminOrSubAdminAuth,
+//   requirePermission("services", "add"),
+//   (req, res) => adminController.addService(req, res)
+// );
+// adminRouter.get(
+//   "/services",
+//   adminOrSubAdminAuth,
+//   requirePermission("services", "view"),
+//   (req, res) => adminController.fetchServices(req, res)
+// );
+// adminRouter.put(
+//   "/services/:id",
+//   adminOrSubAdminAuth,
+//   requirePermission("services", "edit"),
+//   (req, res) => adminController.editService(req, res)
+// );
+// adminRouter.delete(
+//   "/services/:id",
+//   adminOrSubAdminAuth,
+//   requirePermission("services", "delete"),
+//   (req, res) => adminController.deleteService(req, res)
+// );
+
+// // ─── Users ────────────────────────────────────────────────────────────────────
+// adminRouter.get(
+//   "/carowners",
+//   adminOrSubAdminAuth,
+//   requirePermission("users", "view"),
+//   (req, res) => adminController.getAllCarOwners(req, res)
+// );
+// adminRouter.get(
+//   "/autoshopowners",
+//   adminOrSubAdminAuth,
+//   requirePermission("users", "view"),
+//   (req, res) => adminController.getAllAutoShopOwners(req, res)
+// );
+// adminRouter.post(
+//   "/autoshopowners/toggle-status",
+//   adminOrSubAdminAuth,
+//   requirePermission("users", "edit"),
+//   (req, res) => adminController.toggleAutoShopOwnerStatus(req, res)
+// );
+
+// // ─── Vehicle Types ────────────────────────────────────────────────────────────
+// adminRouter.get(
+//   "/vehicletypes",
+//   adminOrSubAdminAuth,
+//   requirePermission("services", "view"),
+//   (req, res) => adminController.fetchVehicleTypes(req, res)
+// );
+// adminRouter.post(
+//   "/vehicletypes",
+//   adminOrSubAdminAuth,
+//   requirePermission("services", "add"),
+//   (req, res) => adminController.addVehicleType(req, res)
+// );
+// adminRouter.put(
+//   "/vehicletypes/:id",
+//   adminOrSubAdminAuth,
+//   requirePermission("services", "edit"),
+//   (req, res) => adminController.updateVehicleType(req, res)
+// );
+// adminRouter.delete(
+//   "/vehicletypes/:id",
+//   adminOrSubAdminAuth,
+//   requirePermission("services", "delete"),
+//   (req, res) => adminController.deleteVehicleType(req, res)
+// );
+
+// // ─── Website Templates ────────────────────────────────────────────────────────
+// adminRouter.post(
+//   "/website-templates",
+//   adminOrSubAdminAuth,
+//   requirePermission("websiteTemplates", "add"),
+//   (req, res) => adminController.createWebsiteTemplate(req, res)
+// );
+// adminRouter.put(
+//   "/website-templates/:id",
+//   adminOrSubAdminAuth,
+//   requirePermission("websiteTemplates", "edit"),
+//   (req, res) => adminController.editWebsiteTemplate(req, res)
+// );
+// adminRouter.delete(
+//   "/website-templates/:id",
+//   adminOrSubAdminAuth,
+//   requirePermission("websiteTemplates", "delete"),
+//   (req, res) => adminController.deleteWebsiteTemplate(req, res)
+// );
+// adminRouter.get(
+//   "/website-templates",
+//   adminOrSubAdminAuth,
+//   requirePermission("websiteTemplates", "view"),
+//   (req, res) => adminController.fetchWebsiteTemplates(req, res)
+// );
+
+// // ─── Dashboard Data ───────────────────────────────────────────────────────────
+// adminRouter.post(
+//   "/dashboard-data",
+//   adminOrSubAdminAuth,
+//   requirePermission("dashboardData", "add"),
+//   (req, res) => adminController.upsertDashboardData(req, res)
+// );
+// adminRouter.get(
+//   "/dashboard-data",
+//   adminOrSubAdminAuth,
+//   requirePermission("dashboardData", "view"),
+//   (req, res) => adminController.fetchDashboardData(req, res)
+// );
+// adminRouter.patch(
+//   "/dashboard-data",
+//   adminOrSubAdminAuth,
+//   requirePermission("dashboardData", "edit"),
+//   (req, res) => adminController.editDashboardData(req, res)
+// );
+// adminRouter.delete(
+//   "/dashboard-data",
+//   adminOrSubAdminAuth,
+//   requirePermission("dashboardData", "delete"),
+//   (req, res) => adminController.deleteDashboardData(req, res)
+// );
+
+// // ─── Car Companies ────────────────────────────────────────────────────────────
+// // FIX: auth + permission BEFORE upload middleware (multer consumes req.body)
+// adminRouter.post(
+//   "/car-company",
+//   adminOrSubAdminAuth,
+//   requirePermission("carCompanies", "add"),
+//   brandLogoUploadMiddleware,                        // ← upload LAST, after auth
+//   (req, res) => adminController.addCarCompany(req, res)
+// );
+// adminRouter.patch(
+//   "/car-company/:id",
+//   adminOrSubAdminAuth,
+//   requirePermission("carCompanies", "edit"),
+//   brandLogoUploadMiddleware,                        // ← upload LAST, after auth
+//   (req, res) => adminController.editCarCompany(req, res)
+// );
+// adminRouter.get(
+//   "/car-company",
+//   adminOrSubAdminAuth,
+//   requirePermission("carCompanies", "view"),
+//   (req, res) => adminController.fetchCarCompanies(req, res)
+// );
+// adminRouter.delete(
+//   "/car-company/:id",
+//   adminOrSubAdminAuth,
+//   requirePermission("carCompanies", "delete"),
+//   (req, res) => adminController.deleteCarCompany(req, res)
+// );
+
+// // ─── Website Page ─────────────────────────────────────────────────────────────
+// adminRouter.get(
+//   "/website-page",
+//   adminOrSubAdminAuth,
+//   requirePermission("websiteTemplates", "view"),
+//   (req, res) => adminController.getWebsitePage(req, res)
+// );
+
+// // ─── Provinces ────────────────────────────────────────────────────────────────
+// adminRouter.post(
+//   "/provinces",
+//   adminOrSubAdminAuth,
+//   requirePermission("provinces", "add"),
+//   (req, res) => adminController.addProvince(req, res)
+// );
+// adminRouter.get(
+//   "/provinces",
+//   adminOrSubAdminAuth,
+//   requirePermission("provinces", "view"),
+//   (req, res) => adminController.fetchProvinces(req, res)
+// );
+// adminRouter.patch(
+//   "/provinces/:provinceId",
+//   adminOrSubAdminAuth,
+//   requirePermission("provinces", "edit"),
+//   (req, res) => adminController.editProvince(req, res)
+// );
+// adminRouter.delete(
+//   "/provinces/:provinceId",
+//   adminOrSubAdminAuth,
+//   requirePermission("provinces", "delete"),
+//   (req, res) => adminController.deleteProvince(req, res)
+// );
+
+// // ─── Cities ───────────────────────────────────────────────────────────────────
+// adminRouter.post(
+//   "/provinces/:provinceId/cities",
+//   adminOrSubAdminAuth,
+//   requirePermission("cities", "add"),
+//   (req, res) => adminController.addCity(req, res)
+// );
+// adminRouter.patch(
+//   "/provinces/:provinceId/cities/:cityName",
+//   adminOrSubAdminAuth,
+//   requirePermission("cities", "edit"),
+//   (req, res) => adminController.editCity(req, res)
+// );
+// adminRouter.delete(
+//   "/provinces/:provinceId/cities/:cityName",
+//   adminOrSubAdminAuth,
+//   requirePermission("cities", "delete"),
+//   (req, res) => adminController.deleteCity(req, res)
+// );
+
+// // ─── Business Ads ─────────────────────────────────────────────────────────────
+// // FIX: auth + permission BEFORE adsUploadMiddleware
+// adminRouter.get(
+//   "/business-profiles/:businessId/ads",
+//   adminOrSubAdminAuth,
+//   requirePermission("ads", "view"),
+//   (req, res) => adminController.getAllBusinessAds(req, res)
+// );
+// adminRouter.post(
+//   "/business-profiles/:businessId/ads",
+//   adminOrSubAdminAuth,
+//   requirePermission("ads", "add"),
+//   adsUploadMiddleware,                              // ← upload LAST, after auth
+//   (req, res) => adminController.createBusinessAd(req, res)
+// );
+// adminRouter.patch(
+//   "/business-profiles/:businessId/ads/:adId",
+//   adminOrSubAdminAuth,
+//   requirePermission("ads", "edit"),
+//   adsUploadMiddleware,                              // ← upload LAST, after auth
+//   (req, res) => adminController.editBusinessAd(req, res)
+// );
+// adminRouter.delete(
+//   "/business-profiles/:businessId/ads/:adId",
+//   adminOrSubAdminAuth,
+//   requirePermission("ads", "delete"),
+//   (req, res) => adminController.deleteBusinessAd(req, res)
+// );
+
+// // ─── Running Deals ────────────────────────────────────────────────────────────
+// adminRouter.get(
+//   "/deals/running",
+//   adminOrSubAdminAuth,
+//   requirePermission("runningDeals", "view"),
+//   (req, res) => adminController.getAllRunningDeals(req, res)
+// );
+
+// // ─── Wallet / Job Card Payments ───────────────────────────────────────────────
+// adminRouter.get(
+//   "/job-cards/payments",
+//   adminOrSubAdminAuth,
+//   requirePermission("wallet", "view"),
+//   (req, res) => adminController.getAllPaymentDetailsOfAllJobCards(req, res)
+// );
+
+// // ─── Notifications ────────────────────────────────────────────────────────────
+// // FIX: was incorrectly using ads→"add". Notifications are a user action.
+// adminRouter.post(
+//   "/notification/custom/send",
+//   adminOrSubAdminAuth,
+//   requirePermission("users", "edit"),
+//   (req, res) => adminController.sendCustomNotificationToUser(req, res)
+// );
+
+// // ─── Invite Help ──────────────────────────────────────────────────────────────
+// adminRouter.get(
+//   "/invite-help",
+//   adminOrSubAdminAuth,
+//   requirePermission("inviteHelp", "view"),
+//   (req, res) => adminController.getInviteHelpToAdmin(req, res)
+// );
+
+// export default adminRouter;
