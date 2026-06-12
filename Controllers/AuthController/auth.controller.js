@@ -5,6 +5,8 @@ import {
 } from "../../Schema/user.schema.js";
 import ExpiredTokenModel from "../../Schema/expired-token.schema.js";
 import { Admin } from "../../Schema/admin.schema.js";
+import { SubAdminActivity } from "../../Schema/subadmin-activity.schema.js";
+import { SubAdmin } from "../../Schema/subadmin.schema.js";
 
 // Allowed roles from user.schema.js (see enum in file_context_2 line 8)
 const ALLOWED_ROLES = ["patient", "therapist", "admin", "carowner", "autoshopowner"];
@@ -677,21 +679,35 @@ class AuthController {
   adminCheckAuth = async (req, res) => {
     try {
       const { id, role } = req.user || {};
-      if (!id || role !== "admin") {
-        return res.status(401).json({ message: "Unauthorized: Admin only" });
+      if (!id || !["admin", "subadmin"].includes(role)) {
+        return res.status(401).json({ message: "Unauthorized: Admin/Subadmin only" });
       }
 
-      const admin = await Admin.findOne({ _id: id, role: "admin" });
-      if (!admin) {
-        return res.status(401).json({ message: "Admin not found" });
-      }
+      if (role === "admin") {
+        const admin = await Admin.findOne({ _id: id, role: "admin" });
+        if (!admin) {
+          return res.status(401).json({ message: "Admin not found" });
+        }
+        return res.status(200).json({
+          message: "Admin authorized",
+          name: admin.name,
+          email: admin.email
+        });
+      } else if (role === "subadmin") {
+        const subAdmin = await SubAdmin.findById(id).select("-password");
+        if (!subAdmin || !subAdmin.isActive)
+          return res.status(401).json({ message: "Unauthorized: Subadmin not found or inactive" });
 
-      // No status or suspend support in Admin schema, so skip
-      return res.status(200).json({
-        message: "Admin authorized",
-        name: admin.name,
-        email: admin.email
-      });
+        return res.status(200).json({
+          message: "Subadmin authorized",
+          name: subAdmin.name,
+          email: subAdmin.email,
+          permissions: subAdmin.permissions,
+        });
+      } else {
+        // Should not reach here
+        return res.status(401).json({ message: "Unauthorized: Invalid role" });
+      }
     } catch (error) {
       console.error("[adminCheckAuth] Error encountered:", error);
       return res.status(401).json({ message: "Unauthorized" });
@@ -797,6 +813,89 @@ class AuthController {
       return res.status(500).json({ message: "Internal Server Error" });
     }
   };
+
+
+ 
+/**
+ * POST /api/auth/subadmin/login
+ * Password-based login for SubAdmins.
+ * Returns JWT with { id, role, permissions }.
+ */
+ subAdminLogin = async(req, res) => {
+  try {
+    const { email, password } = req.body;
+    if (!email || !password)
+      return res.status(400).json({ success: false, message: "Email and password are required." });
+ 
+    const subAdmin = await SubAdmin.findOne({ email: email.trim().toLowerCase() });
+    if (!subAdmin)
+      return res.status(401).json({ success: false, message: "Invalid credentials." });
+ 
+    if (!subAdmin.isActive)
+      return res.status(403).json({ success: false, message: "Account inactive. Contact the admin." });
+ 
+    const valid = await subAdmin.comparePassword(password);
+    if (!valid)
+      return res.status(401).json({ success: false, message: "Invalid credentials." });
+ 
+    subAdmin.lastLogin = new Date();
+    await subAdmin.save();
+ 
+    const token = jwt.sign(
+      { id: subAdmin._id, role: "subadmin", permissions: subAdmin.permissions },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+ 
+    // Log activity
+    try {
+      await SubAdminActivity.create({
+        performedBy: subAdmin._id,
+        performedByRole: "subadmin",
+        performedByName: subAdmin.name,
+        action: "LOGIN",
+        description: "SubAdmin logged in",
+        targetSubAdmin: subAdmin._id,
+        ipAddress: req.headers["x-forwarded-for"]?.split(",")[0] || req.socket?.remoteAddress || "",
+      });
+    } catch { /* non-fatal */ }
+ 
+    return res.status(200).json({
+      success: true,
+      token,
+      user: {
+        id: subAdmin._id,
+        name: subAdmin.name,
+        email: subAdmin.email,
+        role: "subadmin",
+        permissions: subAdmin.permissions,
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Login failed", error: err.message });
+  }
+}
+ 
+/**
+ * POST /api/auth/subadmin/check-auth
+ * Verify a subadmin token is still valid and return user info.
+ */
+   subAdminCheckAuth =async (req, res) =>{
+  try {
+    const subAdmin = await SubAdmin.findById(req.user.id).select("-password");
+    if (!subAdmin || !subAdmin.isActive)
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+ 
+    return res.status(200).json({
+      success: true,
+      name: subAdmin.name,
+      email: subAdmin.email,
+      permissions: subAdmin.permissions,
+    });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: err.message });
+  }
+}
 
 }
 

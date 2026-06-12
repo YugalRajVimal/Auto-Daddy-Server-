@@ -520,15 +520,6 @@ async getAllAutoShopOwners(req, res) {
   }
 }
 
-// --- Enable/Disable AutoShopOwner (with transaction support) ---
-
-/**
- * Enable or disable an AutoShopOwner (and their linked businessProfile).
- * - Updates User's isDisabled field.
- * - Updates businessProfile's isBusinessActive.
- * - Accepts { userId, disable } in req.body.
- * - Uses MongoDB transactions for safety (when supported).
- */
 async toggleAutoShopOwnerStatus(req, res) {
   let session = null;
   try {
@@ -595,87 +586,6 @@ async toggleAutoShopOwnerStatus(req, res) {
   }
 }
 
-
-
-
-
-// --- VEHICLE TYPE CONTROLLERS (CRUD) ---
-
-
-// // Fetch all vehicle types
-// async fetchVehicleTypes  (req, res) {
-//   try {
-//     const types = await VehicleType.find({});
-//     res.status(200).json({ success: true, data: types });
-//   } catch (err) {
-//     res.status(500).json({ success: false, message: "Error fetching vehicle types", error: err.message });
-//   }
-// };
-
-// // Add a new vehicle type
-// async addVehicleType  (req, res) {
-//   try {
-//     const { type } = req.body;
-//     if (!type || typeof type !== "string" || !type.trim()) {
-//       return res.status(400).json({ success: false, message: "Vehicle type is required and must be a non-empty string" });
-//     }
-//     // Prevent duplicate type (case-insensitive)
-//     const exists = await VehicleType.findOne({ type: { $regex: new RegExp(`^${type.trim()}$`, 'i') } });
-//     if (exists) {
-//       return res.status(409).json({ success: false, message: "Vehicle type already exists" });
-//     }
-//     const vehicleType = new VehicleType({ type: type.trim() });
-//     await vehicleType.save();
-//     res.status(201).json({ success: true, data: vehicleType });
-//   } catch (err) {
-//     res.status(500).json({ success: false, message: "Error adding vehicle type", error: err.message });
-//   }
-// };
-
-// // Edit a vehicle type
-// async updateVehicleType  (req, res) {
-//   try {
-//     const { id } = req.params;
-//     const { type } = req.body;
-//     if (!type || typeof type !== "string" || !type.trim()) {
-//       return res.status(400).json({ success: false, message: "Vehicle type is required and must be a non-empty string" });
-//     }
-//     // Prevent updating to a duplicate type
-//     const exists = await VehicleType.findOne({ 
-//       _id: { $ne: id }, 
-//       type: { $regex: new RegExp(`^${type.trim()}$`, 'i') } 
-//     });
-//     if (exists) {
-//       return res.status(409).json({ success: false, message: "Another vehicle type with this name already exists" });
-//     }
-
-//     const updated = await VehicleType.findByIdAndUpdate(
-//       id,
-//       { type: type.trim() },
-//       { new: true }
-//     );
-//     if (!updated) {
-//       return res.status(404).json({ success: false, message: "Vehicle type not found" });
-//     }
-//     res.status(200).json({ success: true, data: updated });
-//   } catch (err) {
-//     res.status(500).json({ success: false, message: "Error updating vehicle type", error: err.message });
-//   }
-// };
-
-// // Delete a vehicle type
-// async deleteVehicleType  (req, res) {
-//   try {
-//     const { id } = req.params;
-//     const deleted = await VehicleType.findByIdAndDelete(id);
-//     if (!deleted) {
-//       return res.status(404).json({ success: false, message: "Vehicle type not found" });
-//     }
-//     res.status(200).json({ success: true, message: "Vehicle type deleted", data: deleted });
-//   } catch (err) {
-//     res.status(500).json({ success: false, message: "Error deleting vehicle type", error: err.message });
-//   }
-// };
 
 
   /**
@@ -1424,162 +1334,8 @@ async deleteCity(req, res) {
     return null;
 };
 
-// // Admin: Get all ads for a specific business profile
-// // @route   GET /admin/business-profiles/:businessId/ads
-// // @desc    Get all ads for a business profile
-// // @access  Admin
-// async getAllBusinessAds(req, res) {
-//     try {
-//         const { businessId } = req.params;
-//         const business = await BusinessProfileModel.findById(businessId);
-//         if (!business) {
-//             return res.status(404).json({ success: false, message: "Business Profile not found" });
-//         }
-//         // Return the ads array (see @bussiness-profile.js for 'ads' field)
-//         return res.status(200).json({ success: true, data: business.ads || [] });
-//     } catch (err) {
-//         return res.status(500).json({ success: false, message: "Failed to fetch ads", error: err.message });
-//     }
-// }
 
-// // Admin: Create (add) a new ad to a business profile
-// // @route   POST /admin/business-profiles/:businessId/ads
-// // @desc    Add ad to a business profile
-// // @access  Admin
-// async createBusinessAd(req, res) {
-//     let imagePath;
-//     try {
-//         const { businessId } = req.params;
-//         const { category, websiteURL } = req.body;
 
-//         // Check image upload
-//         if (!req.files || !req.files.adsImage || !req.files.adsImage[0]) {
-//             deleteUploadedFiles(req.files); // Clean up any files
-//             return res.status(400).json({ success: false, message: "adsImage is required" });
-//         }
-//         imagePath = req.files.adsImage[0].path;
-
-//         const errMsg = this.validateAdInputs(category, websiteURL, imagePath);
-//         if (errMsg) {
-//             deleteUploadedFiles(req.files);
-//             return res.status(400).json({ success: false, message: errMsg });
-//         }
-
-//         const business = await BusinessProfileModel.findById(businessId);
-//         if (!business) {
-//             deleteUploadedFiles(imagePath); // Or req.files
-//             return res.status(404).json({ success: false, message: "Business Profile not found" });
-//         }
-
-//         // Create new ad object
-//         const newAd = {
-//             category,
-//             imageUpload: imagePath,
-//             websiteURL,
-//             createdAt: new Date()
-//         };
-
-//         // Push ad to the start of the array (most recent first)
-//         business.ads.unshift(newAd);
-
-//         await business.save();
-//         // Return the created ad (the ad we just pushed)
-//         return res.status(201).json({ success: true, data: newAd });
-//     } catch (err) {
-//         if (req.files) deleteUploadedFiles(req.files);
-//         return res.status(500).json({ success: false, message: "Failed to create ad", error: err.message });
-//     }
-// }
-
-// // Admin: Edit/update an ad in a business profile
-// // @route   PATCH /admin/business-profiles/:businessId/ads/:adId
-// // @desc    Edit ad in a business profile by id
-// // @access  Admin
-// async editBusinessAd(req, res) {
-//     let newImagePath;
-//     try {
-//         const { businessId, adId } = req.params;
-//         const business = await BusinessProfileModel.findById(businessId);
-//         if (!business) {
-//             if (req.files) deleteUploadedFiles(req.files);
-//             return res.status(404).json({ success: false, message: "Business Profile not found" });
-//         }
-
-//         // Find index of ad within business.ads array
-//         const adIdx = business.ads.findIndex(ad => ad._id?.toString?.() === adId || ad.id === adId);
-//         if (adIdx === -1) {
-//             if (req.files) deleteUploadedFiles(req.files);
-//             return res.status(404).json({ success: false, message: "Ad not found in this business" });
-//         }
-//         const ad = business.ads[adIdx];
-//         let oldImagePath = ad.imageUpload;
-
-//         // Update fields
-//         if (req.body.category) ad.category = req.body.category;
-//         if (req.body.websiteURL) ad.websiteURL = req.body.websiteURL;
-
-//         // New image upload?
-//         if (req.files && req.files.adsImage && req.files.adsImage[0]) {
-//             newImagePath = req.files.adsImage[0].path;
-//             ad.imageUpload = newImagePath;
-//         }
-
-//         // Validate new/updated category
-//         if (ad.category && !['Deals', 'Ads', 'Calendor'].includes(ad.category)) {
-//             if (newImagePath) deleteUploadedFiles(newImagePath);
-//             return res.status(400).json({ success: false, message: "Invalid category" });
-//         }
-
-//         // Save changes
-//         await business.save();
-
-//         // Delete old image if replaced
-//         if (newImagePath && oldImagePath && oldImagePath !== newImagePath) {
-//             deleteUploadedFiles(oldImagePath);
-//         }
-
-//         return res.status(200).json({ success: true, data: ad });
-//     } catch (err) {
-//         if (req.files) deleteUploadedFiles(req.files);
-//         return res.status(500).json({ success: false, message: "Failed to edit ad", error: err.message });
-//     }
-// }
-
-// // Admin: Delete an ad from a business profile
-// // @route   DELETE /admin/business-profiles/:businessId/ads/:adId
-// // @desc    Delete ad by adId from a business profile
-// // @access  Admin
-// async deleteBusinessAd(req, res) {
-//     try {
-//         const { businessId, adId } = req.params;
-//         const business = await BusinessProfileModel.findById(businessId);
-//         if (!business) {
-//             return res.status(404).json({ success: false, message: "Business Profile not found" });
-//         }
-
-//         const adIdx = business.ads.findIndex(ad => ad._id?.toString?.() === adId || ad.id === adId);
-//         if (adIdx === -1) {
-//             return res.status(404).json({ success: false, message: "Ad not found in this business" });
-//         }
-
-//         // Remove ad and delete image if present
-//         const [removedAd] = business.ads.splice(adIdx, 1);
-//         await business.save();
-
-//         if (removedAd?.imageUpload) deleteUploadedFiles(removedAd.imageUpload);
-
-//         return res.status(200).json({ success: true, message: "Ad deleted successfully" });
-//     } catch (err) {
-//         return res.status(500).json({ success: false, message: "Failed to delete ad", error: err.message });
-//     }
-// }
-
-// ----------- BUSINESS PROFILE ADS CRUD -----------
-// business.ads stores ObjectId refs → must create/update/delete via AdsModel directly
-
-// Admin: Get all ads for a specific business profile
-// @route   GET /admin/business-profiles/:businessId/ads
-// @access  Admin
 
 async getAllBusinessAds(req, res) {
   try {
@@ -1970,35 +1726,6 @@ async getAllPaymentDetailsOfAllJobCards(req, res) {
     }
 }
 
-/**
- * Send a custom push notification via FCM to a specific user.
- * 
- * Request body:
- *   {
- *      userId: String,          // Required: MongoDB ObjectId string of the User to notify
- *      title: String,           // Required: Notification Title text
- *      body: String             // Required: Notification body/content
- *   }
- * 
- * Returns:
- *   { success: true, message: "...", fcmResult }
- *   or error
- */
-/**
- * Send a custom push notification via FCM to one or more users.
- * 
- * Request body:
- *   {
- *      userType: String,           // Required: Target user type (e.g., 'carOwner')
- *      userIds: [String],          // Required: Array of MongoDB ObjectId strings of users to notify
- *      title: String,              // Required: Notification Title text
- *      message: String             // Required: Notification body/content
- *   }
- * 
- * Returns:
- *   { success: true, message: "...", results: [...] }
- *   or error
- */
 async sendCustomNotificationToUser(req, res) {
     try {
         const { userType, userIds, title, message } = req.body;
@@ -2141,17 +1868,6 @@ async sendCustomNotificationToUser(req, res) {
         });
     }
 }
-
-
-
-
-
-
-
-
-
-
-
 
 }
 
