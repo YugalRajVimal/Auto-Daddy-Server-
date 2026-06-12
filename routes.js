@@ -14,28 +14,14 @@ import reportRouter from "./Routers/report.routes.js";
 const router = express.Router();
 
 router.get("/", (req, res) => {
-  res.send("Welcome to EV App Server APIs");
+  res.send("Welcome to Auto Daddy App Server APIs");
 });
 
 router.use("/auth", authRouter);
-// router.use("/admin", adminRouter);
-// router.use("/super-admin", superAdminRouter);
-// router.use("/parent", parentRouter);
-// router.use("/therapist", therapistRouter);
-
 router.use("/admin", adminRouter);
-
-
 router.use("/user", userRouter);
-
 router.use("/auto-shop-owner", autoShopRouter);
-
 router.use("/report", reportRouter);
-
-// router.use("/discount", discountRouter);
-
-
-
 
 
 
