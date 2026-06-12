@@ -5,7 +5,7 @@ import bcrypt from "bcryptjs";
 import { SubAdminActivity } from "../../Schema/subadmin-activity.schema.js";
 import ExpiredTokenModel from "../../Schema/expired-token.schema.js";
 import { Admin } from "../../Schema/admin.schema.js";
-import { SubAdmin } from "../../Schema/Subadmin.schema.js";
+import { SubAdmin } from "../../Schema/subadmin.schema.js";
 
 // Helper: log activity
 async function logActivity({ performedBy, performedByRole, performedByName, action, module, description, targetSubAdmin, ipAddress, metadata }) {
