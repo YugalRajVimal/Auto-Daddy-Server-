@@ -3,6 +3,8 @@ import AdminController from "../Controllers/Admin/admin.controller.js";
 import { brandLogoUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/brandLogoUpload.middleware.js";
 import { adsUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/adsUpload.middleware.js";
 import { subAdminManagementRouter } from "./subadmin.routes.js";
+import jwtAuth from "../middlewares/Auth/auth.middleware.js";
+import { onboardCarOwnerUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/onboardCustomerImageUpload.middleware.js";
 
 
 const adminRouter = express.Router();
@@ -251,6 +253,33 @@ adminRouter.post(
 adminRouter.get(
   "/invite-help",
   (req, res) => adminController.getInviteHelpToAdmin(req, res)
+);
+
+
+
+adminRouter.post(
+  "/onboard-carowner",
+  jwtAuth,
+  onboardCarOwnerUploadMiddleware,
+  (req, res) => adminController.onboardCarOwner(req, res)
+);
+
+// Route to edit/update a car owner (customer) by autoshop owner
+adminRouter.put(
+  "/my-customers",
+  jwtAuth,
+  onboardCarOwnerUploadMiddleware,
+  (req, res) => adminController.editCustomer(req, res)
+);
+
+// Route to soft delete a car owner by userId (set status to "deleted")
+// Route: PUT /admin/car-owner/:userId/status/deleted
+// Toggle status of a car owner (customer) by userId between "deleted" and "active"
+// Route: PUT /admin/car-owner/:userId/status/toggle
+adminRouter.put(
+  "/car-owner/:userId/status/toggle",
+  jwtAuth,
+  (req, res) => adminController.toggleStatus(req, res)
 );
 
 
