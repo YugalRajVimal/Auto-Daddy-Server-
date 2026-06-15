@@ -143,7 +143,7 @@ async editService(req, res) {
     // Fetch existing service to check existence
     const existingService = await Services.findById(id);
     if (!existingService) {
-      return res.status(404).json({ success: false, message: "Service not found" });
+      return res.status(404).json({ success: false, message: "Category not found" });
     }
 
     // Prepare update fields: only name, status, subServices
@@ -157,7 +157,7 @@ async editService(req, res) {
       const names = formattedSubServices.map(sub => sub.name && sub.name.trim().toLowerCase()).filter(Boolean);
       const uniqueNames = new Set(names);
       if (names.length !== uniqueNames.size) {
-        return res.status(400).json({ success: false, message: "Duplicate subService names are not allowed within a single service." });
+        return res.status(400).json({ success: false, message: "Duplicate Service names are not allowed within a single service." });
       }
 
       updateFields.subServices = formattedSubServices;
@@ -168,9 +168,9 @@ async editService(req, res) {
       updateFields,
       { new: true }
     );
-    res.status(200).json({ success: true, message: "Service updated", data: updatedService });
+    res.status(200).json({ success: true, message: "Category updated", data: updatedService });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Error editing service", error: err.message });
+    res.status(500).json({ success: false, message: "Error editing category", error: err.message });
   }
 }
 
@@ -187,7 +187,7 @@ async deleteService(req, res) {
     if (businessProfileUsingService) {
       return res.status(400).json({
         success: false,
-        message: "Cannot delete: This service is still referenced by a business profile."
+        message: "Cannot delete: This category is still referenced by a business profile."
       });
     }
 
@@ -196,18 +196,18 @@ async deleteService(req, res) {
     if (jobCardUsingService) {
       return res.status(400).json({
         success: false,
-        message: "Cannot delete: This service is still referenced by a job card."
+        message: "Cannot delete: This category is still referenced by a job card."
       });
     }
 
     // OK to delete
     const deleted = await Services.findByIdAndDelete(id);
     if (!deleted) {
-      return res.status(404).json({ success: false, message: "Service not found" });
+      return res.status(404).json({ success: false, message: "Category not found" });
     }
-    res.status(200).json({ success: true, message: "Service deleted" });
+    res.status(200).json({ success: true, message: "Category deleted" });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Error deleting service", error: err.message });
+    res.status(500).json({ success: false, message: "Error deleting category", error: err.message });
   }
 }
 
@@ -217,7 +217,7 @@ async fetchServices(req, res) {
     const allServices = await Services.find({});
     res.status(200).json({ success: true, data: allServices });
   } catch (err) {
-    res.status(500).json({ success: false, message: "Error fetching services", error: err.message });
+    res.status(500).json({ success: false, message: "Error fetching categories", error: err.message });
   }
 }
 
@@ -415,7 +415,8 @@ async getAllAutoShopOwners(req, res) {
         isBusinessProfileCompleted: 1,
         businessProfile: 1,
         myCustomers: 1,
-        createdAt:1
+        createdAt:1,
+        status:1
       }
     )
       .populate({
