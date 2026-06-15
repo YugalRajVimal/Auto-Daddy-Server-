@@ -414,7 +414,8 @@ async getAllAutoShopOwners(req, res) {
         isProfileComplete: 1,
         isBusinessProfileCompleted: 1,
         businessProfile: 1,
-        myCustomers: 1
+        myCustomers: 1,
+        createdAt:1
       }
     )
       .populate({
@@ -2416,6 +2417,356 @@ toggleStatus = async (req, res) => {
     return res.status(500).json({ message: "Internal server error" });
   }
 };
+
+// =================================================================
+//  PASTE THESE 4 METHODS INSIDE THE AdminController CLASS BODY
+//  in: Controllers/Admin/admin.controller.js
+//
+//  Place them after the existing toggleAutoShopOwnerStatus method.
+//  The User import is already at the top of your file.
+// =================================================================
+
+  // ─── CREATE AUTO SHOP OWNER ─────────────────────────────────────────────────
+  /**
+   * Create a new auto shop owner account.
+   * POST /api/admin/autoshopowners
+   *
+   * Body: { name, email, phone, countryCode, pincode, address? }
+   */
+  createAutoShopOwner = async (req, res) => {
+    try {
+      const { name, email, phone, countryCode, pincode, address } = req.body;
+
+      // ── Required field check ─────────────────────────────────────────────
+      if (!name || !email || !phone || !countryCode || !pincode) {
+        return res.status(400).json({
+          success: false,
+          message: "Fields name, email, phone, countryCode, and pincode are required.",
+        });
+      }
+
+      // ── Country code whitelist ───────────────────────────────────────────
+      const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
+      if (!allowedCountryCodes.includes(countryCode)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid country code. Allowed values: ${allowedCountryCodes.join(", ")}.`,
+        });
+      }
+
+      // ── Duplicate email check ────────────────────────────────────────────
+      const existingEmail = await User.findOne({
+        email: email.trim().toLowerCase(),
+      });
+      if (existingEmail) {
+        return res.status(409).json({
+          success: false,
+          message: "A user with this email already exists.",
+        });
+      }
+
+      // ── Duplicate phone + countryCode check ──────────────────────────────
+      const existingPhone = await User.findOne({ phone, countryCode });
+      if (existingPhone) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "A user with this phone number and country code already exists.",
+        });
+      }
+
+      // ── Create ───────────────────────────────────────────────────────────
+      const newOwner = await User.create({
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        phone: String(phone).trim(),
+        countryCode,
+        pincode: pincode.trim(),
+        address: address ? String(address).trim().slice(0, 100) : "",
+        role: "autoshopowner",
+        isProfileComplete: false,
+        isBusinessProfileCompleted: false,
+        otpAttempts: 0,
+        status: "active",
+        isDisabled: false,
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "Auto shop owner created successfully.",
+        data: {
+          _id: newOwner._id,
+          name: newOwner.name,
+          email: newOwner.email,
+          phone: newOwner.phone,
+          countryCode: newOwner.countryCode,
+          pincode: newOwner.pincode,
+          address: newOwner.address,
+          role: newOwner.role,
+          status: newOwner.status,
+          isProfileComplete: newOwner.isProfileComplete,
+          isBusinessProfileCompleted: newOwner.isBusinessProfileCompleted,
+          createdAt: newOwner.createdAt,
+        },
+      });
+    } catch (err) {
+      console.error("[createAutoShopOwner] Error:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to create auto shop owner.",
+        error: err.message,
+      });
+    }
+  };
+
+  // ─── UPDATE AUTO SHOP OWNER ─────────────────────────────────────────────────
+  /**
+   * Update basic profile fields of an existing auto shop owner.
+   * PUT /api/admin/autoshopowners/:ownerId
+   *
+   * Body (all optional, send only what needs changing):
+   *   { name, email, phone, countryCode, pincode, address }
+   */
+  updateAutoShopOwner = async (req, res) => {
+    try {
+      const { ownerId } = req.params;
+
+      if (!ownerId) {
+        return res.status(400).json({
+          success: false,
+          message: "ownerId param is required.",
+        });
+      }
+
+      // ── Fetch owner ──────────────────────────────────────────────────────
+      const owner = await User.findOne({ _id: ownerId, role: "autoshopowner" });
+      if (!owner) {
+        return res.status(404).json({
+          success: false,
+          message: "Auto shop owner not found.",
+        });
+      }
+
+      const updateFields = {};
+
+      // ── Scalar fields ────────────────────────────────────────────────────
+      const plainFields = ["name", "phone", "countryCode", "pincode", "address"];
+      for (const field of plainFields) {
+        if (req.body[field] !== undefined && req.body[field] !== null) {
+          const val = String(req.body[field]).trim();
+          updateFields[field] = field === "address" ? val.slice(0, 100) : val;
+        }
+      }
+
+      // ── Validate countryCode if changed ──────────────────────────────────
+      if (updateFields.countryCode) {
+        const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
+        if (!allowedCountryCodes.includes(updateFields.countryCode)) {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid country code. Allowed: ${allowedCountryCodes.join(", ")}.`,
+          });
+        }
+      }
+
+      // ── Email — check uniqueness if being changed ─────────────────────────
+      if (
+        req.body.email !== undefined &&
+        req.body.email.trim().toLowerCase() !== owner.email
+      ) {
+        const newEmail = req.body.email.trim().toLowerCase();
+        const emailTaken = await User.findOne({
+          email: newEmail,
+          _id: { $ne: ownerId },
+        });
+        if (emailTaken) {
+          return res.status(409).json({
+            success: false,
+            message: "Another user with this email already exists.",
+          });
+        }
+        updateFields.email = newEmail;
+      }
+
+      if (Object.keys(updateFields).length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: "No valid fields provided to update.",
+        });
+      }
+
+      const updatedOwner = await User.findByIdAndUpdate(
+        ownerId,
+        { $set: updateFields },
+        { new: true }
+      ).select(
+        "name email phone countryCode pincode address role status " +
+        "isProfileComplete isBusinessProfileCompleted isDisabled createdAt updatedAt"
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Auto shop owner updated successfully.",
+        data: updatedOwner,
+      });
+    } catch (err) {
+      console.error("[updateAutoShopOwner] Error:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to update auto shop owner.",
+        error: err.message,
+      });
+    }
+  };
+
+  // ─── DELETE AUTO SHOP OWNER (SOFT DELETE) ───────────────────────────────────
+  /**
+   * Soft-delete an auto shop owner.
+   * Sets status = "deleted" and isDisabled = true.
+   * Also deactivates their linked business profile.
+   *
+   * DELETE /api/admin/autoshopowners/:ownerId
+   */
+  deleteAutoShopOwner = async (req, res) => {
+    try {
+      const { ownerId } = req.params;
+
+      if (!ownerId) {
+        return res.status(400).json({
+          success: false,
+          message: "ownerId param is required.",
+        });
+      }
+
+      const owner = await User.findOne({ _id: ownerId, role: "autoshopowner" });
+      if (!owner) {
+        return res.status(404).json({
+          success: false,
+          message: "Auto shop owner not found.",
+        });
+      }
+
+      // Idempotent — already deleted
+      if (owner.status === "deleted") {
+        return res.status(200).json({
+          success: true,
+          message: "Auto shop owner is already deleted.",
+        });
+      }
+
+      // ── Soft-delete the user ─────────────────────────────────────────────
+      const updated = await User.findByIdAndUpdate(
+        ownerId,
+        { $set: { status: "deleted", isDisabled: true } },
+        { new: true }
+      ).select("name email phone status isDisabled");
+
+      // ── Deactivate business profile ──────────────────────────────────────
+      if (owner.businessProfile) {
+        try {
+          await BusinessProfileModel.findByIdAndUpdate(owner.businessProfile, {
+            $set: { isBusinessActive: false },
+          });
+          console.log(
+            `[deleteAutoShopOwner] Business profile ${owner.businessProfile} deactivated.`
+          );
+        } catch (bpErr) {
+          // Non-fatal: log and continue
+          console.warn(
+            "[deleteAutoShopOwner] Could not deactivate business profile:",
+            bpErr.message
+          );
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Auto shop owner has been soft-deleted.",
+        data: updated,
+      });
+    } catch (err) {
+      console.error("[deleteAutoShopOwner] Error:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to delete auto shop owner.",
+        error: err.message,
+      });
+    }
+  };
+
+  // ─── REVIVE AUTO SHOP OWNER ─────────────────────────────────────────────────
+  /**
+   * Restore a soft-deleted auto shop owner to active.
+   * Sets status = "active" and isDisabled = false.
+   * Also re-activates their linked business profile.
+   *
+   * PUT /api/admin/autoshopowners/:ownerId/revive
+   */
+  reviveAutoShopOwner = async (req, res) => {
+    try {
+      const { ownerId } = req.params;
+
+      if (!ownerId) {
+        return res.status(400).json({
+          success: false,
+          message: "ownerId param is required.",
+        });
+      }
+
+      const owner = await User.findOne({ _id: ownerId, role: "autoshopowner" });
+      if (!owner) {
+        return res.status(404).json({
+          success: false,
+          message: "Auto shop owner not found.",
+        });
+      }
+
+      // Idempotent — already active
+      if (owner.status === "active" && !owner.isDisabled) {
+        return res.status(200).json({
+          success: true,
+          message: "Auto shop owner is already active.",
+        });
+      }
+
+      // ── Restore the user ─────────────────────────────────────────────────
+      const updated = await User.findByIdAndUpdate(
+        ownerId,
+        { $set: { status: "active", isDisabled: false } },
+        { new: true }
+      ).select("name email phone status isDisabled");
+
+      // ── Re-activate business profile ─────────────────────────────────────
+      if (owner.businessProfile) {
+        try {
+          await BusinessProfileModel.findByIdAndUpdate(owner.businessProfile, {
+            $set: { isBusinessActive: true },
+          });
+          console.log(
+            `[reviveAutoShopOwner] Business profile ${owner.businessProfile} reactivated.`
+          );
+        } catch (bpErr) {
+          console.warn(
+            "[reviveAutoShopOwner] Could not reactivate business profile:",
+            bpErr.message
+          );
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "Auto shop owner has been restored to active.",
+        data: updated,
+      });
+    } catch (err) {
+      console.error("[reviveAutoShopOwner] Error:", err);
+      return res.status(500).json({
+        success: false,
+        message: "Failed to revive auto shop owner.",
+        error: err.message,
+      });
+    }
+  };
 
 
 }
