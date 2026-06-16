@@ -27,7 +27,6 @@ userRouter.post("/toggle-auto-shop-fav", jwtAuth, (req, res) => { userController
 userRouter.get("/favorite-auto-shops", jwtAuth, (req, res) => { userController.getFavAutoShops(req, res) });
 
 // -------- VEHICLE CRUD ROUTES --------
-
 // Route to fetch car companies (with optional companyName search)
 userRouter.get("/car-companies", (req, res) => {
   userController.fetchCarCompanies(req, res);
@@ -83,7 +82,6 @@ userRouter.get("/auto-shops", jwtAuth,(req, res) => { userController.getAllAutoS
 userRouter.post("/rate-auto-shop", jwtAuth, (req, res) => {
   userController.rateAutoShop(req, res);
 });
-
 
 // Fetch all job cards for the authenticated user (car owner)
 userRouter.get("/job-cards", jwtAuth, (req, res) => { userController.getAllJobCards(req, res) });

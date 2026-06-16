@@ -109,12 +109,19 @@ async getDashboardDetails(req, res) {
 // Add a new service
 async addService(req, res) {
   try {
-    const { name, status, subServices } = req.body;
-    // Ensure subServices contains only name and status fields for each subService (no dups allowed)
+    const { name, status, subServices, shopType } = req.body;
+
+    // Validate required fields
+    const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
+    if (!shopType || !allowedShopTypes.includes(shopType)) {
+      return res.status(400).json({ success: false, message: `shopType is required and must be one of: ${allowedShopTypes.join(", ")}` });
+    }
+
+    // Ensure subServices contains only name and status fields (no dups allowed)
     const formattedSubServices = Array.isArray(subServices)
       ? subServices.map(({ name, status }) => ({ name, status }))
       : [];
-    
+
     // Check for duplicate subService names
     const names = formattedSubServices.map(sub => sub.name && sub.name.trim().toLowerCase()).filter(Boolean);
     const uniqueNames = new Set(names);
@@ -122,10 +129,11 @@ async addService(req, res) {
       return res.status(400).json({ success: false, message: "Duplicate subService names are not allowed within a single service." });
     }
 
-    const newService = new Services({ 
-      name, 
-      status, 
-      subServices: formattedSubServices
+    const newService = new Services({
+      name,
+      status,
+      subServices: formattedSubServices,
+      shopType
     });
     await newService.save();
     res.status(201).json({ success: true, message: "Service added successfully", data: newService });
@@ -138,7 +146,7 @@ async addService(req, res) {
 async editService(req, res) {
   try {
     const { id } = req.params;
-    const { name, status, subServices } = req.body;
+    const { name, status, subServices, shopType } = req.body;
 
     // Fetch existing service to check existence
     const existingService = await Services.findById(id);
@@ -146,18 +154,28 @@ async editService(req, res) {
       return res.status(404).json({ success: false, message: "Category not found" });
     }
 
-    // Prepare update fields: only name, status, subServices
-    const updateFields = { name, status };
+    // Prepare update fields
+    const updateFields = {};
+    if (name !== undefined) updateFields.name = name;
+    if (status !== undefined) updateFields.status = status;
+    if (shopType !== undefined) {
+      const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
+      if (!allowedShopTypes.includes(shopType)) {
+        return res.status(400).json({ success: false, message: `shopType must be one of: ${allowedShopTypes.join(", ")}` });
+      }
+      updateFields.shopType = shopType;
+    }
+
     if (subServices !== undefined) {
       const formattedSubServices = Array.isArray(subServices)
         ? subServices.map(({ name, status }) => ({ name, status }))
         : [];
-      
+
       // Check for duplicate subService names
       const names = formattedSubServices.map(sub => sub.name && sub.name.trim().toLowerCase()).filter(Boolean);
       const uniqueNames = new Set(names);
       if (names.length !== uniqueNames.size) {
-        return res.status(400).json({ success: false, message: "Duplicate Service names are not allowed within a single service." });
+        return res.status(400).json({ success: false, message: "Duplicate subService names are not allowed within a single service." });
       }
 
       updateFields.subServices = formattedSubServices;
@@ -178,7 +196,6 @@ async editService(req, res) {
 async deleteService(req, res) {
   try {
     const { id } = req.params;
-    // Import models here or at the top if not already imported
     const BusinessProfileModel = (await import('../../Schema/bussiness-profile.js')).default;
     const JobCard = (await import('../../Schema/jobCard.schema.js')).default;
 
@@ -211,10 +228,23 @@ async deleteService(req, res) {
   }
 }
 
-// Fetch all services
+// Fetch all services with optional shopType filter
 async fetchServices(req, res) {
   try {
-    const allServices = await Services.find({});
+    const { shopType } = req.query;
+    // shopType can be one of: autoShop, tyreShop, carWash, towTruck, or "all"/undefined
+    const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
+    let query = {};
+    if (shopType && shopType !== "all") {
+      if (!allowedShopTypes.includes(shopType)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid shopType value. Allowed: all, ${allowedShopTypes.join(", ")}`
+        });
+      }
+      query.shopType = shopType;
+    }
+    const allServices = await Services.find(query);
     res.status(200).json({ success: true, data: allServices });
   } catch (err) {
     res.status(500).json({ success: false, message: "Error fetching categories", error: err.message });
@@ -416,7 +446,8 @@ async getAllAutoShopOwners(req, res) {
         businessProfile: 1,
         myCustomers: 1,
         createdAt:1,
-        status:1
+        status:1,
+        shopType:1
       }
     )
       .populate({
@@ -2419,30 +2450,22 @@ toggleStatus = async (req, res) => {
   }
 };
 
-// =================================================================
-//  PASTE THESE 4 METHODS INSIDE THE AdminController CLASS BODY
-//  in: Controllers/Admin/admin.controller.js
-//
-//  Place them after the existing toggleAutoShopOwnerStatus method.
-//  The User import is already at the top of your file.
-// =================================================================
-
   // ─── CREATE AUTO SHOP OWNER ─────────────────────────────────────────────────
   /**
    * Create a new auto shop owner account.
    * POST /api/admin/autoshopowners
    *
-   * Body: { name, email, phone, countryCode, pincode, address? }
+   * Body: { name, email, phone, countryCode, pincode, address?, shopType }
    */
   createAutoShopOwner = async (req, res) => {
     try {
-      const { name, email, phone, countryCode, pincode, address } = req.body;
+      const { name, email, phone, countryCode, pincode, address, shopType } = req.body;
 
       // ── Required field check ─────────────────────────────────────────────
-      if (!name || !email || !phone || !countryCode || !pincode) {
+      if (!name || !email || !phone || !countryCode || !pincode || !shopType) {
         return res.status(400).json({
           success: false,
-          message: "Fields name, email, phone, countryCode, and pincode are required.",
+          message: "Fields name, email, phone, countryCode, pincode, and shopType are required.",
         });
       }
 
@@ -2452,6 +2475,15 @@ toggleStatus = async (req, res) => {
         return res.status(400).json({
           success: false,
           message: `Invalid country code. Allowed values: ${allowedCountryCodes.join(", ")}.`,
+        });
+      }
+
+      // ── ShopType code whitelist ──────────────────────────────────────────
+      const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
+      if (!allowedShopTypes.includes(shopType)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid shopType. Allowed values: ${allowedShopTypes.join(", ")}.`,
         });
       }
 
@@ -2485,6 +2517,7 @@ toggleStatus = async (req, res) => {
         pincode: pincode.trim(),
         address: address ? String(address).trim().slice(0, 100) : "",
         role: "autoshopowner",
+        shopType,
         isProfileComplete: false,
         isBusinessProfileCompleted: false,
         otpAttempts: 0,
@@ -2504,6 +2537,7 @@ toggleStatus = async (req, res) => {
           pincode: newOwner.pincode,
           address: newOwner.address,
           role: newOwner.role,
+          shopType: newOwner.shopType,
           status: newOwner.status,
           isProfileComplete: newOwner.isProfileComplete,
           isBusinessProfileCompleted: newOwner.isBusinessProfileCompleted,
@@ -2526,7 +2560,7 @@ toggleStatus = async (req, res) => {
    * PUT /api/admin/autoshopowners/:ownerId
    *
    * Body (all optional, send only what needs changing):
-   *   { name, email, phone, countryCode, pincode, address }
+   *   { name, email, phone, countryCode, pincode, address, shopType }
    */
   updateAutoShopOwner = async (req, res) => {
     try {
@@ -2551,11 +2585,14 @@ toggleStatus = async (req, res) => {
       const updateFields = {};
 
       // ── Scalar fields ────────────────────────────────────────────────────
-      const plainFields = ["name", "phone", "countryCode", "pincode", "address"];
+      const plainFields = ["name", "phone", "countryCode", "pincode", "address", "shopType"];
       for (const field of plainFields) {
         if (req.body[field] !== undefined && req.body[field] !== null) {
-          const val = String(req.body[field]).trim();
-          updateFields[field] = field === "address" ? val.slice(0, 100) : val;
+          let val = String(req.body[field]).trim();
+          if (field === "address") {
+            val = val.slice(0, 100);
+          }
+          updateFields[field] = val;
         }
       }
 
@@ -2566,6 +2603,17 @@ toggleStatus = async (req, res) => {
           return res.status(400).json({
             success: false,
             message: `Invalid country code. Allowed: ${allowedCountryCodes.join(", ")}.`,
+          });
+        }
+      }
+
+      // ── Validate shopType if changed ─────────────────────────────────────
+      if (updateFields.shopType) {
+        const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
+        if (!allowedShopTypes.includes(updateFields.shopType)) {
+          return res.status(400).json({
+            success: false,
+            message: `Invalid shopType. Allowed: ${allowedShopTypes.join(", ")}.`,
           });
         }
       }
@@ -2601,7 +2649,7 @@ toggleStatus = async (req, res) => {
         { $set: updateFields },
         { new: true }
       ).select(
-        "name email phone countryCode pincode address role status " +
+        "name email phone countryCode pincode address shopType role status " +
         "isProfileComplete isBusinessProfileCompleted isDisabled createdAt updatedAt"
       );
 

@@ -882,11 +882,7 @@ class UserController {
             }
 
             // Extract filter parameters from query
-            // Filter options:
-            // - search: text search on service/subservice names
-            // - service: filter by service id(s) (single or comma-separated list)
-            // - carCompanies: filter by carCompany id(s) (now replacing vehicle-based filtering)
-            const { search, service, carCompanies } = req.query;
+            const { search, service, carCompanies, shopType } = req.query;
 
             let filterSearch = typeof search === "string" && search.trim().length > 0 ? search.trim().toLowerCase() : null;
 
@@ -902,11 +898,22 @@ class UserController {
                 filterCarCompanyIds = carCompanies.split(',').map(v => v.trim()).filter(Boolean);
             }
 
+            // Apply shopType filter if provided and is valid
+            const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
+            let filterShopType = null;
+            if (typeof shopType === "string" && allowedShopTypes.includes(shopType.trim())) {
+                filterShopType = shopType.trim();
+            }
+
             // Get all services from db
             const allServices = await servicesSchema.find({}, { _id: 1, name: 1, desc: 1 }).lean();
 
-            // Build the filter object for business profiles (if we want to filter on some properties at the DB level)
-            let businessProfileFilter = {}; // add more filters if needed
+            // Build the filter object for business profiles -
+            // do not send suspended or deleted shops (status ONLY "active").
+            let businessProfileFilter = { status: "active" };
+            if (filterShopType) {
+                businessProfileFilter.shopType = filterShopType;
+            }
 
             let autoShops = await BusinessProfileModel.find(businessProfileFilter, {
                     businessName: 1,
@@ -922,7 +929,9 @@ class UserController {
                     myServices: 1,
                     ratings: 1,
                     carCompanies: 1,
-                    _id: 1
+                    shopType: 1,
+                    _id: 1,
+                    status: 1 // Only for confirmation/debug, can be removed in returned object. Not exposed to client.
                 })
                 .populate({
                     path: 'myServices.service',
@@ -1013,6 +1022,7 @@ class UserController {
                     myServices: allMyServices,
                     avgRating: avgRating,
                     carCompanies: shop.carCompanies || [],
+                    shopType: shop.shopType || null,
                     isFavourite: isFavourite
                 };
             });
@@ -1044,6 +1054,11 @@ class UserController {
                     });
                     return filterCarCompanyIds.some(fid => shopCarCompanies.includes(fid));
                 });
+            }
+
+            // 2b. Filter by shopType (on mapped data, for backwards compatibility)
+            if (filterShopType) {
+                autoShops = autoShops.filter(shop => shop.shopType === filterShopType);
             }
 
             // 3. Search by service name or sub-service name

@@ -44,6 +44,11 @@ const UserSchema = new mongoose.Schema(
     onboardedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
 
     //Auto Shop Owner
+    shopType: {
+      type: String,
+      enum: ["autoShop", "tyreShop", "carWash", "towTruck"],
+      default: "autoShop"
+    },
     isAutoShopBusinessProfileComplete: { type: Boolean, default: false },
     businessProfile: { type: mongoose.Schema.Types.ObjectId, ref: "BusinessProfile", default: null },
     myCustomers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User", default: [] }],

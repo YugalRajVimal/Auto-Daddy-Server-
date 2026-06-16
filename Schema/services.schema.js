@@ -15,6 +15,11 @@ const subServiceSchema = new mongoose.Schema(
 
 const servicesSchema = new mongoose.Schema({
   name: { type: String, required: true },
+  shopType: {
+    type: String,
+    enum: ["autoShop", "tyreShop", "carWash", "towTruck"],
+    required: true,
+  },
   status: {
     type: String,
     enum: ["Active", "Inactive"],
