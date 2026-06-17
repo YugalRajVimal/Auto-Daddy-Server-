@@ -4,6 +4,7 @@ import cors from "cors";
 import bodyParser from "body-parser";
 import router from "./routes.js";
 import { connectUsingMongoose } from "./config/mongoose.config.js";
+import { User } from "./Schema/user.schema.js";
 
 const app = express();
 
@@ -58,4 +59,5 @@ app.use("/api", router);
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}/`);
   connectUsingMongoose();
+
 });
