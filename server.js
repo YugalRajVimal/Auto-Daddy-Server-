@@ -21,6 +21,8 @@ const allowedOrigins = [
   "https://www.auto-daddy-panel.onrender.com",
   "https://autodaddy-shop.vercel.app",
   "https://www.autodaddy-shop.vercel.app",
+  "https://autodaddy-admin.vercel.app",
+  "https://www.autodaddy-admin.vercel.app",
   process.env.FRONTEND_URL
 ];
 
