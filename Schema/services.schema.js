@@ -26,6 +26,10 @@ const servicesSchema = new mongoose.Schema({
     default: "Active",
   },
   subServices: [subServiceSchema],
-});
+  odoOutRequired: {
+    type: Boolean,
+    default: false,
+  },
+}, { timestamps: true });
 
 export default mongoose.model("Services", servicesSchema);

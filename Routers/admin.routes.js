@@ -617,6 +617,13 @@ import { adsUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/adsUp
 import { subAdminManagementRouter } from "./subadmin.routes.js";
 import jwtAuth from "../middlewares/Auth/auth.middleware.js";
 import { onboardCarOwnerUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/onboardCustomerImageUpload.middleware.js";
+import commonRoutes from "./Admin/common.routes.js";
+import provinceRouter from "./Admin/province.routes.js";
+import servicesRouter from "./Admin/services.routes.js";
+import carCompanyRouter from "./Admin/carCompany.routes.js";
+import carOwnerRouter from "./Admin/carOwner.routes.js";
+import dealerRouter from "./Admin/dealer.routes.js";
+
 
 const adminRouter = express.Router();
 const adminController = new AdminController();
@@ -636,10 +643,10 @@ adminRouter.get(
 );
 
 // ─── Services ─────────────────────────────────────────────────────────────────
-adminRouter.post("/services", (req, res) => adminController.addService(req, res));
-adminRouter.get("/services", (req, res) => adminController.fetchServices(req, res));
-adminRouter.put("/services/:id", (req, res) => adminController.editService(req, res));
-adminRouter.delete("/services/:id", (req, res) => adminController.deleteService(req, res));
+// adminRouter.post("/services", (req, res) => adminController.addService(req, res));
+// adminRouter.get("/services", (req, res) => adminController.fetchServices(req, res));
+// adminRouter.put("/services/:id", (req, res) => adminController.editService(req, res));
+// adminRouter.delete("/services/:id", (req, res) => adminController.deleteService(req, res));
 
 // ─── Car Owners ───────────────────────────────────────────────────────────────
 // Get all car owners (with job cards & populated vehicles/shops)
@@ -725,16 +732,16 @@ adminRouter.post(
 );
 
 // ─── Vehicle Types ────────────────────────────────────────────────────────────
-adminRouter.get("/vehicletypes", (req, res) => adminController.fetchVehicleTypes(req, res));
-adminRouter.post("/vehicletypes", (req, res) => adminController.addVehicleType(req, res));
-adminRouter.put("/vehicletypes/:id", (req, res) => adminController.updateVehicleType(req, res));
-adminRouter.delete("/vehicletypes/:id", (req, res) => adminController.deleteVehicleType(req, res));
+// adminRouter.get("/vehicletypes", (req, res) => adminController.fetchVehicleTypes(req, res));
+// adminRouter.post("/vehicletypes", (req, res) => adminController.addVehicleType(req, res));
+// adminRouter.put("/vehicletypes/:id", (req, res) => adminController.updateVehicleType(req, res));
+// adminRouter.delete("/vehicletypes/:id", (req, res) => adminController.deleteVehicleType(req, res));
 
 // ─── Website Templates ────────────────────────────────────────────────────────
-adminRouter.post("/website-templates", (req, res) => adminController.createWebsiteTemplate(req, res));
-adminRouter.put("/website-templates/:id", (req, res) => adminController.editWebsiteTemplate(req, res));
-adminRouter.delete("/website-templates/:id", (req, res) => adminController.deleteWebsiteTemplate(req, res));
-adminRouter.get("/website-templates", (req, res) => adminController.fetchWebsiteTemplates(req, res));
+// adminRouter.post("/website-templates", (req, res) => adminController.createWebsiteTemplate(req, res));
+// adminRouter.put("/website-templates/:id", (req, res) => adminController.editWebsiteTemplate(req, res));
+// adminRouter.delete("/website-templates/:id", (req, res) => adminController.deleteWebsiteTemplate(req, res));
+// adminRouter.get("/website-templates", (req, res) => adminController.fetchWebsiteTemplates(req, res));
 
 // ─── Dashboard Data ───────────────────────────────────────────────────────────
 adminRouter.post("/dashboard-data", (req, res) => adminController.upsertDashboardData(req, res));
@@ -743,31 +750,31 @@ adminRouter.patch("/dashboard-data", (req, res) => adminController.editDashboard
 adminRouter.delete("/dashboard-data", (req, res) => adminController.deleteDashboardData(req, res));
 
 // ─── Car Companies ────────────────────────────────────────────────────────────
-adminRouter.post(
-  "/car-company",
-  brandLogoUploadMiddleware,
-  (req, res) => adminController.addCarCompany(req, res)
-);
-adminRouter.patch(
-  "/car-company/:id",
-  brandLogoUploadMiddleware,
-  (req, res) => adminController.editCarCompany(req, res)
-);
-adminRouter.get("/car-company", (req, res) => adminController.fetchCarCompanies(req, res));
-adminRouter.delete("/car-company/:id", (req, res) => adminController.deleteCarCompany(req, res));
+// adminRouter.post(
+//   "/car-company",
+//   brandLogoUploadMiddleware,
+//   (req, res) => adminController.addCarCompany(req, res)
+// );
+// adminRouter.patch(
+//   "/car-company/:id",
+//   brandLogoUploadMiddleware,
+//   (req, res) => adminController.editCarCompany(req, res)
+// );
+// adminRouter.get("/car-company", (req, res) => adminController.fetchCarCompanies(req, res));
+// adminRouter.delete("/car-company/:id", (req, res) => adminController.deleteCarCompany(req, res));
 
 // ─── Website Page ─────────────────────────────────────────────────────────────
 adminRouter.get("/website-page", (req, res) => adminController.getWebsitePage(req, res));
 
-// ─── Provinces & Cities ───────────────────────────────────────────────────────
-adminRouter.post("/provinces", (req, res) => adminController.addProvince(req, res));
-adminRouter.get("/provinces", (req, res) => adminController.fetchProvinces(req, res));
-adminRouter.patch("/provinces/:provinceId", (req, res) => adminController.editProvince(req, res));
-adminRouter.delete("/provinces/:provinceId", (req, res) => adminController.deleteProvince(req, res));
+// // ─── Provinces & Cities ───────────────────────────────────────────────────────
+// adminRouter.post("/provinces", (req, res) => adminController.addProvince(req, res));
+// adminRouter.get("/provinces", (req, res) => adminController.fetchProvinces(req, res));
+// adminRouter.patch("/provinces/:provinceId", (req, res) => adminController.editProvince(req, res));
+// adminRouter.delete("/provinces/:provinceId", (req, res) => adminController.deleteProvince(req, res));
 
-adminRouter.post("/provinces/:provinceId/cities", (req, res) => adminController.addCity(req, res));
-adminRouter.patch("/provinces/:provinceId/cities/:cityName", (req, res) => adminController.editCity(req, res));
-adminRouter.delete("/provinces/:provinceId/cities/:cityName", (req, res) => adminController.deleteCity(req, res));
+// adminRouter.post("/provinces/:provinceId/cities", (req, res) => adminController.addCity(req, res));
+// adminRouter.patch("/provinces/:provinceId/cities/:cityName", (req, res) => adminController.editCity(req, res));
+// adminRouter.delete("/provinces/:provinceId/cities/:cityName", (req, res) => adminController.deleteCity(req, res));
 
 // ─── Business Profile Ads ─────────────────────────────────────────────────────
 adminRouter.get(
@@ -808,5 +815,36 @@ adminRouter.post(
 
 // ─── Invite Help ──────────────────────────────────────────────────────────────
 adminRouter.get("/invite-help", (req, res) => adminController.getInviteHelpToAdmin(req, res));
+
+//New
+//New
+//New
+//New
+//New
+//New
+//New Routes
+
+
+// Mount Thought of the Day router under /admin/thought-of-the-day
+adminRouter.use("/common", commonRoutes);
+
+
+adminRouter.use("/provinces", provinceRouter);
+
+
+adminRouter.use("/services", servicesRouter);
+
+
+adminRouter.use("/car-company", carCompanyRouter);
+
+
+adminRouter.use("/car-owner", carOwnerRouter);
+
+adminRouter.use("/dealer", dealerRouter);
+
+
+
+
+
 
 export default adminRouter;

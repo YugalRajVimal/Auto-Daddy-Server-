@@ -106,150 +106,150 @@ async getDashboardDetails(req, res) {
   }
 }
 
-// Add a new service
-async addService(req, res) {
-  try {
-    const { name, status, subServices, shopType } = req.body;
+// // Add a new service
+// async addService(req, res) {
+//   try {
+//     const { name, status, subServices, shopType } = req.body;
 
-    // Validate required fields
-    const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
-    if (!shopType || !allowedShopTypes.includes(shopType)) {
-      return res.status(400).json({ success: false, message: `shopType is required and must be one of: ${allowedShopTypes.join(", ")}` });
-    }
+//     // Validate required fields
+//     const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
+//     if (!shopType || !allowedShopTypes.includes(shopType)) {
+//       return res.status(400).json({ success: false, message: `shopType is required and must be one of: ${allowedShopTypes.join(", ")}` });
+//     }
 
-    // Ensure subServices contains only name and status fields (no dups allowed)
-    const formattedSubServices = Array.isArray(subServices)
-      ? subServices.map(({ name, status }) => ({ name, status }))
-      : [];
+//     // Ensure subServices contains only name and status fields (no dups allowed)
+//     const formattedSubServices = Array.isArray(subServices)
+//       ? subServices.map(({ name, status }) => ({ name, status }))
+//       : [];
 
-    // Check for duplicate subService names
-    const names = formattedSubServices.map(sub => sub.name && sub.name.trim().toLowerCase()).filter(Boolean);
-    const uniqueNames = new Set(names);
-    if (names.length !== uniqueNames.size) {
-      return res.status(400).json({ success: false, message: "Duplicate subService names are not allowed within a single service." });
-    }
+//     // Check for duplicate subService names
+//     const names = formattedSubServices.map(sub => sub.name && sub.name.trim().toLowerCase()).filter(Boolean);
+//     const uniqueNames = new Set(names);
+//     if (names.length !== uniqueNames.size) {
+//       return res.status(400).json({ success: false, message: "Duplicate subService names are not allowed within a single service." });
+//     }
 
-    const newService = new Services({
-      name,
-      status,
-      subServices: formattedSubServices,
-      shopType
-    });
-    await newService.save();
-    res.status(201).json({ success: true, message: "Service added successfully", data: newService });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Error adding service", error: err.message });
-  }
-}
+//     const newService = new Services({
+//       name,
+//       status,
+//       subServices: formattedSubServices,
+//       shopType
+//     });
+//     await newService.save();
+//     res.status(201).json({ success: true, message: "Service added successfully", data: newService });
+//   } catch (err) {
+//     res.status(500).json({ success: false, message: "Error adding service", error: err.message });
+//   }
+// }
 
-// Edit a service by ID
-async editService(req, res) {
-  try {
-    const { id } = req.params;
-    const { name, status, subServices, shopType } = req.body;
+// // Edit a service by ID
+// async editService(req, res) {
+//   try {
+//     const { id } = req.params;
+//     const { name, status, subServices, shopType } = req.body;
 
-    // Fetch existing service to check existence
-    const existingService = await Services.findById(id);
-    if (!existingService) {
-      return res.status(404).json({ success: false, message: "Category not found" });
-    }
+//     // Fetch existing service to check existence
+//     const existingService = await Services.findById(id);
+//     if (!existingService) {
+//       return res.status(404).json({ success: false, message: "Category not found" });
+//     }
 
-    // Prepare update fields
-    const updateFields = {};
-    if (name !== undefined) updateFields.name = name;
-    if (status !== undefined) updateFields.status = status;
-    if (shopType !== undefined) {
-      const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
-      if (!allowedShopTypes.includes(shopType)) {
-        return res.status(400).json({ success: false, message: `shopType must be one of: ${allowedShopTypes.join(", ")}` });
-      }
-      updateFields.shopType = shopType;
-    }
+//     // Prepare update fields
+//     const updateFields = {};
+//     if (name !== undefined) updateFields.name = name;
+//     if (status !== undefined) updateFields.status = status;
+//     if (shopType !== undefined) {
+//       const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
+//       if (!allowedShopTypes.includes(shopType)) {
+//         return res.status(400).json({ success: false, message: `shopType must be one of: ${allowedShopTypes.join(", ")}` });
+//       }
+//       updateFields.shopType = shopType;
+//     }
 
-    if (subServices !== undefined) {
-      const formattedSubServices = Array.isArray(subServices)
-        ? subServices.map(({ name, status }) => ({ name, status }))
-        : [];
+//     if (subServices !== undefined) {
+//       const formattedSubServices = Array.isArray(subServices)
+//         ? subServices.map(({ name, status }) => ({ name, status }))
+//         : [];
 
-      // Check for duplicate subService names
-      const names = formattedSubServices.map(sub => sub.name && sub.name.trim().toLowerCase()).filter(Boolean);
-      const uniqueNames = new Set(names);
-      if (names.length !== uniqueNames.size) {
-        return res.status(400).json({ success: false, message: "Duplicate subService names are not allowed within a single service." });
-      }
+//       // Check for duplicate subService names
+//       const names = formattedSubServices.map(sub => sub.name && sub.name.trim().toLowerCase()).filter(Boolean);
+//       const uniqueNames = new Set(names);
+//       if (names.length !== uniqueNames.size) {
+//         return res.status(400).json({ success: false, message: "Duplicate subService names are not allowed within a single service." });
+//       }
 
-      updateFields.subServices = formattedSubServices;
-    }
+//       updateFields.subServices = formattedSubServices;
+//     }
 
-    const updatedService = await Services.findByIdAndUpdate(
-      id,
-      updateFields,
-      { new: true }
-    );
-    res.status(200).json({ success: true, message: "Category updated", data: updatedService });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Error editing category", error: err.message });
-  }
-}
+//     const updatedService = await Services.findByIdAndUpdate(
+//       id,
+//       updateFields,
+//       { new: true }
+//     );
+//     res.status(200).json({ success: true, message: "Category updated", data: updatedService });
+//   } catch (err) {
+//     res.status(500).json({ success: false, message: "Error editing category", error: err.message });
+//   }
+// }
 
-// Delete a service by ID with referential integrity check
-async deleteService(req, res) {
-  try {
-    const { id } = req.params;
-    const BusinessProfileModel = (await import('../../Schema/bussiness-profile.js')).default;
-    const JobCard = (await import('../../Schema/jobCard.schema.js')).default;
+// // Delete a service by ID with referential integrity check
+// async deleteService(req, res) {
+//   try {
+//     const { id } = req.params;
+//     const BusinessProfileModel = (await import('../../Schema/bussiness-profile.js')).default;
+//     const JobCard = (await import('../../Schema/jobCard.schema.js')).default;
 
-    // 1. Check if any business profile uses this service in its myServices array
-    const businessProfileUsingService = await BusinessProfileModel.findOne({ 'myServices.service': id });
-    if (businessProfileUsingService) {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot delete: This category is still referenced by a business profile."
-      });
-    }
+//     // 1. Check if any business profile uses this service in its myServices array
+//     const businessProfileUsingService = await BusinessProfileModel.findOne({ 'myServices.service': id });
+//     if (businessProfileUsingService) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Cannot delete: This category is still referenced by a business profile."
+//       });
+//     }
 
-    // 2. Check if any JobCard references this service in its services array
-    const jobCardUsingService = await JobCard.findOne({ 'services.id': id });
-    if (jobCardUsingService) {
-      return res.status(400).json({
-        success: false,
-        message: "Cannot delete: This category is still referenced by a job card."
-      });
-    }
+//     // 2. Check if any JobCard references this service in its services array
+//     const jobCardUsingService = await JobCard.findOne({ 'services.id': id });
+//     if (jobCardUsingService) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Cannot delete: This category is still referenced by a job card."
+//       });
+//     }
 
-    // OK to delete
-    const deleted = await Services.findByIdAndDelete(id);
-    if (!deleted) {
-      return res.status(404).json({ success: false, message: "Category not found" });
-    }
-    res.status(200).json({ success: true, message: "Category deleted" });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Error deleting category", error: err.message });
-  }
-}
+//     // OK to delete
+//     const deleted = await Services.findByIdAndDelete(id);
+//     if (!deleted) {
+//       return res.status(404).json({ success: false, message: "Category not found" });
+//     }
+//     res.status(200).json({ success: true, message: "Category deleted" });
+//   } catch (err) {
+//     res.status(500).json({ success: false, message: "Error deleting category", error: err.message });
+//   }
+// }
 
-// Fetch all services with optional shopType filter
-async fetchServices(req, res) {
-  try {
-    const { shopType } = req.query;
-    // shopType can be one of: autoShop, tyreShop, carWash, towTruck, or "all"/undefined
-    const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
-    let query = {};
-    if (shopType && shopType !== "all") {
-      if (!allowedShopTypes.includes(shopType)) {
-        return res.status(400).json({
-          success: false,
-          message: `Invalid shopType value. Allowed: all, ${allowedShopTypes.join(", ")}`
-        });
-      }
-      query.shopType = shopType;
-    }
-    const allServices = await Services.find(query);
-    res.status(200).json({ success: true, data: allServices });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Error fetching categories", error: err.message });
-  }
-}
+// // Fetch all services with optional shopType filter
+// async fetchServices(req, res) {
+//   try {
+//     const { shopType } = req.query;
+//     // shopType can be one of: autoShop, tyreShop, carWash, towTruck, or "all"/undefined
+//     const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
+//     let query = {};
+//     if (shopType && shopType !== "all") {
+//       if (!allowedShopTypes.includes(shopType)) {
+//         return res.status(400).json({
+//           success: false,
+//           message: `Invalid shopType value. Allowed: all, ${allowedShopTypes.join(", ")}`
+//         });
+//       }
+//       query.shopType = shopType;
+//     }
+//     const allServices = await Services.find(query);
+//     res.status(200).json({ success: true, data: allServices });
+//   } catch (err) {
+//     res.status(500).json({ success: false, message: "Error fetching categories", error: err.message });
+//   }
+// }
 
 
 async getAllCarOwners(req, res) {
@@ -425,6 +425,550 @@ async getAllCarOwners(req, res) {
     res.status(500).json({ success: false, message: "Error fetching car owners", error: err.message });
   }
 }
+
+
+onboardCarOwner = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  // Cleanup all uploaded files on failure
+  const cleanupUploads = async () => {
+    const profilePhoto = req.files?.["profilePhoto"]?.[0]?.path;
+    if (profilePhoto) await deleteUploadedFile(profilePhoto);
+
+    // Clean up all carImage_i files
+    for (let i = 0; i < 5; i++) {
+      const imgPath = req.files?.[`carImage_${i}`]?.[0]?.path;
+      if (imgPath) await deleteUploadedFile(imgPath);
+    }
+  };
+
+  try {
+    const { name, email, phone, countryCode, pincode, role, address, vehicles } = req.body;
+
+    let vehiclesArray = vehicles;
+    if (typeof vehicles === "string") {
+      try { vehiclesArray = JSON.parse(vehicles); }
+      catch (e) { vehiclesArray = undefined; }
+    }
+
+    // ── Validation ──────────────────────────────────────────────────────────
+    if (!name || !email || !phone || !countryCode || !pincode || !role || !address) {
+      await cleanupUploads();
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "All owner fields (name, email, phone, countryCode, pincode, role, address) are required.",
+      });
+    }
+
+    const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
+    if (!allowedCountryCodes.includes(countryCode)) {
+      await cleanupUploads();
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Invalid country code. Allowed: +1, +61, +44, +91.",
+      });
+    }
+
+    if (role !== "carowner") {
+      await cleanupUploads();
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        message: "Only role 'carowner' is allowed for onboarding via this endpoint.",
+      });
+    }
+
+    if (email) {
+      const existingEmailUser = await User.findOne({ email }).session(session);
+      if (existingEmailUser) {
+        await cleanupUploads();
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(409).json({
+          message: "A user with this email already exists.",
+          userId: existingEmailUser._id,
+        });
+      }
+    }
+
+    if (phone && countryCode) {
+      const existingPhoneUser = await User.findOne({ phone, countryCode }).session(session);
+      if (existingPhoneUser) {
+        await cleanupUploads();
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(409).json({
+          message: "A user with this phone and country code already exists.",
+          userId: existingPhoneUser._id,
+          phone: existingPhoneUser.phone,
+          countryCode: existingPhoneUser.countryCode,
+          name: existingPhoneUser.name,
+          email: existingPhoneUser.email,
+        });
+      }
+    }
+
+    // ── Create User ──────────────────────────────────────────────────────────
+    // const otp = "000000";
+    // const otpExpiresAt = new Date(Date.now() + 1000 * 600);
+    const profilePhotoPath = req.files?.["profilePhoto"]?.[0]?.path || null;
+    const onboardedBy = req.user?.id || null;
+
+    const carOwnerPayload = {
+      name, email, phone, countryCode, pincode, role, address,
+      isProfileComplete: true, otpAttempts: 0,
+      onboardedBy,
+      ...(profilePhotoPath ? { profilePhoto: profilePhotoPath } : {}),
+    };
+
+    let newCarOwner;
+    try {
+      [newCarOwner] = await User.create([carOwnerPayload], { session });
+    } catch (err) {
+      await cleanupUploads();
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(500).json({ message: "Failed to create car owner profile." });
+    }
+
+    // ── Process Vehicles ─────────────────────────────────────────────────────
+    const newVehicles = [];
+
+    async function isDuplicateNotDisabledPlate(licensePlateNo) {
+      if (!licensePlateNo) return false;
+      return !!(await VehicleModel.findOne({
+        licensePlateNo,
+        $or: [{ disabled: false }, { disabled: { $exists: false } }],
+      }).session(session));
+    }
+
+    const inputVehiclesArray = Array.isArray(vehiclesArray)
+      ? vehiclesArray
+      : (req.body.licensePlateNo || req.body.vinNo || req.body.vehicleName
+        ? [{
+            licensePlateNo:  req.body.licensePlateNo,
+            vinNo:           req.body.vinNo,
+            vehicleName:     req.body.vehicleName,
+            model:           req.body.model,
+            year:            req.body.year,
+            odometerReading: req.body.odometerReading,
+            disabled:        req.body.disabled,
+          }]
+        : []);
+
+    for (let i = 0; i < inputVehiclesArray.length; i++) {
+      const veh = inputVehiclesArray[i] || {};
+      const { licensePlateNo, vinNo, vehicleName, model, year, odometerReading, disabled } = veh;
+
+      const vehiclePayload = {};
+      if (licensePlateNo  !== undefined) vehiclePayload.licensePlateNo  = licensePlateNo;
+      if (vinNo           !== undefined) vehiclePayload.vinNo           = vinNo;
+      if (vehicleName     !== undefined) vehiclePayload.make            = { ...(vehiclePayload.make || {}), name: vehicleName };
+      if (model           !== undefined) vehiclePayload.make            = { ...(vehiclePayload.make || {}), model };
+      if (year            !== undefined) vehiclePayload.year            = year;
+      if (odometerReading !== undefined) vehiclePayload.odometerReading = odometerReading;
+      if (disabled        !== undefined) vehiclePayload.disabled        = disabled;
+
+      // ✅ Pick carImage for THIS vehicle index: carImage_0, carImage_1, etc.
+      const vehicleImagePath = req.files?.[`carImage_${i}`]?.[0]?.path || null;
+      if (vehicleImagePath) {
+        vehiclePayload.carImages = [vehicleImagePath];
+      }
+
+      const hasAllRequired =
+        vehiclePayload.licensePlateNo &&
+        vehiclePayload.vinNo &&
+        vehiclePayload.make?.name &&
+        vehiclePayload.make?.model &&
+        vehiclePayload.year;
+
+      if (!hasAllRequired) continue;
+
+      if (!vehiclePayload.disabled) {
+        const plateExists = await isDuplicateNotDisabledPlate(vehiclePayload.licensePlateNo);
+        if (plateExists) {
+          await cleanupUploads();
+          await session.abortTransaction();
+          session.endSession();
+          return res.status(409).json({
+            message: `A vehicle with license plate "${vehiclePayload.licensePlateNo}" already exists and is not disabled.`,
+            licensePlateNo: vehiclePayload.licensePlateNo,
+          });
+        }
+      }
+
+      try {
+        const [createdVehicle] = await VehicleModel.create([vehiclePayload], { session });
+
+        newCarOwner.myVehicles.push(createdVehicle._id);
+
+        // ✅ Save vehicleId + carImage into User.documents for this vehicle
+        const vehicleDoc = { vehicleId: createdVehicle._id };
+        if (vehicleImagePath) vehicleDoc.carImage = vehicleImagePath;
+        newCarOwner.documents.push(vehicleDoc);
+
+        newVehicles.push(createdVehicle);
+      } catch (err) {
+        await cleanupUploads();
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(500).json({ message: "Failed to create vehicle." });
+      }
+    }
+
+    if (newVehicles.length > 0) {
+      try {
+        await newCarOwner.save({ session });
+      } catch (saveErr) {
+        await cleanupUploads();
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(500).json({ message: "Failed to update car owner with vehicles." });
+      }
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(201).json({
+      message: "Car owner onboarded successfully.",
+      carOwner: {
+        id:                newCarOwner._id,
+        name:              newCarOwner.name,
+        email:             newCarOwner.email,
+        phone:             newCarOwner.phone,
+        countryCode:       newCarOwner.countryCode,
+        pincode:           newCarOwner.pincode,
+        role:              newCarOwner.role,
+        address:           newCarOwner.address,
+        isProfileComplete: newCarOwner.isProfileComplete,
+        status:            newCarOwner.status,
+        onboardedBy:       newCarOwner.onboardedBy,
+        profilePhoto:      newCarOwner.profilePhoto,
+        documents:         newCarOwner.documents, // vehicleId + carImage per vehicle
+        vehicles: newVehicles.map(v => ({
+          id:              v._id,
+          licensePlateNo:  v.licensePlateNo,
+          vinNo:           v.vinNo,
+          name:            v.make?.name,
+          model:           v.make?.model,
+          year:            v.year,
+          odometerReading: v.odometerReading,
+          carImages:       v.carImages,
+        })),
+      },
+    });
+
+  } catch (error) {
+    await cleanupUploads();
+    try { await session.abortTransaction(); } catch (_) {}
+    session.endSession();
+    console.error("[onboardCarOwner] Error:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+editCustomer = async (req, res) => {
+  try {
+    const autoshopOwnerId = req.user?.id;
+    const { carOwnerId } = req.body;
+
+    // ── Cleanup helper ───────────────────────────────────────────────────────
+    const cleanupUploads = async () => {
+      if (req.files?.["profilePhoto"]?.[0]?.path) {
+        await deleteUploadedFile(req.files["profilePhoto"][0].path);
+      }
+      for (let i = 0; i < 5; i++) {
+        const imgPath = req.files?.[`carImage_${i}`]?.[0]?.path;
+        if (imgPath) await deleteUploadedFile(imgPath);
+      }
+    };
+
+    // Parse vehicles JSON string if needed
+    let vehiclesFromBody = req.body.vehicles;
+    if (typeof vehiclesFromBody === "string") {
+      try { vehiclesFromBody = JSON.parse(vehiclesFromBody); }
+      catch (e) { vehiclesFromBody = undefined; }
+    }
+
+
+    if (!carOwnerId) {
+      await cleanupUploads();
+      return res.status(400).json({ message: "carOwnerId is required." });
+    }
+
+
+
+    // ── Fetch customer ───────────────────────────────────────────────────────
+    // Use lean: false so we can mutate documents array below
+    const customer = await User.findOne({ _id: carOwnerId, role: "carowner" });
+    if (!customer) {
+      await cleanupUploads();
+      return res.status(404).json({ message: "Car owner not found." });
+    }
+
+    const existingVehicleIds = Array.isArray(customer.myVehicles)
+      ? customer.myVehicles.map(id => id.toString())
+      : [];
+
+    // ── Build user update fields ─────────────────────────────────────────────
+    const allowedUserFields = [
+      "name", "email", "phone", "countryCode", "pincode", "address",
+      "city", "isDisabled", "isProfileComplete", "favoriteAutoShops",
+    ];
+    let updateFields = {};
+    for (const field of allowedUserFields) {
+      if (field in req.body && req.body[field] !== undefined) {
+        updateFields[field] = req.body[field];
+      }
+    }
+
+    // Profile photo upload
+    const newProfilePhoto = req.files?.["profilePhoto"]?.[0]?.path;
+    if (newProfilePhoto) {
+      updateFields.profilePhoto = newProfilePhoto;
+    }
+
+    // ── Process vehicles ─────────────────────────────────────────────────────
+    let updatedVehicleObjectIds = [...existingVehicleIds]; // preserve existing
+
+    if (Array.isArray(vehiclesFromBody)) {
+      for (let i = 0; i < vehiclesFromBody.length; i++) {
+        const v = vehiclesFromBody[i];
+
+        // ✅ carImage for this specific vehicle via carImage_0, carImage_1, etc.
+        const vehicleImagePath = req.files?.[`carImage_${i}`]?.[0]?.path || null;
+
+        // ── EDIT EXISTING VEHICLE ────────────────────────────────────────────
+        if (v.vId && mongoose.Types.ObjectId.isValid(v.vId)) {
+          const vehId = v.vId.toString();
+          if (!existingVehicleIds.includes(vehId)) {
+            await cleanupUploads();
+            return res.status(400).json({
+              message: `Invalid vehicle id (${vehId}) for this customer.`,
+            });
+          }
+
+          const allowedVehicleFields = [
+            "licensePlateNo", "licensePlateFrontImagePath", "licensePlateBackImagePath",
+            "carOwnershipCertificate", "insuranceCertificate", "vinNo", "year",
+            "odometerReading", "disabled",
+          ];
+          let vehicleUpdateFields = {};
+          for (const field of allowedVehicleFields) {
+            if (v[field] !== undefined) vehicleUpdateFields[field] = v[field];
+          }
+          if (v.vehicleName !== undefined) vehicleUpdateFields["make.name"] = v.vehicleName;
+          if (v.model !== undefined) vehicleUpdateFields["make.model"] = v.model;
+
+          // Handle carImages (uploaded file takes priority, then body value)
+          if (vehicleImagePath) {
+            vehicleUpdateFields.carImages = [vehicleImagePath];
+          } else if (typeof v.carImages === "string") {
+            try {
+              const imgs = JSON.parse(v.carImages);
+              if (Array.isArray(imgs)) vehicleUpdateFields.carImages = imgs;
+            } catch (e) {}
+          } else if (Array.isArray(v.carImages)) {
+            vehicleUpdateFields.carImages = v.carImages;
+          }
+
+          try {
+            if (Object.keys(vehicleUpdateFields).length > 0) {
+              await VehicleModel.findOneAndUpdate(
+                { _id: vehId },
+                { $set: vehicleUpdateFields },
+                { new: true }
+              );
+            }
+          } catch (err) {
+            await cleanupUploads();
+            return res.status(500).json({ message: "Vehicle update failed." });
+          }
+
+          // ✅ Update User.documents entry for this vehicleId
+          if (vehicleImagePath) {
+            const docEntry = customer.documents.find(
+              d => d.vehicleId?.toString() === vehId
+            );
+            if (docEntry) {
+              docEntry.carImage = vehicleImagePath; // update existing
+            } else {
+              customer.documents.push({ vehicleId: vehId, carImage: vehicleImagePath });
+            }
+          }
+
+        }
+        // ── ADD NEW VEHICLE ──────────────────────────────────────────────────
+        else if (!v.vId) {
+          const requiredFields = ["licensePlateNo", "vehicleName", "model", "year", "vinNo", "odometerReading"];
+          const hasAllRequired = requiredFields.every(
+            field => v[field] !== undefined && v[field] !== null && v[field] !== ""
+          );
+
+          if (hasAllRequired) {
+            let newCarImages = [];
+            if (vehicleImagePath) {
+              newCarImages = [vehicleImagePath];
+            } else if (typeof v.carImages === "string") {
+              try {
+                const imgs = JSON.parse(v.carImages);
+                if (Array.isArray(imgs)) newCarImages = imgs;
+              } catch (e) {}
+            } else if (Array.isArray(v.carImages)) {
+              newCarImages = v.carImages;
+            }
+
+            const newVehicleData = {
+              licensePlateNo:            v.licensePlateNo,
+              year:                      v.year,
+              "make.name":               v.vehicleName,
+              "make.model":              v.model,
+              vinNo:                     v.vinNo,
+              odometerReading:           v.odometerReading,
+              licensePlateFrontImagePath: v.licensePlateFrontImagePath,
+              licensePlateBackImagePath:  v.licensePlateBackImagePath,
+              carOwnershipCertificate:   v.carOwnershipCertificate,
+              insuranceCertificate:      v.insuranceCertificate,
+              carImages:                 newCarImages,
+              disabled:                  v.disabled,
+              owner:                     customer._id,
+            };
+            // Remove undefined keys
+            Object.keys(newVehicleData).forEach(key => {
+              if (newVehicleData[key] === undefined) delete newVehicleData[key];
+            });
+
+            try {
+              const newVehicleDoc = await VehicleModel.create(newVehicleData);
+              if (newVehicleDoc?._id) {
+                updatedVehicleObjectIds.push(newVehicleDoc._id.toString());
+
+                // ✅ Add new entry in User.documents for new vehicle
+                const docEntry = {
+                  vehicleId: newVehicleDoc._id,
+                  ...(vehicleImagePath ? { carImage: vehicleImagePath } : {}),
+                };
+                customer.documents.push(docEntry);
+              }
+            } catch (err) {
+              await cleanupUploads();
+              return res.status(500).json({ message: "Failed to create vehicle." });
+            }
+          }
+          // skip if required fields missing
+        }
+      }
+
+      updateFields.myVehicles = updatedVehicleObjectIds;
+    }
+
+    if (Object.keys(updateFields).length === 0 && !vehiclesFromBody) {
+      await cleanupUploads();
+      return res.status(400).json({ message: "No update fields provided." });
+    }
+
+    // ✅ Persist documents mutations + other fields
+    updateFields.documents = customer.documents;
+
+    let customerDoc;
+    try {
+      customerDoc = await User.findOneAndUpdate(
+        { _id: carOwnerId, role: "carowner" },
+        { $set: updateFields },
+        { new: true }
+      )
+      .select("name email phone countryCode status isDisabled myVehicles address pincode city profilePhoto isProfileComplete documents favoriteAutoShops onboardedBy")
+      .populate({
+        path: "myVehicles",
+        model: "Vehicle",
+        select: "-licensePlateFrontImagePath -licensePlateBackImagePath",
+      })
+      .lean();
+    } catch (err) {
+      await cleanupUploads();
+      return res.status(500).json({ message: "Customer update failed." });
+    }
+
+    if (!customerDoc) {
+      await cleanupUploads();
+      return res.status(404).json({ message: "Car owner not found." });
+    }
+
+    return res.status(200).json({
+      message: "Customer updated successfully.",
+      customer: customerDoc,
+    });
+
+  } catch (error) {
+    // best-effort cleanup
+    try {
+      if (req.files?.["profilePhoto"]?.[0]?.path) {
+        await deleteUploadedFile(req.files["profilePhoto"][0].path);
+      }
+      for (let i = 0; i < 5; i++) {
+        const imgPath = req.files?.[`carImage_${i}`]?.[0]?.path;
+        if (imgPath) await deleteUploadedFile(imgPath);
+      }
+    } catch (_) {}
+    console.error("[editCustomer] Error:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+/**
+ * Set a car owner's status to "deleted" by userId
+ * (Soft deletes a car owner account)
+ */
+toggleStatus = async (req, res) => {
+  const { userId } = req.params;
+  const { status } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ message: "Missing userId parameter" });
+  }
+
+  if (!status || !["active", "suspended", "deleted"].includes(status)) {
+    return res.status(400).json({ message: "Invalid or missing status. Status must be one of: active, suspended, deleted." });
+  }
+
+  try {
+    // Fetch user first to check their current status
+    const userDoc = await User.findOne({ _id: userId, role: "carowner" }).select(
+      "name email phone countryCode status isDisabled myVehicles address pincode city profilePhoto isProfileComplete documents favoriteAutoShops onboardedBy"
+    );
+
+    if (!userDoc) {
+      return res.status(404).json({ message: "Car owner not found." });
+    }
+
+    if (userDoc.status === status) {
+      return res.status(200).json({
+        message: `Car owner status is already '${status}'.`,
+        customer: userDoc,
+      });
+    }
+
+    const updatedUser = await User.findOneAndUpdate(
+      { _id: userId, role: "carowner" },
+      { $set: { status: status } },
+      { new: true }
+    ).select(
+      "name email phone countryCode status isDisabled myVehicles address pincode city profilePhoto isProfileComplete documents favoriteAutoShops onboardedBy"
+    );
+
+    return res.status(200).json({
+      message: `Car owner status updated to '${status}'.`,
+      customer: updatedUser,
+    });
+  } catch (err) {
+    console.error("[toggleStatus] Error:", err);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
 
 
 // Get all auto shop owners
@@ -626,103 +1170,103 @@ async toggleAutoShopOwnerStatus(req, res) {
 
 
 
-  /**
-   * Create a new website template.
-   * POST /api/autoshop/website-templates
-   */
-  async createWebsiteTemplate(req, res) {
-    try {
-        const { name, desc, templateLink } = req.body;
-        if (!name || !desc || !templateLink) {
-            return res.status(400).json({ message: "name, desc, and templateLink are required." });
-        }
+//   /**
+//    * Create a new website template.
+//    * POST /api/autoshop/website-templates
+//    */
+//   async createWebsiteTemplate(req, res) {
+//     try {
+//         const { name, desc, templateLink } = req.body;
+//         if (!name || !desc || !templateLink) {
+//             return res.status(400).json({ message: "name, desc, and templateLink are required." });
+//         }
 
-        // Check for duplicate name
-        const existing = await WebsiteTemplateSchema.findOne({ name });
-        if (existing) {
-            return res.status(409).json({ message: "A template with this name already exists." });
-        }
+//         // Check for duplicate name
+//         const existing = await WebsiteTemplateSchema.findOne({ name });
+//         if (existing) {
+//             return res.status(409).json({ message: "A template with this name already exists." });
+//         }
 
-        const newTemplate = await WebsiteTemplateSchema.create({ name, desc, templateLink });
-        return res.status(201).json({ success: true, data: newTemplate });
-    } catch (err) {
-        console.error("[createWebsiteTemplate] Error:", err);
-        return res.status(500).json({ message: "Failed to create website template", error: err.message });
-    }
-}
+//         const newTemplate = await WebsiteTemplateSchema.create({ name, desc, templateLink });
+//         return res.status(201).json({ success: true, data: newTemplate });
+//     } catch (err) {
+//         console.error("[createWebsiteTemplate] Error:", err);
+//         return res.status(500).json({ message: "Failed to create website template", error: err.message });
+//     }
+// }
 
-  /**
-   * Edit an existing website template.
-   * PUT /api/autoshop/website-templates/:id
-   */
-  async editWebsiteTemplate(req, res) {
-      try {
-          const { id } = req.params;
-          const { name, desc, templateLink } = req.body;
-          if (!id) {
-              return res.status(400).json({ message: "id parameter is required." });
-          }
+//   /**
+//    * Edit an existing website template.
+//    * PUT /api/autoshop/website-templates/:id
+//    */
+//   async editWebsiteTemplate(req, res) {
+//       try {
+//           const { id } = req.params;
+//           const { name, desc, templateLink } = req.body;
+//           if (!id) {
+//               return res.status(400).json({ message: "id parameter is required." });
+//           }
 
-          // If updating name, check for duplicate (excluding current template)
-          if (name) {
-              const exists = await WebsiteTemplateSchema.findOne({ name, _id: { $ne: id } });
-              if (exists) {
-                  return res.status(409).json({ message: "A template with this name already exists." });
-              }
-          }
+//           // If updating name, check for duplicate (excluding current template)
+//           if (name) {
+//               const exists = await WebsiteTemplateSchema.findOne({ name, _id: { $ne: id } });
+//               if (exists) {
+//                   return res.status(409).json({ message: "A template with this name already exists." });
+//               }
+//           }
           
-          const updateFields = {};
-          if (name !== undefined) updateFields.name = name;
-          if (desc !== undefined) updateFields.desc = desc;
-          if (templateLink !== undefined) updateFields.templateLink = templateLink;
+//           const updateFields = {};
+//           if (name !== undefined) updateFields.name = name;
+//           if (desc !== undefined) updateFields.desc = desc;
+//           if (templateLink !== undefined) updateFields.templateLink = templateLink;
 
-          const updated = await WebsiteTemplateSchema.findByIdAndUpdate(id, updateFields, { new: true });
-          if (!updated) {
-              return res.status(404).json({ message: "Website template not found" });
-          }
-          return res.status(200).json({ success: true, data: updated });
-      } catch (err) {
-          console.error("[editWebsiteTemplate] Error:", err);
-          return res.status(500).json({ message: "Failed to edit website template", error: err.message });
-      }
-  }
+//           const updated = await WebsiteTemplateSchema.findByIdAndUpdate(id, updateFields, { new: true });
+//           if (!updated) {
+//               return res.status(404).json({ message: "Website template not found" });
+//           }
+//           return res.status(200).json({ success: true, data: updated });
+//       } catch (err) {
+//           console.error("[editWebsiteTemplate] Error:", err);
+//           return res.status(500).json({ message: "Failed to edit website template", error: err.message });
+//       }
+//   }
 
-  /**
-   * Delete a website template by ID.
-   * DELETE /api/autoshop/website-templates/:id
-   */
-  async deleteWebsiteTemplate(req, res) {
-      try {
-          const { id } = req.params;
-          if (!id) {
-              return res.status(400).json({ message: "id parameter is required." });
-          }
+//   /**
+//    * Delete a website template by ID.
+//    * DELETE /api/autoshop/website-templates/:id
+//    */
+//   async deleteWebsiteTemplate(req, res) {
+//       try {
+//           const { id } = req.params;
+//           if (!id) {
+//               return res.status(400).json({ message: "id parameter is required." });
+//           }
           
-          const deleted = await WebsiteTemplateSchema.findByIdAndDelete(id);
-          if (!deleted) {
-              return res.status(404).json({ message: "Website template not found." });
-          }
-          return res.status(200).json({ success: true, message: "Website template deleted." });
-      } catch (err) {
-          console.error("[deleteWebsiteTemplate] Error:", err);
-          return res.status(500).json({ message: "Failed to delete website template", error: err.message });
-      }
-  }
+//           const deleted = await WebsiteTemplateSchema.findByIdAndDelete(id);
+//           if (!deleted) {
+//               return res.status(404).json({ message: "Website template not found." });
+//           }
+//           return res.status(200).json({ success: true, message: "Website template deleted." });
+//       } catch (err) {
+//           console.error("[deleteWebsiteTemplate] Error:", err);
+//           return res.status(500).json({ message: "Failed to delete website template", error: err.message });
+//       }
+//   }
 
-  /**
-   * Fetch all website templates.
-   * GET /api/autoshop/website-templates
-   */
-  async fetchWebsiteTemplates(req, res) {
-      try {
+//   /**
+//    * Fetch all website templates.
+//    * GET /api/autoshop/website-templates
+//    */
+//   async fetchWebsiteTemplates(req, res) {
+//       try {
           
-          const templates = await WebsiteTemplateSchema.find({}).lean();
-          return res.status(200).json({ success: true, data: templates });
-      } catch (err) {
-          console.error("[fetchWebsiteTemplates] Error:", err);
-          return res.status(500).json({ message: "Failed to fetch website templates", error: err.message });
-      }
-  }
+//           const templates = await WebsiteTemplateSchema.find({}).lean();
+//           return res.status(200).json({ success: true, data: templates });
+//       } catch (err) {
+//           console.error("[fetchWebsiteTemplates] Error:", err);
+//           return res.status(500).json({ message: "Failed to fetch website templates", error: err.message });
+//       }
+//   }
 
 
 
@@ -869,190 +1413,190 @@ async deleteDashboardData(req, res) {
 // --- Car Company CRUD Operations ---
 
 
-/**
- * Add a new car company with models and optional years, and optional brandLogo upload
- * POST /admin/car-company
- * Body: { companyName: string, models: [{ modelName: string, years?: [number] }] }
- * File: brandLogo (optional image upload via multipart/form-data)
- */
-async addCarCompany(req, res) {
-    let brandLogoPath = null;
-    try {
-        const { companyName, models } = req.body;
+// /**
+//  * Add a new car company with models and optional years, and optional brandLogo upload
+//  * POST /admin/car-company
+//  * Body: { companyName: string, models: [{ modelName: string, years?: [number] }] }
+//  * File: brandLogo (optional image upload via multipart/form-data)
+//  */
+// async addCarCompany(req, res) {
+//     let brandLogoPath = null;
+//     try {
+//         const { companyName, models } = req.body;
 
-        // If form-data, models may come as string
-        let parsedModels = models;
-        if (typeof models === "string") {
-            try {
-                parsedModels = JSON.parse(models);
-            } catch {
-                return res.status(400).json({ message: "models must be a valid JSON array." });
-            }
-        }
+//         // If form-data, models may come as string
+//         let parsedModels = models;
+//         if (typeof models === "string") {
+//             try {
+//                 parsedModels = JSON.parse(models);
+//             } catch {
+//                 return res.status(400).json({ message: "models must be a valid JSON array." });
+//             }
+//         }
 
-        if (!companyName || !Array.isArray(parsedModels) || parsedModels.length === 0) {
-            // Delete uploaded image if relevant
-            if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
-            return res.status(400).json({ message: "companyName and models are required." });
-        }
+//         if (!companyName || !Array.isArray(parsedModels) || parsedModels.length === 0) {
+//             // Delete uploaded image if relevant
+//             if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
+//             return res.status(400).json({ message: "companyName and models are required." });
+//         }
 
-        // Ensure models elements at least have modelName, years optional
-        for (const model of parsedModels) {
-            if (!model.modelName) {
-                if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
-                return res.status(400).json({ message: "Each model must have a modelName." });
-            }
-            // years is OPTIONAL, no need to check for it
-        }
+//         // Ensure models elements at least have modelName, years optional
+//         for (const model of parsedModels) {
+//             if (!model.modelName) {
+//                 if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
+//                 return res.status(400).json({ message: "Each model must have a modelName." });
+//             }
+//             // years is OPTIONAL, no need to check for it
+//         }
 
-        // brandLogo from req.files
-        if (req.files && req.files.brandLogo && req.files.brandLogo[0]) {
-            brandLogoPath = req.files.brandLogo[0].path;
-        }
+//         // brandLogo from req.files
+//         if (req.files && req.files.brandLogo && req.files.brandLogo[0]) {
+//             brandLogoPath = req.files.brandLogo[0].path;
+//         }
 
-        // Check for duplicate companyName
-        const existing = await CarCompany.findOne({ companyName });
-        if (existing) {
-            if (brandLogoPath) deleteUploadedFile(brandLogoPath);
-            return res.status(409).json({ message: "Car company already exists." });
-        }
+//         // Check for duplicate companyName
+//         const existing = await CarCompany.findOne({ companyName });
+//         if (existing) {
+//             if (brandLogoPath) deleteUploadedFile(brandLogoPath);
+//             return res.status(409).json({ message: "Car company already exists." });
+//         }
 
-        const newCompany = new CarCompany({
-            companyName,
-            models: parsedModels,
-            brandLogo: brandLogoPath || null
-        });
+//         const newCompany = new CarCompany({
+//             companyName,
+//             models: parsedModels,
+//             brandLogo: brandLogoPath || null
+//         });
 
-        await newCompany.save();
+//         await newCompany.save();
 
-        return res.status(201).json({ success: true, data: newCompany });
+//         return res.status(201).json({ success: true, data: newCompany });
 
-    } catch (err) {
-        // Clean up uploaded image on error
-        if (brandLogoPath) {
-            deleteUploadedFile(brandLogoPath);
-        }
-        console.error("[addCarCompany] Error:", err);
-        return res.status(500).json({ message: "Failed to add car company", error: err.message });
-    }
-}
+//     } catch (err) {
+//         // Clean up uploaded image on error
+//         if (brandLogoPath) {
+//             deleteUploadedFile(brandLogoPath);
+//         }
+//         console.error("[addCarCompany] Error:", err);
+//         return res.status(500).json({ message: "Failed to add car company", error: err.message });
+//     }
+// }
 
-/**
- * Edit a car company by ID, including optional update of brandLogo
- * PATCH /admin/car-company/:id
- * Body may include any subset of { companyName, models }
- * File: brandLogo (optional, replaces old if provided)
- */
-async editCarCompany(req, res) {
-    let brandLogoPath = null;
-    try {
-        const { id } = req.params;
-        const { companyName, models } = req.body;
+// /**
+//  * Edit a car company by ID, including optional update of brandLogo
+//  * PATCH /admin/car-company/:id
+//  * Body may include any subset of { companyName, models }
+//  * File: brandLogo (optional, replaces old if provided)
+//  */
+// async editCarCompany(req, res) {
+//     let brandLogoPath = null;
+//     try {
+//         const { id } = req.params;
+//         const { companyName, models } = req.body;
 
-        // If form-data, models may come as string
-        let parsedModels = models;
-        if (typeof models === "string") {
-            try {
-                parsedModels = JSON.parse(models);
-            } catch {
-                if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
-                return res.status(400).json({ message: "models must be a valid JSON array." });
-            }
-        }
+//         // If form-data, models may come as string
+//         let parsedModels = models;
+//         if (typeof models === "string") {
+//             try {
+//                 parsedModels = JSON.parse(models);
+//             } catch {
+//                 if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
+//                 return res.status(400).json({ message: "models must be a valid JSON array." });
+//             }
+//         }
 
-        if (!companyName && !parsedModels && !req.files?.brandLogo) {
-            if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
-            return res.status(400).json({ message: "Nothing to update." });
-        }
+//         if (!companyName && !parsedModels && !req.files?.brandLogo) {
+//             if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
+//             return res.status(400).json({ message: "Nothing to update." });
+//         }
 
-        // If models provided, ensure each model has a modelName, years are optional
-        if (parsedModels) {
-            for (const model of parsedModels) {
-                if (!model.modelName) {
-                    if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
-                    return res.status(400).json({ message: "Each model must have a modelName." });
-                }
-                // years is OPTIONAL, no need to check for it
-            }
-        }
+//         // If models provided, ensure each model has a modelName, years are optional
+//         if (parsedModels) {
+//             for (const model of parsedModels) {
+//                 if (!model.modelName) {
+//                     if (req.files?.brandLogo?.[0]) deleteUploadedFile(req.files.brandLogo[0]);
+//                     return res.status(400).json({ message: "Each model must have a modelName." });
+//                 }
+//                 // years is OPTIONAL, no need to check for it
+//             }
+//         }
 
-        const updateFields = {};
-        if (companyName) updateFields.companyName = companyName;
-        if (parsedModels) updateFields.models = parsedModels;
+//         const updateFields = {};
+//         if (companyName) updateFields.companyName = companyName;
+//         if (parsedModels) updateFields.models = parsedModels;
 
-        // brandLogo from req.files (new logo uploaded)
-        if (req.files && req.files.brandLogo && req.files.brandLogo[0]) {
-            brandLogoPath = req.files.brandLogo[0].path;
-            updateFields.brandLogo = brandLogoPath;
-        }
+//         // brandLogo from req.files (new logo uploaded)
+//         if (req.files && req.files.brandLogo && req.files.brandLogo[0]) {
+//             brandLogoPath = req.files.brandLogo[0].path;
+//             updateFields.brandLogo = brandLogoPath;
+//         }
 
-        // Check for existing company and handle old logo delete if replacing with new
-        let prevCompany = null;
-        if (brandLogoPath) {
-            prevCompany = await CarCompany.findById(id);
-        }
+//         // Check for existing company and handle old logo delete if replacing with new
+//         let prevCompany = null;
+//         if (brandLogoPath) {
+//             prevCompany = await CarCompany.findById(id);
+//         }
 
-        const updated = await CarCompany.findByIdAndUpdate(id, updateFields, { new: true });
-        if (!updated) {
-            if (brandLogoPath) deleteUploadedFile(brandLogoPath);
-            return res.status(404).json({ message: "CarCompany not found." });
-        }
+//         const updated = await CarCompany.findByIdAndUpdate(id, updateFields, { new: true });
+//         if (!updated) {
+//             if (brandLogoPath) deleteUploadedFile(brandLogoPath);
+//             return res.status(404).json({ message: "CarCompany not found." });
+//         }
 
-        // Delete old logo if replaced by a new one
-        if (brandLogoPath && prevCompany && prevCompany.brandLogo && prevCompany.brandLogo !== brandLogoPath) {
-            deleteUploadedFile(prevCompany.brandLogo);
-        }
+//         // Delete old logo if replaced by a new one
+//         if (brandLogoPath && prevCompany && prevCompany.brandLogo && prevCompany.brandLogo !== brandLogoPath) {
+//             deleteUploadedFile(prevCompany.brandLogo);
+//         }
 
-        return res.status(200).json({ success: true, data: updated });
-    } catch (err) {
-        // Clean up uploaded image on error
-        if (brandLogoPath) {
-            deleteUploadedFile(brandLogoPath);
-        }
-        console.error("[editCarCompany] Error:", err);
-        return res.status(500).json({ message: "Failed to edit car company", error: err.message });
-    }
-}
-
-
-/**
- * Fetch all car companies, or filter by companyName if query provided
- * GET /admin/car-company?companyName=Honda
- */
-async fetchCarCompanies(req, res) {
-    try {
-        const { companyName } = req.query;
-        let companies;
-        if (companyName) {
-            companies = await CarCompany.find({ companyName: { $regex: companyName, $options: "i" } });
-        } else {
-            companies = await CarCompany.find({});
-        }
-        return res.status(200).json({ success: true, data: companies });
-    } catch (err) {
-        console.error("[fetchCarCompanies] Error:", err);
-        return res.status(500).json({ message: "Failed to fetch car companies", error: err.message });
-    }
-}
+//         return res.status(200).json({ success: true, data: updated });
+//     } catch (err) {
+//         // Clean up uploaded image on error
+//         if (brandLogoPath) {
+//             deleteUploadedFile(brandLogoPath);
+//         }
+//         console.error("[editCarCompany] Error:", err);
+//         return res.status(500).json({ message: "Failed to edit car company", error: err.message });
+//     }
+// }
 
 
-/**
- * Delete a car company by ID
- * DELETE /admin/car-company/:id
- */
-async deleteCarCompany(req, res) {
-    try {
-        const { id } = req.params;
-        const deleted = await CarCompany.findByIdAndDelete(id);
-        if (!deleted) {
-            return res.status(404).json({ message: "CarCompany not found." });
-        }
-        return res.status(200).json({ success: true, message: "CarCompany deleted." });
-    } catch (err) {
-        console.error("[deleteCarCompany] Error:", err);
-        return res.status(500).json({ message: "Failed to delete car company", error: err.message });
-    }
-}
+// /**
+//  * Fetch all car companies, or filter by companyName if query provided
+//  * GET /admin/car-company?companyName=Honda
+//  */
+// async fetchCarCompanies(req, res) {
+//     try {
+//         const { companyName } = req.query;
+//         let companies;
+//         if (companyName) {
+//             companies = await CarCompany.find({ companyName: { $regex: companyName, $options: "i" } });
+//         } else {
+//             companies = await CarCompany.find({});
+//         }
+//         return res.status(200).json({ success: true, data: companies });
+//     } catch (err) {
+//         console.error("[fetchCarCompanies] Error:", err);
+//         return res.status(500).json({ message: "Failed to fetch car companies", error: err.message });
+//     }
+// }
+
+
+// /**
+//  * Delete a car company by ID
+//  * DELETE /admin/car-company/:id
+//  */
+// async deleteCarCompany(req, res) {
+//     try {
+//         const { id } = req.params;
+//         const deleted = await CarCompany.findByIdAndDelete(id);
+//         if (!deleted) {
+//             return res.status(404).json({ message: "CarCompany not found." });
+//         }
+//         return res.status(200).json({ success: true, message: "CarCompany deleted." });
+//     } catch (err) {
+//         console.error("[deleteCarCompany] Error:", err);
+//         return res.status(500).json({ message: "Failed to delete car company", error: err.message });
+//     }
+// }
 
 /**
  * Get website page - list of Businesses with key info
@@ -1124,235 +1668,6 @@ async getWebsitePage(req, res) {
         });
     }
 }
-
-// --- Cities CRUD Controller Methods ---
-
-
-
-
-// =================== Province CRUD ===================
-
-// @route   POST /admin/provinces
-// @desc    Create a new province
-// @access  Admin
-async addProvince(req, res) {
-    try {
-        const { name, nickName = "", status = "Active" } = req.body;
-        if (!name) {
-            console.log("[addProvince] Province name missing in request body");
-            return res.status(400).json({ success: false, message: "Province name is required" });
-        }
-
-        // Check if province with same name exists (case-insensitive)
-        const existing = await Province.findOne({ name: { $regex: `^${name}$`, $options: "i" } });
-        if (existing) {
-            console.log(`[addProvince] Province with name "${name}" already exists`);
-            return res.status(409).json({ success: false, message: "Province already exists" });
-        }
-
-        const province = new Province({ name, nickName, status, cities: [] });
-        await province.save();
-        console.log(`[addProvince] Province "${name}" created successfully`);
-        return res.status(201).json({ success: true, data: province });
-    } catch (err) {
-        console.log("[addProvince] Error:", err);
-        return res.status(500).json({ success: false, message: "Failed to add province", error: err.message });
-    }
-}
-
-// @route   GET /admin/provinces
-// @desc    Get list of all provinces (with cities)
-// @access  Admin
-async fetchProvinces(req, res) {
-    try {
-        const provinces = await Province.find({}).sort({ name: 1 });
-        console.log(`[fetchProvinces] Fetched ${provinces.length} provinces`);
-        return res.status(200).json({ success: true, data: provinces });
-    } catch (err) {
-        console.log("[fetchProvinces] Error:", err);
-        return res.status(500).json({ success: false, message: "Failed to fetch provinces", error: err.message });
-    }
-}
-
-// @route   PATCH /admin/provinces/:provinceId
-// @desc    Edit a province (name, nickName, status) by ID
-// @access  Admin
-async editProvince(req, res) {
-    try {
-        const { provinceId } = req.params;
-        const { name, nickName, status } = req.body;
-        if (!name) {
-            console.log("[editProvince] Province name missing in request body");
-            return res.status(400).json({ success: false, message: "Province name is required" });
-        }
-        // Check for another province with this name
-        const duplicate = await Province.findOne({ 
-            name: { $regex: `^${name}$`, $options: "i" },
-            _id: { $ne: provinceId }
-        });
-        if (duplicate) {
-            console.log(`[editProvince] Duplicate province name "${name}" found under different ID`);
-            return res.status(409).json({ success: false, message: "Another province with this name already exists" });
-        }
-        const updateFields = { name };
-        if (typeof nickName === "string") updateFields.nickName = nickName;
-        if (status && ['Active', 'Inactive'].includes(status)) updateFields.status = status;
-        const province = await Province.findByIdAndUpdate(provinceId, updateFields, { new: true });
-        if (!province) {
-            console.log(`[editProvince] Province with ID ${provinceId} not found`);
-            return res.status(404).json({ success: false, message: "Province not found" });
-        }
-        console.log(`[editProvince] Province "${provinceId}" updated`);
-        return res.status(200).json({ success: true, data: province });
-    } catch (err) {
-        console.log("[editProvince] Error:", err);
-        return res.status(500).json({ success: false, message: "Failed to edit province", error: err.message });
-    }
-}
-
-// @route   DELETE /admin/provinces/:provinceId
-// @desc    Delete a province by ID
-// @access  Admin
-async deleteProvince(req, res) {
-    try {
-        const { provinceId } = req.params;
-        const province = await Province.findByIdAndDelete(provinceId);
-        if (!province) {
-            console.log(`[deleteProvince] Province with ID ${provinceId} not found`);
-            return res.status(404).json({ success: false, message: "Province not found" });
-        }
-        console.log(`[deleteProvince] Province with ID ${provinceId} deleted`);
-        return res.status(200).json({ success: true, message: "Province deleted successfully" });
-    } catch (err) {
-        console.log("[deleteProvince] Error:", err);
-        return res.status(500).json({ success: false, message: "Failed to delete province", error: err.message });
-    }
-}
-
-// =================== Cities within Province ===================
-
-// @route   POST /admin/provinces/:provinceId/cities
-// @desc    Add city to province
-// @access  Admin
-async addCity(req, res) {
-    try {
-        const { provinceId } = req.params;
-        const { name, status = "Active" } = req.body;
-        if (!name) {
-            console.log("[addCity] City name missing in request body");
-            return res.status(400).json({ success: false, message: "City name is required" });
-        }
-        if (status && !["Active", "Inactive"].includes(status)) {
-            console.log("[addCity] Invalid status for city");
-            return res.status(400).json({ success: false, message: "Invalid status for city" });
-        }
-        const province = await Province.findById(provinceId);
-        if (!province) {
-            console.log(`[addCity] Province with ID ${provinceId} not found`);
-            return res.status(404).json({ success: false, message: "Province not found" });
-        }
-        // Check for duplicate city in province (case-insensitive)
-        const duplicate = province.cities.find(
-            c => c.name.trim().toLowerCase() === name.trim().toLowerCase()
-        );
-        if (duplicate) {
-            console.log(`[addCity] City "${name}" already exists in province "${provinceId}"`);
-            return res.status(409).json({ success: false, message: "City already exists in this province" });
-        }
-        province.cities.push({ name: name.trim(), status });
-        await province.save();
-        console.log(`[addCity] City "${name}" added to province "${provinceId}"`);
-        return res.status(201).json({ success: true, data: province.cities });
-    } catch (err) {
-        console.log("[addCity] Error:", err);
-        return res.status(500).json({ success: false, message: "Failed to add city", error: err.message });
-    }
-}
-
-// @route   PATCH /admin/provinces/:provinceId/cities/:cityName
-// @desc    Edit a city (name, status) by city name (case-insensitive) in province
-// @access  Admin
-async editCity(req, res) {
-    try {
-        const { provinceId, cityName } = req.params;
-        const { name, status } = req.body;
-        if (!name && !status) {
-            console.log("[editCity] City name/status missing in request body");
-            return res.status(400).json({ success: false, message: "City name or status is required" });
-        }
-        if (status && !["Active", "Inactive"].includes(status)) {
-            console.log("[editCity] Invalid status for city");
-            return res.status(400).json({ success: false, message: "Invalid status for city" });
-        }
-        const province = await Province.findById(provinceId);
-        if (!province) {
-            console.log(`[editCity] Province with ID ${provinceId} not found`);
-            return res.status(404).json({ success: false, message: "Province not found" });
-        }
-        // Ensure no duplicate city name with new value (if a new name is provided)
-        if (name) {
-            const duplicate = province.cities.find(
-                city => city.name.trim().toLowerCase() === name.trim().toLowerCase()
-            );
-            // Only treat as duplicate if the duplicate is NOT the current city we're editing
-            if (duplicate && cityName.trim().toLowerCase() !== name.trim().toLowerCase()) {
-                console.log(`[editCity] Another city with name "${name}" exists in province "${provinceId}"`);
-                return res.status(409).json({ success: false, message: "Another city with this name already exists in this province" });
-            }
-        }
-        // Find the city to update
-        let updated = false;
-        for (let city of province.cities) {
-            if (city.name.trim().toLowerCase() === cityName.trim().toLowerCase()) {
-                if (name) city.name = name.trim();
-                if (status) city.status = status;
-                updated = true;
-                break;
-            }
-        }
-        if (!updated) {
-            console.log(`[editCity] City "${cityName}" not found in province "${provinceId}"`);
-            return res.status(404).json({ success: false, message: "City not found in this province" });
-        }
-        await province.save();
-        console.log(`[editCity] City "${cityName}" edited in province "${provinceId}"`);
-        return res.status(200).json({ success: true, data: province.cities });
-    } catch (err) {
-        console.log("[editCity] Error:", err);
-        return res.status(500).json({ success: false, message: "Failed to edit city", error: err.message });
-    }
-}
-
-// @route   DELETE /admin/provinces/:provinceId/cities/:cityName
-// @desc    Delete a city by name from province (case-insensitive)
-// @access  Admin
-async deleteCity(req, res) {
-    try {
-        const { provinceId, cityName } = req.params;
-        const province = await Province.findById(provinceId);
-        if (!province) {
-            console.log(`[deleteCity] Province with ID ${provinceId} not found`);
-            return res.status(404).json({ success: false, message: "Province not found" });
-        }
-        const initialLength = province.cities.length;
-        province.cities = province.cities.filter(
-            city => city.name.trim().toLowerCase() !== cityName.trim().toLowerCase()
-        );
-        if (province.cities.length === initialLength) {
-            console.log(`[deleteCity] City "${cityName}" not found in province "${provinceId}"`);
-            return res.status(404).json({ success: false, message: "City not found in this province" });
-        }
-        await province.save();
-        console.log(`[deleteCity] City "${cityName}" deleted from province "${provinceId}"`);
-        return res.status(200).json({ success: true, message: "City deleted successfully", data: province.cities });
-    } catch (err) {
-        console.log("[deleteCity] Error:", err);
-        return res.status(500).json({ success: false, message: "Failed to delete city", error: err.message });
-    }
-}
-
-// Ads CRUD for Admin
-
 
 
 // ----------- BUSINESS PROFILE ADS CRUD (Business-specific ads) -----------
@@ -1907,548 +2222,6 @@ async sendCustomNotificationToUser(req, res) {
     }
 }
 
-onboardCarOwner = async (req, res) => {
-  const session = await mongoose.startSession();
-  session.startTransaction();
-
-  // Cleanup all uploaded files on failure
-  const cleanupUploads = async () => {
-    const profilePhoto = req.files?.["profilePhoto"]?.[0]?.path;
-    if (profilePhoto) await deleteUploadedFile(profilePhoto);
-
-    // Clean up all carImage_i files
-    for (let i = 0; i < 5; i++) {
-      const imgPath = req.files?.[`carImage_${i}`]?.[0]?.path;
-      if (imgPath) await deleteUploadedFile(imgPath);
-    }
-  };
-
-  try {
-    const { name, email, phone, countryCode, pincode, role, address, vehicles } = req.body;
-
-    let vehiclesArray = vehicles;
-    if (typeof vehicles === "string") {
-      try { vehiclesArray = JSON.parse(vehicles); }
-      catch (e) { vehiclesArray = undefined; }
-    }
-
-    // ── Validation ──────────────────────────────────────────────────────────
-    if (!name || !email || !phone || !countryCode || !pincode || !role || !address) {
-      await cleanupUploads();
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        message: "All owner fields (name, email, phone, countryCode, pincode, role, address) are required.",
-      });
-    }
-
-    const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
-    if (!allowedCountryCodes.includes(countryCode)) {
-      await cleanupUploads();
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        message: "Invalid country code. Allowed: +1, +61, +44, +91.",
-      });
-    }
-
-    if (role !== "carowner") {
-      await cleanupUploads();
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        message: "Only role 'carowner' is allowed for onboarding via this endpoint.",
-      });
-    }
-
-    if (email) {
-      const existingEmailUser = await User.findOne({ email }).session(session);
-      if (existingEmailUser) {
-        await cleanupUploads();
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(409).json({
-          message: "A user with this email already exists.",
-          userId: existingEmailUser._id,
-        });
-      }
-    }
-
-    if (phone && countryCode) {
-      const existingPhoneUser = await User.findOne({ phone, countryCode }).session(session);
-      if (existingPhoneUser) {
-        await cleanupUploads();
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(409).json({
-          message: "A user with this phone and country code already exists.",
-          userId: existingPhoneUser._id,
-          phone: existingPhoneUser.phone,
-          countryCode: existingPhoneUser.countryCode,
-          name: existingPhoneUser.name,
-          email: existingPhoneUser.email,
-        });
-      }
-    }
-
-    // ── Create User ──────────────────────────────────────────────────────────
-    // const otp = "000000";
-    // const otpExpiresAt = new Date(Date.now() + 1000 * 600);
-    const profilePhotoPath = req.files?.["profilePhoto"]?.[0]?.path || null;
-    const onboardedBy = req.user?.id || null;
-
-    const carOwnerPayload = {
-      name, email, phone, countryCode, pincode, role, address,
-      isProfileComplete: true, otpAttempts: 0,
-      onboardedBy,
-      ...(profilePhotoPath ? { profilePhoto: profilePhotoPath } : {}),
-    };
-
-    let newCarOwner;
-    try {
-      [newCarOwner] = await User.create([carOwnerPayload], { session });
-    } catch (err) {
-      await cleanupUploads();
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(500).json({ message: "Failed to create car owner profile." });
-    }
-
-    // ── Process Vehicles ─────────────────────────────────────────────────────
-    const newVehicles = [];
-
-    async function isDuplicateNotDisabledPlate(licensePlateNo) {
-      if (!licensePlateNo) return false;
-      return !!(await VehicleModel.findOne({
-        licensePlateNo,
-        $or: [{ disabled: false }, { disabled: { $exists: false } }],
-      }).session(session));
-    }
-
-    const inputVehiclesArray = Array.isArray(vehiclesArray)
-      ? vehiclesArray
-      : (req.body.licensePlateNo || req.body.vinNo || req.body.vehicleName
-        ? [{
-            licensePlateNo:  req.body.licensePlateNo,
-            vinNo:           req.body.vinNo,
-            vehicleName:     req.body.vehicleName,
-            model:           req.body.model,
-            year:            req.body.year,
-            odometerReading: req.body.odometerReading,
-            disabled:        req.body.disabled,
-          }]
-        : []);
-
-    for (let i = 0; i < inputVehiclesArray.length; i++) {
-      const veh = inputVehiclesArray[i] || {};
-      const { licensePlateNo, vinNo, vehicleName, model, year, odometerReading, disabled } = veh;
-
-      const vehiclePayload = {};
-      if (licensePlateNo  !== undefined) vehiclePayload.licensePlateNo  = licensePlateNo;
-      if (vinNo           !== undefined) vehiclePayload.vinNo           = vinNo;
-      if (vehicleName     !== undefined) vehiclePayload.make            = { ...(vehiclePayload.make || {}), name: vehicleName };
-      if (model           !== undefined) vehiclePayload.make            = { ...(vehiclePayload.make || {}), model };
-      if (year            !== undefined) vehiclePayload.year            = year;
-      if (odometerReading !== undefined) vehiclePayload.odometerReading = odometerReading;
-      if (disabled        !== undefined) vehiclePayload.disabled        = disabled;
-
-      // ✅ Pick carImage for THIS vehicle index: carImage_0, carImage_1, etc.
-      const vehicleImagePath = req.files?.[`carImage_${i}`]?.[0]?.path || null;
-      if (vehicleImagePath) {
-        vehiclePayload.carImages = [vehicleImagePath];
-      }
-
-      const hasAllRequired =
-        vehiclePayload.licensePlateNo &&
-        vehiclePayload.vinNo &&
-        vehiclePayload.make?.name &&
-        vehiclePayload.make?.model &&
-        vehiclePayload.year;
-
-      if (!hasAllRequired) continue;
-
-      if (!vehiclePayload.disabled) {
-        const plateExists = await isDuplicateNotDisabledPlate(vehiclePayload.licensePlateNo);
-        if (plateExists) {
-          await cleanupUploads();
-          await session.abortTransaction();
-          session.endSession();
-          return res.status(409).json({
-            message: `A vehicle with license plate "${vehiclePayload.licensePlateNo}" already exists and is not disabled.`,
-            licensePlateNo: vehiclePayload.licensePlateNo,
-          });
-        }
-      }
-
-      try {
-        const [createdVehicle] = await VehicleModel.create([vehiclePayload], { session });
-
-        newCarOwner.myVehicles.push(createdVehicle._id);
-
-        // ✅ Save vehicleId + carImage into User.documents for this vehicle
-        const vehicleDoc = { vehicleId: createdVehicle._id };
-        if (vehicleImagePath) vehicleDoc.carImage = vehicleImagePath;
-        newCarOwner.documents.push(vehicleDoc);
-
-        newVehicles.push(createdVehicle);
-      } catch (err) {
-        await cleanupUploads();
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(500).json({ message: "Failed to create vehicle." });
-      }
-    }
-
-    if (newVehicles.length > 0) {
-      try {
-        await newCarOwner.save({ session });
-      } catch (saveErr) {
-        await cleanupUploads();
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(500).json({ message: "Failed to update car owner with vehicles." });
-      }
-    }
-
-    await session.commitTransaction();
-    session.endSession();
-
-    return res.status(201).json({
-      message: "Car owner onboarded successfully.",
-      carOwner: {
-        id:                newCarOwner._id,
-        name:              newCarOwner.name,
-        email:             newCarOwner.email,
-        phone:             newCarOwner.phone,
-        countryCode:       newCarOwner.countryCode,
-        pincode:           newCarOwner.pincode,
-        role:              newCarOwner.role,
-        address:           newCarOwner.address,
-        isProfileComplete: newCarOwner.isProfileComplete,
-        status:            newCarOwner.status,
-        onboardedBy:       newCarOwner.onboardedBy,
-        profilePhoto:      newCarOwner.profilePhoto,
-        documents:         newCarOwner.documents, // vehicleId + carImage per vehicle
-        vehicles: newVehicles.map(v => ({
-          id:              v._id,
-          licensePlateNo:  v.licensePlateNo,
-          vinNo:           v.vinNo,
-          name:            v.make?.name,
-          model:           v.make?.model,
-          year:            v.year,
-          odometerReading: v.odometerReading,
-          carImages:       v.carImages,
-        })),
-      },
-    });
-
-  } catch (error) {
-    await cleanupUploads();
-    try { await session.abortTransaction(); } catch (_) {}
-    session.endSession();
-    console.error("[onboardCarOwner] Error:", error);
-    return res.status(500).json({ message: "Internal Server Error" });
-  }
-};
-
-editCustomer = async (req, res) => {
-  try {
-    const autoshopOwnerId = req.user?.id;
-    const { carOwnerId } = req.body;
-
-    // ── Cleanup helper ───────────────────────────────────────────────────────
-    const cleanupUploads = async () => {
-      if (req.files?.["profilePhoto"]?.[0]?.path) {
-        await deleteUploadedFile(req.files["profilePhoto"][0].path);
-      }
-      for (let i = 0; i < 5; i++) {
-        const imgPath = req.files?.[`carImage_${i}`]?.[0]?.path;
-        if (imgPath) await deleteUploadedFile(imgPath);
-      }
-    };
-
-    // Parse vehicles JSON string if needed
-    let vehiclesFromBody = req.body.vehicles;
-    if (typeof vehiclesFromBody === "string") {
-      try { vehiclesFromBody = JSON.parse(vehiclesFromBody); }
-      catch (e) { vehiclesFromBody = undefined; }
-    }
-
-
-    if (!carOwnerId) {
-      await cleanupUploads();
-      return res.status(400).json({ message: "carOwnerId is required." });
-    }
-
-
-
-    // ── Fetch customer ───────────────────────────────────────────────────────
-    // Use lean: false so we can mutate documents array below
-    const customer = await User.findOne({ _id: carOwnerId, role: "carowner" });
-    if (!customer) {
-      await cleanupUploads();
-      return res.status(404).json({ message: "Car owner not found." });
-    }
-
-    const existingVehicleIds = Array.isArray(customer.myVehicles)
-      ? customer.myVehicles.map(id => id.toString())
-      : [];
-
-    // ── Build user update fields ─────────────────────────────────────────────
-    const allowedUserFields = [
-      "name", "email", "phone", "countryCode", "pincode", "address",
-      "city", "isDisabled", "isProfileComplete", "favoriteAutoShops",
-    ];
-    let updateFields = {};
-    for (const field of allowedUserFields) {
-      if (field in req.body && req.body[field] !== undefined) {
-        updateFields[field] = req.body[field];
-      }
-    }
-
-    // Profile photo upload
-    const newProfilePhoto = req.files?.["profilePhoto"]?.[0]?.path;
-    if (newProfilePhoto) {
-      updateFields.profilePhoto = newProfilePhoto;
-    }
-
-    // ── Process vehicles ─────────────────────────────────────────────────────
-    let updatedVehicleObjectIds = [...existingVehicleIds]; // preserve existing
-
-    if (Array.isArray(vehiclesFromBody)) {
-      for (let i = 0; i < vehiclesFromBody.length; i++) {
-        const v = vehiclesFromBody[i];
-
-        // ✅ carImage for this specific vehicle via carImage_0, carImage_1, etc.
-        const vehicleImagePath = req.files?.[`carImage_${i}`]?.[0]?.path || null;
-
-        // ── EDIT EXISTING VEHICLE ────────────────────────────────────────────
-        if (v.vId && mongoose.Types.ObjectId.isValid(v.vId)) {
-          const vehId = v.vId.toString();
-          if (!existingVehicleIds.includes(vehId)) {
-            await cleanupUploads();
-            return res.status(400).json({
-              message: `Invalid vehicle id (${vehId}) for this customer.`,
-            });
-          }
-
-          const allowedVehicleFields = [
-            "licensePlateNo", "licensePlateFrontImagePath", "licensePlateBackImagePath",
-            "carOwnershipCertificate", "insuranceCertificate", "vinNo", "year",
-            "odometerReading", "disabled",
-          ];
-          let vehicleUpdateFields = {};
-          for (const field of allowedVehicleFields) {
-            if (v[field] !== undefined) vehicleUpdateFields[field] = v[field];
-          }
-          if (v.vehicleName !== undefined) vehicleUpdateFields["make.name"] = v.vehicleName;
-          if (v.model !== undefined) vehicleUpdateFields["make.model"] = v.model;
-
-          // Handle carImages (uploaded file takes priority, then body value)
-          if (vehicleImagePath) {
-            vehicleUpdateFields.carImages = [vehicleImagePath];
-          } else if (typeof v.carImages === "string") {
-            try {
-              const imgs = JSON.parse(v.carImages);
-              if (Array.isArray(imgs)) vehicleUpdateFields.carImages = imgs;
-            } catch (e) {}
-          } else if (Array.isArray(v.carImages)) {
-            vehicleUpdateFields.carImages = v.carImages;
-          }
-
-          try {
-            if (Object.keys(vehicleUpdateFields).length > 0) {
-              await VehicleModel.findOneAndUpdate(
-                { _id: vehId },
-                { $set: vehicleUpdateFields },
-                { new: true }
-              );
-            }
-          } catch (err) {
-            await cleanupUploads();
-            return res.status(500).json({ message: "Vehicle update failed." });
-          }
-
-          // ✅ Update User.documents entry for this vehicleId
-          if (vehicleImagePath) {
-            const docEntry = customer.documents.find(
-              d => d.vehicleId?.toString() === vehId
-            );
-            if (docEntry) {
-              docEntry.carImage = vehicleImagePath; // update existing
-            } else {
-              customer.documents.push({ vehicleId: vehId, carImage: vehicleImagePath });
-            }
-          }
-
-        }
-        // ── ADD NEW VEHICLE ──────────────────────────────────────────────────
-        else if (!v.vId) {
-          const requiredFields = ["licensePlateNo", "vehicleName", "model", "year", "vinNo", "odometerReading"];
-          const hasAllRequired = requiredFields.every(
-            field => v[field] !== undefined && v[field] !== null && v[field] !== ""
-          );
-
-          if (hasAllRequired) {
-            let newCarImages = [];
-            if (vehicleImagePath) {
-              newCarImages = [vehicleImagePath];
-            } else if (typeof v.carImages === "string") {
-              try {
-                const imgs = JSON.parse(v.carImages);
-                if (Array.isArray(imgs)) newCarImages = imgs;
-              } catch (e) {}
-            } else if (Array.isArray(v.carImages)) {
-              newCarImages = v.carImages;
-            }
-
-            const newVehicleData = {
-              licensePlateNo:            v.licensePlateNo,
-              year:                      v.year,
-              "make.name":               v.vehicleName,
-              "make.model":              v.model,
-              vinNo:                     v.vinNo,
-              odometerReading:           v.odometerReading,
-              licensePlateFrontImagePath: v.licensePlateFrontImagePath,
-              licensePlateBackImagePath:  v.licensePlateBackImagePath,
-              carOwnershipCertificate:   v.carOwnershipCertificate,
-              insuranceCertificate:      v.insuranceCertificate,
-              carImages:                 newCarImages,
-              disabled:                  v.disabled,
-              owner:                     customer._id,
-            };
-            // Remove undefined keys
-            Object.keys(newVehicleData).forEach(key => {
-              if (newVehicleData[key] === undefined) delete newVehicleData[key];
-            });
-
-            try {
-              const newVehicleDoc = await VehicleModel.create(newVehicleData);
-              if (newVehicleDoc?._id) {
-                updatedVehicleObjectIds.push(newVehicleDoc._id.toString());
-
-                // ✅ Add new entry in User.documents for new vehicle
-                const docEntry = {
-                  vehicleId: newVehicleDoc._id,
-                  ...(vehicleImagePath ? { carImage: vehicleImagePath } : {}),
-                };
-                customer.documents.push(docEntry);
-              }
-            } catch (err) {
-              await cleanupUploads();
-              return res.status(500).json({ message: "Failed to create vehicle." });
-            }
-          }
-          // skip if required fields missing
-        }
-      }
-
-      updateFields.myVehicles = updatedVehicleObjectIds;
-    }
-
-    if (Object.keys(updateFields).length === 0 && !vehiclesFromBody) {
-      await cleanupUploads();
-      return res.status(400).json({ message: "No update fields provided." });
-    }
-
-    // ✅ Persist documents mutations + other fields
-    updateFields.documents = customer.documents;
-
-    let customerDoc;
-    try {
-      customerDoc = await User.findOneAndUpdate(
-        { _id: carOwnerId, role: "carowner" },
-        { $set: updateFields },
-        { new: true }
-      )
-      .select("name email phone countryCode status isDisabled myVehicles address pincode city profilePhoto isProfileComplete documents favoriteAutoShops onboardedBy")
-      .populate({
-        path: "myVehicles",
-        model: "Vehicle",
-        select: "-licensePlateFrontImagePath -licensePlateBackImagePath",
-      })
-      .lean();
-    } catch (err) {
-      await cleanupUploads();
-      return res.status(500).json({ message: "Customer update failed." });
-    }
-
-    if (!customerDoc) {
-      await cleanupUploads();
-      return res.status(404).json({ message: "Car owner not found." });
-    }
-
-    return res.status(200).json({
-      message: "Customer updated successfully.",
-      customer: customerDoc,
-    });
-
-  } catch (error) {
-    // best-effort cleanup
-    try {
-      if (req.files?.["profilePhoto"]?.[0]?.path) {
-        await deleteUploadedFile(req.files["profilePhoto"][0].path);
-      }
-      for (let i = 0; i < 5; i++) {
-        const imgPath = req.files?.[`carImage_${i}`]?.[0]?.path;
-        if (imgPath) await deleteUploadedFile(imgPath);
-      }
-    } catch (_) {}
-    console.error("[editCustomer] Error:", error);
-    return res.status(500).json({ message: "Internal Server Error" });
-  }
-};
-
-/**
- * Set a car owner's status to "deleted" by userId
- * (Soft deletes a car owner account)
- */
-toggleStatus = async (req, res) => {
-  const { userId } = req.params;
-  const { status } = req.body;
-
-  if (!userId) {
-    return res.status(400).json({ message: "Missing userId parameter" });
-  }
-
-  if (!status || !["active", "suspended", "deleted"].includes(status)) {
-    return res.status(400).json({ message: "Invalid or missing status. Status must be one of: active, suspended, deleted." });
-  }
-
-  try {
-    // Fetch user first to check their current status
-    const userDoc = await User.findOne({ _id: userId, role: "carowner" }).select(
-      "name email phone countryCode status isDisabled myVehicles address pincode city profilePhoto isProfileComplete documents favoriteAutoShops onboardedBy"
-    );
-
-    if (!userDoc) {
-      return res.status(404).json({ message: "Car owner not found." });
-    }
-
-    if (userDoc.status === status) {
-      return res.status(200).json({
-        message: `Car owner status is already '${status}'.`,
-        customer: userDoc,
-      });
-    }
-
-    const updatedUser = await User.findOneAndUpdate(
-      { _id: userId, role: "carowner" },
-      { $set: { status: status } },
-      { new: true }
-    ).select(
-      "name email phone countryCode status isDisabled myVehicles address pincode city profilePhoto isProfileComplete documents favoriteAutoShops onboardedBy"
-    );
-
-    return res.status(200).json({
-      message: `Car owner status updated to '${status}'.`,
-      customer: updatedUser,
-    });
-  } catch (err) {
-    console.error("[toggleStatus] Error:", err);
-    return res.status(500).json({ message: "Internal server error" });
-  }
-};
 
   // ─── CREATE AUTO SHOP OWNER ─────────────────────────────────────────────────
   /**
