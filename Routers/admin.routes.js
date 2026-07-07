@@ -623,6 +623,10 @@ import servicesRouter from "./Admin/services.routes.js";
 import carCompanyRouter from "./Admin/carCompany.routes.js";
 import carOwnerRouter from "./Admin/carOwner.routes.js";
 import dealerRouter from "./Admin/dealer.routes.js";
+import leadsRouter from "./Admin/leads.routes.js";
+import accountsRouter from "./Admin/accounts.router.js";
+import domainRouter from "./Admin/domain.router.js";
+import autoShopOwnersRouter from "./Admin/autoShopOwners.routes.js";
 
 
 const adminRouter = express.Router();
@@ -648,88 +652,88 @@ adminRouter.get(
 // adminRouter.put("/services/:id", (req, res) => adminController.editService(req, res));
 // adminRouter.delete("/services/:id", (req, res) => adminController.deleteService(req, res));
 
-// ─── Car Owners ───────────────────────────────────────────────────────────────
-// Get all car owners (with job cards & populated vehicles/shops)
-adminRouter.get(
-  "/carowners",
-  (req, res) => adminController.getAllCarOwners(req, res)
-);
+// // ─── Car Owners ───────────────────────────────────────────────────────────────
+// // Get all car owners (with job cards & populated vehicles/shops)
+// adminRouter.get(
+//   "/carowners",
+//   (req, res) => adminController.getAllCarOwners(req, res)
+// );
 
-// Onboard (create) a new car owner from admin panel
-adminRouter.post(
-  "/onboard-carowner",
-  jwtAuth,
-  onboardCarOwnerUploadMiddleware,
-  (req, res) => adminController.onboardCarOwner(req, res)
-);
+// // Onboard (create) a new car owner from admin panel
+// adminRouter.post(
+//   "/onboard-carowner",
+//   jwtAuth,
+//   onboardCarOwnerUploadMiddleware,
+//   (req, res) => adminController.onboardCarOwner(req, res)
+// );
 
-// Edit/update a car owner (admin panel)
-adminRouter.put(
-  "/my-customers",
-  jwtAuth,
-  onboardCarOwnerUploadMiddleware,
-  (req, res) => adminController.editCustomer(req, res)
-);
+// // Edit/update a car owner (admin panel)
+// adminRouter.put(
+//   "/my-customers",
+//   jwtAuth,
+//   onboardCarOwnerUploadMiddleware,
+//   (req, res) => adminController.editCustomer(req, res)
+// );
 
-// Toggle car owner status (soft delete / restore)
-// PUT /api/admin/car-owner/:userId/status/toggle
-adminRouter.put(
-  "/car-owner/:userId/status/toggle",
-  jwtAuth,
-  (req, res) => adminController.toggleStatus(req, res)
-);
+// // Toggle car owner status (soft delete / restore)
+// // PUT /api/admin/car-owner/:userId/status/toggle
+// adminRouter.put(
+//   "/car-owner/:userId/status/toggle",
+//   jwtAuth,
+//   (req, res) => adminController.toggleStatus(req, res)
+// );
 
-// ─── Auto Shop Owners ─────────────────────────────────────────────────────────
+// // ─── Auto Shop Owners ─────────────────────────────────────────────────────────
 
-// GET all auto shop owners
-adminRouter.get(
-  "/autoshopowners",
-  (req, res) => adminController.getAllAutoShopOwners(req, res)
-);
+// // GET all auto shop owners
+// adminRouter.get(
+//   "/autoshopowners",
+//   (req, res) => adminController.getAllAutoShopOwners(req, res)
+// );
 
-// POST  — Create a new auto shop owner (Admin)
-// Body: { name, email, phone, countryCode, pincode, address? }
-adminRouter.post(
-  "/autoshopowners",
-  jwtAuth,
-  (req, res) => adminController.createAutoShopOwner(req, res)
-);
+// // POST  — Create a new auto shop owner (Admin)
+// // Body: { name, email, phone, countryCode, pincode, address? }
+// adminRouter.post(
+//   "/autoshopowners",
+//   jwtAuth,
+//   (req, res) => adminController.createAutoShopOwner(req, res)
+// );
 
-// PUT  — Update an auto shop owner's profile (Admin)
-// Params: ownerId
-// Body (any subset): { name, email, phone, countryCode, pincode, address }
-adminRouter.put(
-  "/autoshopowners/:ownerId",
-  jwtAuth,
-  (req, res) => adminController.updateAutoShopOwner(req, res)
-);
+// // PUT  — Update an auto shop owner's profile (Admin)
+// // Params: ownerId
+// // Body (any subset): { name, email, phone, countryCode, pincode, address }
+// adminRouter.put(
+//   "/autoshopowners/:ownerId",
+//   jwtAuth,
+//   (req, res) => adminController.updateAutoShopOwner(req, res)
+// );
 
-// DELETE  — Soft-delete an auto shop owner (Admin)
-// Sets status="deleted", isDisabled=true, deactivates business profile
-// Params: ownerId
-adminRouter.delete(
-  "/autoshopowners/:ownerId",
-  jwtAuth,
-  (req, res) => adminController.deleteAutoShopOwner(req, res)
-);
+// // DELETE  — Soft-delete an auto shop owner (Admin)
+// // Sets status="deleted", isDisabled=true, deactivates business profile
+// // Params: ownerId
+// adminRouter.delete(
+//   "/autoshopowners/:ownerId",
+//   jwtAuth,
+//   (req, res) => adminController.deleteAutoShopOwner(req, res)
+// );
 
-// PUT  — Revive (restore) a soft-deleted auto shop owner (Admin)
-// Sets status="active", isDisabled=false, re-activates business profile
-// Params: ownerId
-// NOTE: This route MUST be declared BEFORE /autoshopowners/:ownerId
-//       so Express does not treat "revive" as an ownerId value.
-adminRouter.put(
-  "/autoshopowners/:ownerId/revive",
-  jwtAuth,
-  (req, res) => adminController.reviveAutoShopOwner(req, res)
-);
+// // PUT  — Revive (restore) a soft-deleted auto shop owner (Admin)
+// // Sets status="active", isDisabled=false, re-activates business profile
+// // Params: ownerId
+// // NOTE: This route MUST be declared BEFORE /autoshopowners/:ownerId
+// //       so Express does not treat "revive" as an ownerId value.
+// adminRouter.put(
+//   "/autoshopowners/:ownerId/revive",
+//   jwtAuth,
+//   (req, res) => adminController.reviveAutoShopOwner(req, res)
+// );
 
-// POST  — Enable / disable an auto shop owner + their business profile
-// Body: { userId: string, disable: boolean }
-adminRouter.post(
-  "/autoshopowners/toggle-status",
-  (req, res) => adminController.toggleAutoShopOwnerStatus(req, res)
-);
+// // POST  — Enable / disable an auto shop owner + their business profile
+// // Body: { userId: string, disable: boolean }
+// adminRouter.post(
+//   "/autoshopowners/toggle-status",
+//   (req, res) => adminController.toggleAutoShopOwnerStatus(req, res)
+// );
 
 // ─── Vehicle Types ────────────────────────────────────────────────────────────
 // adminRouter.get("/vehicletypes", (req, res) => adminController.fetchVehicleTypes(req, res));
@@ -781,16 +785,19 @@ adminRouter.get(
   "/business-profiles/:businessId/ads",
   (req, res) => adminController.getAllBusinessAds(req, res)
 );
+
 adminRouter.post(
   "/business-profiles/:businessId/ads",
   adsUploadMiddleware,
   (req, res) => adminController.createBusinessAd(req, res)
 );
+
 adminRouter.patch(
   "/business-profiles/:businessId/ads/:adId",
   adsUploadMiddleware,
   (req, res) => adminController.editBusinessAd(req, res)
 );
+
 adminRouter.delete(
   "/business-profiles/:businessId/ads/:adId",
   (req, res) => adminController.deleteBusinessAd(req, res)
@@ -840,9 +847,18 @@ adminRouter.use("/car-company", carCompanyRouter);
 
 adminRouter.use("/car-owner", carOwnerRouter);
 
+// Mount Auto Shop Owners router under /admin/auto-shop-owners
+adminRouter.use("/auto-shop-owners", autoShopOwnersRouter);
+
+
 adminRouter.use("/dealer", dealerRouter);
 
 
+adminRouter.use("/leads", leadsRouter);
+
+adminRouter.use("/accounts", accountsRouter);
+
+adminRouter.use("/domains", domainRouter);
 
 
 
