@@ -186,8 +186,9 @@ export const getDomains = async (req, res) => {
     }
 
     const domains = await Domain.find(filter)
-      .populate("userId", "name email phone role")
+      .populate({ path: "userId", model: User, select: "name email phone role" })
       .sort({ createdAt: -1 });
+ 
 
     return res.status(200).json({ success: true, data: domains });
   } catch (err) {

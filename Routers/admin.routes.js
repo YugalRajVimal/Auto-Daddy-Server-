@@ -845,10 +845,10 @@ adminRouter.use("/services", servicesRouter);
 adminRouter.use("/car-company", carCompanyRouter);
 
 
-adminRouter.use("/car-owner", carOwnerRouter);
+adminRouter.use("/carowners", carOwnerRouter);
 
 // Mount Auto Shop Owners router under /admin/auto-shop-owners
-adminRouter.use("/auto-shop-owners", autoShopOwnersRouter);
+adminRouter.use("/autoshopowners", autoShopOwnersRouter);
 
 
 adminRouter.use("/dealer", dealerRouter);

@@ -167,6 +167,8 @@ async addService(req, res) {
   try {
     const { name, status, subServices, shopType, odoOutRequired = false } = req.body;
 
+    console.log(status)
+
     // Validate required fields
     if (!name || typeof name !== "string" || !name.trim()) {
       return res.status(400).json({ success: false, message: "name is required" });
