@@ -57,6 +57,17 @@ const carModelSchema = new mongoose.Schema(
       required: true,
       trim: true,
     },
+    years: {
+      type: [Number],
+      default: function () {
+        const currentYear = new Date().getFullYear();
+        const years = [];
+        for (let year = 1990; year <= currentYear; year++) {
+          years.push(year);
+        }
+        return years;
+      },
+    },
   },
   { _id: false }
 );

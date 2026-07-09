@@ -2,8 +2,9 @@ import mongoose from "mongoose";
 
 const VehicleSchema = new mongoose.Schema(
   {
-    licensePlateNo: { type: String, required: true }, // Vehicle license plate number
+    carCompany: { type: mongoose.Schema.Types.ObjectId, ref: "CarCompany", required: false }, // Reference to car company
 
+    licensePlateNo: { type: String, required: true }, // Vehicle license plate number
     vinNo: { type: String, required: true }, // Vehicle Identification Number (VIN)
     make: {
       name: { type: String, required: true }, // Car make/brand
@@ -12,8 +13,6 @@ const VehicleSchema = new mongoose.Schema(
     year: { type: Number, required: true }, // Model year
     odometerReading: { type: Number, default: 0 }, // Odometer reading (kilometers/miles)
     dueOdometerReading: { type: Number, default: null }, // Odometer reading for next service due
-    vehicleImage: { type: String, default: null }, // URL or path to vehicle image (single image)
-    disabled: { type: Boolean, default: false } // Whether the vehicle is disabled (soft-deleted/archived)
   },
   {
     timestamps: true

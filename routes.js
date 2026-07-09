@@ -4,6 +4,7 @@ import authRouter from "./Routers/auth.routes.js";
 import userRouter from "./Routers/user.routes.js";
 import autoShopRouter from "./Routers/auto-shop.routes.js";
 import reportRouter from "./Routers/report.routes.js";
+import autoShopNewRouter from "./Routers/AutoShops/autoShopNew.routes.js";
 
 
 
@@ -23,6 +24,8 @@ router.use("/user", userRouter);
 router.use("/auto-shop-owner", autoShopRouter);
 router.use("/report", reportRouter);
 
+//New
+router.use("/autoshopowner", autoShopNewRouter);
 
 
 
