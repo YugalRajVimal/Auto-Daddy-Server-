@@ -223,6 +223,8 @@ const jwtAuth = async (req, res, next) => {
       });
     }
     req.user.phone = dbUser.phone;
+    req.user.role = dbUser.role;
+
     return next();
   } catch {
     return res.status(500).json({ message: "Internal Server Error" });

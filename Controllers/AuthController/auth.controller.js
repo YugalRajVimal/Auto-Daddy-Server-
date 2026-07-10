@@ -373,11 +373,9 @@ class AuthController {
       }
       await User.updateOne({ _id: user._id }, { $set: updateObj });
 
-      // Generate JWT
-      const tokenPayload = { id: user._id };
+      // Generate JWT and save role in token payload
+      const tokenPayload = { id: user._id, role: user.role };
       const token = jwt.sign(tokenPayload, process.env.JWT_SECRET);
- 
- 
 
       await ExpiredTokenModel.create({
         token,

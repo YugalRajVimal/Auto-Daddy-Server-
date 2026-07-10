@@ -2932,10 +2932,13 @@ async editMyServices(req, res) {
   }
 
 /**
- * Create a new deal (Service or Parts) and link it to the creator's business profile.
+ * Create a new deal (Service, Parts, or Salvages) and link it to the creator's business profile.
  * Handles dealImage upload (single image, field "dealImage").
  * Saves dealImage path in db (DealModel.dealImage). Deletes uploaded image if creation fails.
  * Console.log checks at every step for debugging.
+ * 
+ * Now also supports originalPrice (required, like discountedPrice).
+ * Now supports dealType = "Salvages".
  */
 async createDeal(req, res) {
     let uploadedDealImage;
@@ -2971,6 +2974,7 @@ async createDeal(req, res) {
             partName,
             description,
             discountedPrice,
+            originalPrice,
             offerEndsOnDate,
             vehicleId,
             vehicleName,
@@ -2983,20 +2987,22 @@ async createDeal(req, res) {
         partName = typeof partName === "string" ? partName.trim() : undefined;
         description = typeof description === "string" ? description.trim() : undefined;
         discountedPrice = typeof discountedPrice === "string" ? Number(discountedPrice) : discountedPrice;
+        originalPrice = typeof originalPrice === "string" ? Number(originalPrice) : originalPrice;
         serviceId = typeof serviceId === "string" ? serviceId.trim() : undefined;
         vehicleId = typeof vehicleId === "string" ? vehicleId.trim() : undefined;
         vehicleName = typeof vehicleName === "string" ? vehicleName.trim() : undefined;
         vehicleModel = typeof vehicleModel === "string" ? vehicleModel.trim() : undefined;
         vehicleYear = typeof vehicleYear === "string" ? vehicleYear.trim() : vehicleYear;
         console.log("Step 4: Normalized and prepared fields:",
-            { dealType, serviceId, partName, description, discountedPrice, offerEndsOnDate, vehicleId, vehicleName, vehicleModel, vehicleYear }
+            { dealType, serviceId, partName, description, discountedPrice, originalPrice, offerEndsOnDate, vehicleId, vehicleName, vehicleModel, vehicleYear }
         );
 
         // Validate dealType
-        if (!dealType || (dealType !== "Service" && dealType !== "Parts")) {
+        const allowedDealTypes = ["Service", "Parts", "Salvages"];
+        if (!dealType || !allowedDealTypes.includes(dealType)) {
             console.log("Invalid dealType:", dealType);
             if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
-            return res.status(400).json({ success: false, message: "dealType is required and must be 'Service' or 'Parts'." });
+            return res.status(400).json({ success: false, message: "dealType is required and must be 'Service', 'Parts', or 'Salvages'." });
         }
         console.log("dealType validated:", dealType);
 
@@ -3021,17 +3027,18 @@ async createDeal(req, res) {
                     message: "The specified servicesId does not correspond to a valid service."
                 });
             }
-        } else if (dealType === "Parts") {
-            console.log("Step 5: Validating Parts dealType...");
+        } else if (dealType === "Parts" || dealType === "Salvages") {
+            // Salvages and Parts must have partName, vehicleId, vehicleName, vehicleModel, vehicleYear
+            console.log(`Step 5: Validating ${dealType} dealType...`);
             if (!partName) {
-                console.log("Missing partName for Parts deal.");
+                console.log(`Missing partName for ${dealType} deal.`);
                 if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
-                return res.status(400).json({ success: false, message: "partName is required for dealType 'Parts'." });
+                return res.status(400).json({ success: false, message: `partName is required for dealType '${dealType}'.` });
             }
             if (!vehicleId || !mongoose.Types.ObjectId.isValid(vehicleId)) {
-                console.log("Invalid or missing vehicleId:", vehicleId);
+                console.log(`Invalid or missing vehicleId:`, vehicleId);
                 if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
-                return res.status(400).json({ success: false, message: "vehicleId is required and must be a valid MongoDB ObjectId for 'Parts' deals." });
+                return res.status(400).json({ success: false, message: `vehicleId is required and must be a valid MongoDB ObjectId for '${dealType}' deals.` });
             }
             if (!vehicleName || !vehicleModel || !vehicleYear) {
                 console.log("One or more required vehicle fields missing.",
@@ -3040,7 +3047,7 @@ async createDeal(req, res) {
                 if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
                 return res.status(400).json({
                     success: false,
-                    message: "vehicleName, vehicleModel, and vehicleYear are required for 'Parts' deals."
+                    message: "vehicleName, vehicleModel, and vehicleYear are required for '" + dealType + "' deals."
                 });
             }
         }
@@ -3052,6 +3059,24 @@ async createDeal(req, res) {
         }
         console.log("description validated.");
 
+        // Validate originalPrice
+        if (
+            originalPrice === undefined ||
+            originalPrice === null ||
+            typeof originalPrice !== "number" ||
+            isNaN(originalPrice) ||
+            originalPrice < 0
+        ) {
+            console.log("Invalid originalPrice:", originalPrice);
+            if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
+            return res.status(400).json({
+                success: false,
+                message: "originalPrice is required and must be a number greater than or equal to zero."
+            });
+        }
+        console.log("originalPrice validated:", originalPrice);
+
+        // Validate discountedPrice
         if (
             discountedPrice === undefined ||
             discountedPrice === null ||
@@ -3067,6 +3092,16 @@ async createDeal(req, res) {
             });
         }
         console.log("discountedPrice validated:", discountedPrice);
+
+        // discountedPrice should not be more than originalPrice
+        if (discountedPrice > originalPrice) {
+            console.log(`discountedPrice (${discountedPrice}) is greater than originalPrice (${originalPrice})`);
+            if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
+            return res.status(400).json({
+                success: false,
+                message: "discountedPrice cannot be greater than originalPrice."
+            });
+        }
 
         if (!offerEndsOnDate || typeof offerEndsOnDate !== "string") {
             console.log("Missing or invalid offerEndsOnDate.");
@@ -3112,6 +3147,7 @@ async createDeal(req, res) {
         let dealDoc = {
             dealType,
             description,
+            originalPrice,
             discountedPrice,
             offerEndsOnDate: offerEndsDate,
             createdBy: businessProfile._id,
@@ -3120,7 +3156,7 @@ async createDeal(req, res) {
 
         if (dealType === "Service") {
             dealDoc.serviceId = serviceId;
-        } else {
+        } else { // Parts or Salvages
             dealDoc.partName = partName;
             dealDoc.vehicle = vehicleId;
             dealDoc.selectedVehicle = {
@@ -3162,6 +3198,8 @@ async createDeal(req, res) {
  * Updates or replaces dealImage path in db (DealModel.dealImage).
  * Deletes the old image file on replacement. On validation/DB error with a new upload, deletes the new image file.
  * Console.log checks at every step for debugging.
+ *
+ * Now also supports originalPrice and dealType = "Salvages".
  */
 async editDeal(req, res) {
     let uploadedDealImage, oldDealImage;
@@ -3214,6 +3252,7 @@ async editDeal(req, res) {
             partName,
             description,
             discountedPrice,
+            originalPrice,
             offerEndsOnDate,
             vehicleId,
             vehicleName,
@@ -3222,8 +3261,15 @@ async editDeal(req, res) {
         } = req.body;
         console.log("Step 3: Raw body values:", req.body);
 
+        // Only allow dealType update to allowed set
+        const allowedDealTypes = ["Service", "Parts", "Salvages"];
         dealType = typeof dealType === "string" ? dealType.trim() : deal.dealType;
         updates.dealType = dealType;
+        if (!allowedDealTypes.includes(dealType)) {
+            console.log("Invalid dealType in edit:", dealType);
+            if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
+            return res.status(400).json({ success: false, message: "dealType is required and must be 'Service', 'Parts', or 'Salvages'." });
+        }
         console.log("Prepared dealType for update:", dealType);
 
         if (dealType === "Service") {
@@ -3255,8 +3301,8 @@ async editDeal(req, res) {
             updates.selectedVehicle = undefined;
         }
 
-        if (dealType === "Parts") {
-            console.log("Step 4: Processing Parts type update...");
+        if (dealType === "Parts" || dealType === "Salvages") {
+            console.log(`Step 4: Processing ${dealType} type update...`);
             partName = typeof partName === "string" ? partName.trim() : deal.partName;
             vehicleId = typeof vehicleId === "string" ? vehicleId.trim() : deal.vehicle;
             vehicleName = typeof vehicleName === "string" ? vehicleName.trim() : deal.selectedVehicle?.name;
@@ -3264,26 +3310,26 @@ async editDeal(req, res) {
             vehicleYear = typeof vehicleYear === "string" ? vehicleYear.trim() : deal.selectedVehicle?.year;
 
             if (!partName) {
-                console.log("Missing partName for Parts edit.");
+                console.log(`Missing partName for ${dealType} edit.`);
                 if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
-                return res.status(400).json({ success: false, message: "partName is required for dealType 'Parts'." });
+                return res.status(400).json({ success: false, message: `partName is required for dealType '${dealType}'.` });
             }
             if (!vehicleId || !mongoose.Types.ObjectId.isValid(vehicleId)) {
-                console.log("Invalid or missing vehicleId for Parts edit:", vehicleId);
+                console.log(`Invalid or missing vehicleId for ${dealType} edit:`, vehicleId);
                 if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
                 return res.status(400).json({
                     success: false,
-                    message: "vehicleId is required and must be a valid ObjectId for 'Parts' deals."
+                    message: `vehicleId is required and must be a valid ObjectId for '${dealType}' deals.`
                 });
             }
             if (!vehicleName || !vehicleModel || !vehicleYear) {
-                console.log("Missing vehicular detail(s) in editParts:",
+                console.log("Missing vehicular detail(s) in edit:",
                     { vehicleName, vehicleModel, vehicleYear }
                 );
                 if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
                 return res.status(400).json({
                     success: false,
-                    message: "vehicleName, vehicleModel, and vehicleYear are required for 'Parts' deals."
+                    message: "vehicleName, vehicleModel, and vehicleYear are required for '" + dealType + "' deals."
                 });
             }
             updates.partName = partName;
@@ -3306,6 +3352,30 @@ async editDeal(req, res) {
             }
             updates.description = description.trim();
         }
+
+        // Handle originalPrice (can be updated only if provided)
+        if (typeof originalPrice !== "undefined") {
+            originalPrice = typeof originalPrice === "string" ? Number(originalPrice) : originalPrice;
+            if (
+                originalPrice === undefined ||
+                originalPrice === null ||
+                typeof originalPrice !== "number" ||
+                isNaN(originalPrice) ||
+                originalPrice < 0
+            ) {
+                console.log("originalPrice is missing or invalid in edit:", originalPrice);
+                if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
+                return res.status(400).json({
+                    success: false,
+                    message: "originalPrice is required and must be a number greater than or equal to zero."
+                });
+            }
+            updates.originalPrice = originalPrice;
+            console.log("originalPrice processed for update:", originalPrice);
+        } else if (typeof updates.originalPrice === "undefined" && typeof deal.originalPrice !== "undefined") {
+            updates.originalPrice = deal.originalPrice;
+        }
+
         if (typeof discountedPrice !== "undefined") {
             discountedPrice = typeof discountedPrice === "string" ? Number(discountedPrice) : discountedPrice;
             if (
@@ -3324,7 +3394,22 @@ async editDeal(req, res) {
             }
             updates.discountedPrice = discountedPrice;
             console.log("discountedPrice processed for update:", discountedPrice);
+        } else if (typeof updates.discountedPrice === "undefined" && typeof deal.discountedPrice !== "undefined") {
+            updates.discountedPrice = deal.discountedPrice;
         }
+
+        // discountedPrice should not be more than originalPrice
+        let tempOriginalPrice = (typeof updates.originalPrice === "number" ? updates.originalPrice : deal.originalPrice);
+        let tempDiscountedPrice = (typeof updates.discountedPrice === "number" ? updates.discountedPrice : deal.discountedPrice);
+        if (typeof tempOriginalPrice === "number" && typeof tempDiscountedPrice === "number" && tempDiscountedPrice > tempOriginalPrice) {
+            console.log(`discountedPrice (${tempDiscountedPrice}) is greater than originalPrice (${tempOriginalPrice})`);
+            if (uploadedDealImage) await deleteUploadedFile(uploadedDealImage);
+            return res.status(400).json({
+                success: false,
+                message: "discountedPrice cannot be greater than originalPrice."
+            });
+        }
+
         if (typeof offerEndsOnDate !== "undefined") {
             const offerDate = typeof offerEndsOnDate === "string" ? new Date(offerEndsOnDate) : offerEndsOnDate;
             if (!offerDate || isNaN(offerDate.getTime()) || offerDate <= new Date()) {
@@ -3344,7 +3429,7 @@ async editDeal(req, res) {
         if (dealType === "Service") {
             duplicateQuery.servicesId = updates.servicesId;
         }
-        if (dealType === "Parts") {
+        if (dealType === "Parts" || dealType === "Salvages") {
             duplicateQuery.partName = updates.partName;
             duplicateQuery.vehicle = updates.vehicle;
         }
@@ -3366,7 +3451,7 @@ async editDeal(req, res) {
             delete updates.partName;
             delete updates.vehicle;
             delete updates.selectedVehicle;
-        } else if (dealType === "Parts") {
+        } else if (dealType === "Parts" || dealType === "Salvages") {
             delete updates.servicesId;
         }
         delete updates.createdBy;
