@@ -1,8 +1,6 @@
+import { getJobCardPrefixForYear, setJobCardPrefix } from "../../Schema/jobCard.schema.js";
 import { User } from "../../Schema/user.schema.js";
-import JobCardPrefix, {
-  setJobCardPrefix,
-  getJobCardPrefixForYear,
-} from "../../Schema/jobCardPrefix.schema.js";
+
 
 /* Helper: resolve the caller's businessProfile id from DB (req.user only
    ever has { id, role, ... } from jwtAuth — never businessProfile). Same
