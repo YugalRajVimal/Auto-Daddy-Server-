@@ -411,6 +411,18 @@ const perDayTimingSchema = new Schema({
   isClosed: { type: Boolean, default: false }
 }, { _id: false });
 
+// --- Special/Override Day Timing Schema ---
+// A one-off override for a SPECIFIC calendar date (e.g. closed for a
+// holiday, or shortened hours for a single day) — takes priority over
+// perDayOpenHours for that date only, without touching the weekly default.
+const specialDayTimingSchema = new Schema({
+  date: { type: Date, required: true }, // stored normalized to midnight UTC — see normalizeToMidnight() in the controller
+  open: { type: String },   // ignored if isClosed: true
+  close: { type: String },  // ignored if isClosed: true
+  isClosed: { type: Boolean, default: false },
+  reason: { type: String }, // optional, e.g. "Public Holiday", "Owner unavailable"
+}, { timestamps: true });
+
 /* =========================================================
    ONBOARDED CUSTOMERS
    The shop creates a REAL User account for these customers
@@ -481,6 +493,7 @@ const businessProfileSchema = new Schema({
   gst: { type: Number },
 
   perDayOpenHours: { type: [perDayTimingSchema], default: [] },
+  specialDayOpenHours: { type: [specialDayTimingSchema], default: [] }, // NEW
 
   teamMembers: [teamMemberSchema],
   businessLogo: { type: String },
