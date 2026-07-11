@@ -1397,6 +1397,61 @@ export const markStatus = async (req, res) => {
 };
 
 /* =========================================================
+   MARK INVOICE AS PAID
+   Sets invoicePaid to true for a given jobCardNo if eligible.
+   Only allowed if status is convertedToInvoice.
+   Route: POST /jobCards/:jobCardNo/markInvoicePaid
+========================================================= */
+export const markInvoicePaid = async (req, res) => {
+  try {
+    const { jobCardNo } = req.params;
+
+    const businessId = await getBusinessId(req.user.id);
+    if (!businessId) {
+      return res.status(404).json({ success: false, message: "Business profile not found" });
+    }
+
+    const jobCard = await JobCard.findOne({ business: businessId, jobCardNo: Number(jobCardNo) });
+    if (!jobCard) {
+      return res.status(404).json({ success: false, message: "Job card not found" });
+    }
+
+    if (jobCard.invoicePaid) {
+      return res.status(409).json({
+        success: false,
+        message: "Job card invoice already marked as paid",
+      });
+    }
+
+    // Only allow if jobCard.status is exactly convertedToInvoice
+    if (jobCard.status !== "convertedToInvoice") {
+      return res.status(409).json({
+        success: false,
+        message: "Job card status must be 'convertedToInvoice' to mark invoice as paid",
+      });
+    }
+
+    jobCard.invoicePaid = true;
+    await jobCard.save();
+
+    return res.status(200).json({ 
+      success: true, 
+      message: "Job card invoice marked as paid", 
+      data: jobCard 
+    });
+
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to mark job card invoice as paid",
+      error: error.message,
+    });
+  }
+};
+
+
+
+/* =========================================================
    7. SEND FOR APPROVAL
       Notifies the customer (registered users only — onboarded
       customers have no account to notify) via an in-app

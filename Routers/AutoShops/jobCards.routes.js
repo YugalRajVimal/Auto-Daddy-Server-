@@ -10,6 +10,7 @@ import {
   markStatus,
   sendForApproval,
   getSendForApprovalJobCards,
+  markInvoicePaid,
 } from "../../Controllers/AutoShops/jobCard.controller.js";
 import jwtAuth from "../../middlewares/Auth/auth.middleware.js";
 
@@ -29,6 +30,8 @@ jobCardRouter.post("/", createJobCard);
 jobCardRouter.get("/", getAllJobCards); // supports ?search=&status=&page=&limit=
 jobCardRouter.put("/:jobCardNo", editJobCard);
 jobCardRouter.delete("/:jobCardNo", deleteJobCard);
+
+jobCardRouter.post("/:jobCardNo/markInvoicePaid", markInvoicePaid);
 
 /* Status + approval actions */
 jobCardRouter.put("/:jobCardNo/status", markStatus);

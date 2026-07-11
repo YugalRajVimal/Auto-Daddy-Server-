@@ -247,6 +247,8 @@ const JobCardSchema = new Schema({
     enum: ['pending', 'rejected', 'autoRejected', 'convertedToInvoice', 'CashPaid'],
     default: 'pending',
   },
+  invoicePaid: { type: Boolean, default: false },
+
 }, { timestamps: true });
 
 // Each shop's job card numbers are independent of every other shop's
