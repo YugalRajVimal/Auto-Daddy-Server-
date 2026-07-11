@@ -1,4 +1,4 @@
-import { getJobCardPrefixForYear, setJobCardPrefix } from "../../Schema/jobCard.schema.js";
+import { getJobCardPrefixForYear, setJobCardPrefix } from "../../Schema/Jobcardprefix.schema.js";
 import { User } from "../../Schema/user.schema.js";
 
 

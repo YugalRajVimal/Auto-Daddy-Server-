@@ -1290,18 +1290,24 @@ export const getAllJobCards = async (req, res) => {
   try {
     const { search, status, page = 1, limit = 20 } = req.query;
 
+    console.log("getAllJobCards called with:", { search, status, page, limit });
+
     const businessId = await getBusinessId(req.user.id);
+    console.log("Resolved businessId:", businessId);
     if (!businessId) {
+      console.log("Business profile not found for user:", req.user.id);
       return res.status(404).json({ success: false, message: "Business profile not found" });
     }
 
     await autoRejectStaleForBusiness(businessId);
 
     const filter = { business: businessId };
+    console.log("Initial filter:", filter);
 
     if (status) {
       const validStatuses = ["pending", "autoRejected", "convertedToInvoice", "CashPaid"];
       if (!validStatuses.includes(status)) {
+        console.log("Invalid status filter attempted:", status);
         return res.status(400).json({ success: false, message: "Invalid status filter" });
       }
       filter.status = status;
@@ -1320,6 +1326,8 @@ export const getAllJobCards = async (req, res) => {
       filter.$or = orClauses;
     }
 
+    console.log("Final filter for JobCard.find:", filter);
+
     const skip = (Number(page) - 1) * Number(limit);
 
     const [jobCards, total] = await Promise.all([
@@ -1327,12 +1335,15 @@ export const getAllJobCards = async (req, res) => {
       JobCard.countDocuments(filter),
     ]);
 
+    console.log("Fetched jobCards:", jobCards.length, "Total count:", total);
+
     return res.status(200).json({
       success: true,
       data: jobCards,
       pagination: { total, page: Number(page), limit: Number(limit) },
     });
   } catch (error) {
+    console.log("Error in getAllJobCards:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch job cards",

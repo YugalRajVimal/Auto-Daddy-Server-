@@ -1,4 +1,4 @@
-import { getJobCardPrefixForYear } from "../../Schema/jobCard.schema.js";
+import { getJobCardPrefixForYear } from "../../Schema/Jobcardprefix.schema.js";
 import { getNextJobCardNo, peekNextJobCardNo } from "../../Schema/Jobcardcounter.schema.js";
 
 
