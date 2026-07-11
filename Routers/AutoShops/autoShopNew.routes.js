@@ -8,6 +8,7 @@ import jobCardRouter from "./jobCards.routes.js";
 import domainDetailsRouter from "./domainDetails.routes.js";
 import websiteTemplateRouter from "./websiteTemplate.routes.js";
 import autoShopDealsRouter from "./deals.routes.js";
+import jobCardPrefixRouter from "./jobcardprefix.routes.js";
 
 
 const autoShopNewRouter = express.Router();
@@ -24,6 +25,10 @@ autoShopNewRouter.use("/customer", autoShopCustomerRouter);
 autoShopNewRouter.use("/account", autoShopAccountsRouter);
 
 autoShopNewRouter.use("/jobcards", jobCardRouter);
+
+
+autoShopNewRouter.use("/jobcard-prefix", jobCardPrefixRouter);
+
 
 autoShopNewRouter.use("/domain-details", domainDetailsRouter);
 

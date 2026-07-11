@@ -1,6 +1,5 @@
 import express from "express";
 
-
 import {
   getPendingCustomerAddRequests,
   approveCustomerAddRequest,
@@ -8,22 +7,29 @@ import {
   getPendingJobCardApprovals,
   approveJobCard,
   rejectJobCard,
+  getCustomerAddRequestDetails,
 } from "../../Controllers/CarOwner/carOwnerApproval.controller.js";
 import jwtAuth from "../../middlewares/Auth/auth.middleware.js";
 
 const approvalsRouter = express.Router();
 
-approvalsRouter.use(jwtAuth);
-
 /* Customer add-request approvals (shop's "AddToMyCustomers" flow) */
-approvalsRouter.get("/customer-requests", getPendingCustomerAddRequests);
+approvalsRouter.get("/customer-requests",jwtAuth, getPendingCustomerAddRequests);
+// approvalsRouter.post("/customer-requests/:businessId/approve", approveCustomerAddRequest);
+// approvalsRouter.post("/customer-requests/:businessId/reject", rejectCustomerAddRequest);
+
+approvalsRouter.get("/customer-requests/:businessId", getCustomerAddRequestDetails);
 approvalsRouter.post("/customer-requests/:businessId/approve", approveCustomerAddRequest);
 approvalsRouter.post("/customer-requests/:businessId/reject", rejectCustomerAddRequest);
 
+// link sent via SMS, e.g.:
+// https://yourapp.com/customer-requests/<businessId>/approve?customerId=<customerId>
+// https://yourapp.com/customer-requests/<businessId>/reject?customerId=<customerId>
+
 /* Job card approvals */
-approvalsRouter.get("/jobcards", getPendingJobCardApprovals);
-approvalsRouter.post("/jobcards/:jobCardId/approve", approveJobCard);
-approvalsRouter.post("/jobcards/:jobCardId/reject", rejectJobCard);
+approvalsRouter.get("/jobcards",jwtAuth, getPendingJobCardApprovals);
+approvalsRouter.post("/jobcards/:jobCardId/approve",jwtAuth, approveJobCard);
+approvalsRouter.post("/jobcards/:jobCardId/reject",jwtAuth, rejectJobCard);
 
 export default approvalsRouter;
 
