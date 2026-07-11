@@ -509,6 +509,7 @@ async function getBusinessId(userId) {
       job cards / edits themselves. Rejects if the phone is
       already registered to any existing User.
       Body: { name, phone, city, email }
+      ALSO: Add this customer to myCustomers with status: "pending"
    ========================================================= */
 export const onboardCustomer = async (req, res) => {
   let session;
@@ -570,6 +571,7 @@ export const onboardCustomer = async (req, res) => {
       });
     }
 
+    // 1. Create new customer User
     const newCustomer = await User.create(
       [{
         role: "carowner",
@@ -586,16 +588,43 @@ export const onboardCustomer = async (req, res) => {
     ).then(arr => arr[0]);
     console.log("[onboardCustomer] New customer created:", newCustomer._id);
 
+    // 2. Add to myOnboardedCustomers
     business.myOnboardedCustomers.push({ user: newCustomer._id });
+
+    // 3. Also add to myCustomers with status: "pending"
+    // (Only add if not already present in myCustomers)
+    const alreadyInMyCustomers = business.myCustomers.find((c) =>
+      c._id && c._id.toString() === newCustomer._id.toString()
+    );
+    if (!alreadyInMyCustomers) {
+      business.myCustomers.push({
+        _id: newCustomer._id,
+        name: newCustomer.name,
+        phone: newCustomer.phone,
+        email: newCustomer.email,
+        city: newCustomer.city,
+        status: "pending",
+        pendingEdit: null,
+      });
+      console.log("[onboardCustomer] Added to myCustomers with pending status:", newCustomer._id);
+    } else {
+      console.log("[onboardCustomer] Customer already in myCustomers, skipping add.");
+    }
+
     await business.save({ session });
     console.log("[onboardCustomer] Added customer to business and saved:", business._id);
 
     await session.commitTransaction();
     session.endSession();
 
+    // Find the new myCustomers entry for response
+    const myCustomerEntry = business.myCustomers.find((c) =>
+      c._id && c._id.toString() === newCustomer._id.toString()
+    );
+
     return res.status(201).json({
       success: true,
-      message: "Customer onboarded successfully",
+      message: "Customer onboarded successfully (add request is pending approval)",
       data: {
         customerId: business.myOnboardedCustomers[business.myOnboardedCustomers.length - 1]._id,
         user: {
@@ -607,6 +636,17 @@ export const onboardCustomer = async (req, res) => {
           city: newCustomer.city,
           phoneVerified: newCustomer.phoneVerified,
         },
+        myCustomer: myCustomerEntry
+          ? {
+              _id: myCustomerEntry._id,
+              name: myCustomerEntry.name,
+              phone: myCustomerEntry.phone,
+              email: myCustomerEntry.email,
+              city: myCustomerEntry.city,
+              status: myCustomerEntry.status,
+              pendingEdit: myCustomerEntry.pendingEdit,
+            }
+          : null,
       },
     });
   } catch (error) {

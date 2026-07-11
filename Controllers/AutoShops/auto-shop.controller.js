@@ -6549,6 +6549,92 @@ async inviteHelpAutoShopToAdmin(req, res) {
 
 
 
+async  getInviteHelpToShopOwner(req, res) {
+    try {
+        // Optionally, you can support filtering by serviceId, etc.
+        const filter = { to: "AutoShopOwner" };
+        if (req.query.serviceId) {
+            filter.serviceId = req.query.serviceId;
+        }
+        // Get all InviteHelp entries sent to Admin and populate user and their businessProfile
+        const invites = await InviteHelpSchema.find(filter)
+            .populate({
+                path: "userId",
+                model: User,
+                select: "name email", 
+            })
+            .sort({ createdAt: -1 }); // Sort latest first
+
+        return res.status(200).json({
+            success: true,
+            data: invites,
+        });
+    } catch (error) {
+        console.error("[getInviteHelpToAdmin] Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Error fetching InviteHelp requests sent to admin.",
+            error: error.message
+        });
+    }
+}
+
+
+/**
+ * Update status of an InviteHelp request. 
+ * @route PATCH /invite-help/:id/status
+ * @body { status: 'pending'|'reviewed'|'resolved'|'rejected' }
+ */
+async updateInviteHelpStatus(req, res) {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        const validStatuses = ["pending", "reviewed", "resolved", "rejected"];
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid status. Valid values are: ${validStatuses.join(", ")}`
+            });
+        }
+
+        const inviteHelp = await InviteHelpSchema.findById(id);
+
+        if (!inviteHelp) {
+            return res.status(404).json({
+                success: false,
+                message: "InviteHelp request not found."
+            });
+        }
+
+        inviteHelp.status = status;
+        await inviteHelp.save();
+
+        return res.status(200).json({
+            success: true,
+            message: "InviteHelp request status updated.",
+            data: {
+                id: inviteHelp._id,
+                status: inviteHelp.status
+            }
+        });
+    } catch (error) {
+        console.error("[updateInviteHelpStatus] Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update InviteHelp request status",
+            error: error.message
+        });
+    }
+}
+
+
+
+
+
+
+
+
 }
 
 export default AutoShopController;

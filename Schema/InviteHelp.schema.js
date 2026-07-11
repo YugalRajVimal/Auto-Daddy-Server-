@@ -29,6 +29,12 @@ const InviteHelpSchema = new mongoose.Schema(
       enum: ['Admin', 'AutoShopOwner'],
       required: true,
     },
+    status: {
+      type: String,
+      enum: ["pending", "reviewed", "resolved", "rejected"],
+      default: "pending",
+      required: true,
+    },
   },
   { timestamps: true }
 );

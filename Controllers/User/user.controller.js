@@ -225,6 +225,7 @@ class UserController {
                 pincode,
                 address,
                 city,
+                profilePhoto,
                 favoriteAutoShops
             } = user;
 
@@ -238,6 +239,7 @@ class UserController {
                 pincode,
                 address,
                 city,
+                profilePhoto,
                 favoriteAutoShopsIds:favoriteAutoShops
             });
 

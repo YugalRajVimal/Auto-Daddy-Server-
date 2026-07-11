@@ -480,6 +480,27 @@ autoShopRouter.post(
   }
 );
 
+// Route to get all InviteHelp requests sent to AutoShopOwner (protected, requires JWT)
+autoShopRouter.get(
+  "/invite-help-to-shopowner",
+  jwtAuth,
+  async (req, res) => {
+    await autoShopController.getInviteHelpToShopOwner(req, res);
+  }
+);
+
+
+// Route to update the status of an InviteHelp request (sent to shopowner)
+// PATCH /invite-help/:id/status
+autoShopRouter.patch(
+  "/invite-help/:id/status",
+  jwtAuth,
+  async (req, res) => {
+    await autoShopController.updateInviteHelpStatus(req, res);
+  }
+);
+
+
 
 
 

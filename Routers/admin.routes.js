@@ -860,6 +860,13 @@ adminRouter.use("/accounts", accountsRouter);
 
 adminRouter.use("/domains", domainRouter);
 
+adminRouter.patch(
+  "/invite-help/:id/status",
+  jwtAuth,
+  async (req, res) => {
+    await adminController.updateInviteHelpStatus(req, res);
+  }
+);
 
 
 
