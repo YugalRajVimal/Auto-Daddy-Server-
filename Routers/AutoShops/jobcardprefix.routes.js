@@ -1,6 +1,7 @@
 import express from "express";
 
-import { setPrefix, getPrefix, getAllPrefixes } from "../../Controllers/AutoShops/jobCardPrefix.controller.js";
+// import { setPrefix, getPrefix, getAllPrefixes } from "../../Controllers/AutoShops/jobCardPrefix.controller.js";
+import { getAllPrefixes, getPrefix, setPrefix } from "../../Controllers/AutoShops/Jobcardprefix.controller.js";
 import jwtAuth from "../../middlewares/Auth/auth.middleware.js";
 
 const jobCardPrefixRouter = express.Router();
