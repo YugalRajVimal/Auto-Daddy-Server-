@@ -3,6 +3,7 @@ import AutoShopBank from "../../Schema/AutoShopAccounts/autoShopBank.schema.js";
 import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
 import AutoShopExpense from "../../Schema/AutoShopAccounts/autoShopExpenses.schema.js";
 import { User } from "../../Schema/user.schema.js";
+import ExpenseCategory from "../../Schema/Accounts/expensesCategoryDropdown.schema.js";
 
 
 
@@ -159,6 +160,19 @@ export const getBankAccountById = async (req, res) => {
    Uses `upload.single("expenseImage")` (already mapped in
    your multer middleware) for the optional bill photo.
    ========================================================= */
+
+   /**
+ * Fetch all expense categories and their subcategories
+ * GET /admin/accounts/expenses-category
+ */
+export const fetchExpenseCategories = async (req, res) => {
+  try {
+    const categories = await ExpenseCategory.find();
+    return res.status(200).json({ success: true, data: categories });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Failed to fetch expense categories.", error: err.message });
+  }
+};
 
 export const addExpense = async (req, res) => {
   try {

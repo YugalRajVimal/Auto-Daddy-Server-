@@ -3,7 +3,8 @@ import jwtAuth from "../../middlewares/Auth/auth.middleware.js";
 
 
 import { upload } from "../../middlewares/ImageUploadMiddlewares/fileUpload.middleware.js";
-import { addExpense, editExpense, getExpenseById, getExpenses,addBankAccount, editBankAccount, getBankAccountById, getBankAccounts  } from "../../Controllers/AutoShops/accounts.controller.js";
+import { addExpense, editExpense, getExpenseById, getExpenses,addBankAccount, editBankAccount, getBankAccountById, getBankAccounts, fetchExpenseCategories  } from "../../Controllers/AutoShops/accounts.controller.js";
+
 
 const autoShopAccountsRouter = express.Router();
 
@@ -16,6 +17,10 @@ autoShopAccountsRouter.get("/bank", getBankAccounts);
 autoShopAccountsRouter.get("/bank/:bankId", getBankAccountById);
 
 /* Expenses */
+
+autoShopAccountsRouter.get("/expense-categories", fetchExpenseCategories);
+
+
 autoShopAccountsRouter.post("/expenses", upload.single("expenseImage"), addExpense);
 autoShopAccountsRouter.put("/expenses/:expenseId", upload.single("expenseImage"), editExpense);
 autoShopAccountsRouter.get("/expenses", getExpenses);

@@ -1,6 +1,10 @@
 import express from "express";
 
 import {
+  addExpenseCategory,
+  editExpenseCategory,
+  removeExpenseCategory,
+  fetchExpenseCategories,
   addExpense, editExpense, getExpenses, getExpenseById, deleteExpense,
   addIncome, editIncome, getIncomes, getIncomeById, deleteIncome,
   addBank, editBank, getBanks, getBankById, deleteBank,
@@ -8,6 +12,15 @@ import {
 import { expenseImageUploadMiddleware, incomeImageUploadMiddleware } from "../../middlewares/ImageUploadMiddlewares/accountsUpload.middleware.js";
 
 const accountsRouter = express.Router();
+
+
+
+// ---- Expense Categories ----
+accountsRouter.post("/expenses-category", addExpenseCategory);
+accountsRouter.put("/expenses-category/:id", editExpenseCategory);
+accountsRouter.delete("/expenses-category/:id", removeExpenseCategory);
+accountsRouter.get("/expenses-category", fetchExpenseCategories);
+
 
 // ---- Expenses ----
 accountsRouter.post("/expenses", expenseImageUploadMiddleware, addExpense);

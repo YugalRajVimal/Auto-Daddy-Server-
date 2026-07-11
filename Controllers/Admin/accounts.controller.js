@@ -2,6 +2,7 @@ import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fil
 import Bank from "../../Schema/Accounts/bank.schema.js";
 import Expense from "../../Schema/Accounts/expenses.schema.js";
 import Income from "../../Schema/Accounts/income.schema.js";
+import ExpenseCategory from "../../Schema/Accounts/expensesCategoryDropdown.schema.js";
 
 
 function isValidDate(value) {
@@ -18,6 +19,114 @@ const BANK_REQUIRED_PAYMENT_MODES = ["Bank Transfer", "Cheque"];
  * Body: { date, vendor, amount, category, notes?, gst?, billNumber?, byCheque?, account? }
  * File: expenseImage (optional)
  */
+
+
+
+/**
+ * Add a new expense category with optional subcategories
+ * POST /admin/accounts/expenses-category
+ * Body: { name, subcategories: [string] }
+ */
+export const addExpenseCategory = async (req, res) => {
+  try {
+    const { name, subcategories } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: "Category name is required." });
+    }
+    // Check if exists
+    const existingCategory = await ExpenseCategory.findOne({ name: name.trim() });
+    if (existingCategory) {
+      return res.status(409).json({ success: false, message: `Expense category '${name}' already exists.` });
+    }
+
+    const category = new ExpenseCategory({
+      name: name.trim(),
+      subcategories: Array.isArray(subcategories)
+        ? subcategories
+            .filter((s) => !!s && !!s.trim())
+            .map((s) => ({ name: s.trim() }))
+        : [],
+    });
+
+    await category.save();
+    return res.status(201).json({ success: true, data: category });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Failed to add expense category.", error: err.message });
+  }
+};
+
+/**
+ * Edit an expense category's name or subcategories
+ * PUT /admin/accounts/expenses-category/:id
+ * Body: { name?, subcategories? }
+ */
+export const editExpenseCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, subcategories } = req.body;
+
+    const category = await ExpenseCategory.findById(id);
+    if (!category) {
+      return res.status(404).json({ success: false, message: "Expense category not found." });
+    }
+
+    if (name && name.trim()) {
+      // Check for name conflict
+      const nameConflict = await ExpenseCategory.findOne({ name: name.trim(), _id: { $ne: id } });
+      if (nameConflict) {
+        return res.status(409).json({ success: false, message: `Another category named '${name}' already exists.` });
+      }
+      category.name = name.trim();
+    }
+
+    if (subcategories && Array.isArray(subcategories)) {
+      category.subcategories = subcategories
+        .filter((s) => !!s && !!s.trim())
+        .map((s) => ({ name: s.trim() }));
+    }
+
+    await category.save();
+    return res.status(200).json({ success: true, data: category });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Failed to edit expense category.", error: err.message });
+  }
+};
+
+/**
+ * Remove (delete) an expense category (and its subcategories)
+ * DELETE /admin/accounts/expenses-category/:id
+ */
+export const removeExpenseCategory = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const deleted = await ExpenseCategory.findByIdAndDelete(id);
+    if (!deleted) {
+      return res.status(404).json({ success: false, message: "Expense category not found." });
+    }
+
+    return res.status(200).json({ success: true, message: "Expense category deleted." });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Failed to delete expense category.", error: err.message });
+  }
+};
+
+/**
+ * Fetch all expense categories and their subcategories
+ * GET /admin/accounts/expenses-category
+ */
+export const fetchExpenseCategories = async (req, res) => {
+  try {
+    const categories = await ExpenseCategory.find();
+    return res.status(200).json({ success: true, data: categories });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: "Failed to fetch expense categories.", error: err.message });
+  }
+};
+
+
+
 export const addExpense = async (req, res) => {
   let imagePath = null;
   try {
