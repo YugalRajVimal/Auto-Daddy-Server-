@@ -763,7 +763,6 @@ import { VehicleModel } from "../../Schema/vehicles.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import { peekNextJobCardIdentifiers } from "./Jobcardidentifier.helper.js";
 
-// import { peekNextJobCardIdentifiers } from "../../Schema/Jobcardidentifier.helper.js";
 
 const AUTO_REJECT_AFTER_DAYS = 7;
 
