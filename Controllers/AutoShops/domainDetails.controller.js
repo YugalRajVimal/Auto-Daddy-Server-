@@ -1,9 +1,12 @@
 import BusinessProfileModel from "../../Schema/bussiness-profile.js";
+import { User } from "../../Schema/user.schema.js";
+
 
 // Get all domain details for a business profile
 // Route: GET /api/autoshops/domain-details/get
 export const getDomainDetails = async (req, res) => {
   try {
+    // req.user.id holds the User _id
     const user = await User.findById(req.user.id).select("businessProfile");
     if (!user || !user.businessProfile) {
       return res.status(404).json({ success: false, message: "Business profile not found." });
@@ -19,14 +22,20 @@ export const getDomainDetails = async (req, res) => {
     return res.status(500).json({ success: false, message: "Failed to fetch domain details.", error: error.message });
   }
 };
+
 /**
  * Add new domain details to a business profile
  * Expects: req.body = { domainName, expiryDate, provider, status? }
- * Requires: req.user.id mapped to business
+ * Requires: req.user.id store id for User schema, then fetch business profile
  */
 export const addDomainDetails = async (req, res) => {
   try {
-    const businessId = req.user.businessId || req.user.id; // Adjust logic as needed for your auth
+    // Get the user's businessProfile via User schema
+    const user = await User.findById(req.user.id).select("businessProfile");
+    if (!user || !user.businessProfile) {
+      return res.status(404).json({ success: false, message: "Business profile not found." });
+    }
+
     const { domainName, expiryDate, provider, status } = req.body;
 
     if (!domainName || !expiryDate || !provider) {
@@ -40,7 +49,7 @@ export const addDomainDetails = async (req, res) => {
       status: status || "Active"
     };
 
-    const business = await BusinessProfileModel.findById(businessId);
+    const business = await BusinessProfileModel.findById(user.businessProfile);
     if (!business) {
       return res.status(404).json({ success: false, message: "Business not found." });
     }
@@ -57,18 +66,23 @@ export const addDomainDetails = async (req, res) => {
 /**
  * Edit a domain detail entry on a business profile by its index or domain name.
  * Expects: req.body = { index?, domainName?, ...fieldsToUpdate }
- * Requires: req.user.id
+ * Requires: req.user.id -> User -> businessProfile
  */
 export const editDomainDetails = async (req, res) => {
   try {
-    const businessId = req.user.businessId || req.user.id; // Adjust logic as needed
+    // Get user's business profile from User
+    const user = await User.findById(req.user.id).select("businessProfile");
+    if (!user || !user.businessProfile) {
+      return res.status(404).json({ success: false, message: "Business profile not found." });
+    }
+
     const { index, domainName, ...updates } = req.body;
 
     if (typeof index === "undefined" && !domainName) {
       return res.status(400).json({ success: false, message: "Provide an index or domainName to identify the domain detail." });
     }
 
-    const business = await BusinessProfileModel.findById(businessId);
+    const business = await BusinessProfileModel.findById(user.businessProfile);
     if (!business) {
       return res.status(404).json({ success: false, message: "Business not found." });
     }

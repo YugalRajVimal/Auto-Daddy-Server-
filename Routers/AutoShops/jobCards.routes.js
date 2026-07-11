@@ -11,6 +11,8 @@ import {
   sendForApproval,
   getSendForApprovalJobCards,
   markInvoicePaid,
+  getGSTReports,
+  getIncome,
 } from "../../Controllers/AutoShops/jobCard.controller.js";
 import jwtAuth from "../../middlewares/Auth/auth.middleware.js";
 
@@ -36,6 +38,13 @@ jobCardRouter.post("/:jobCardNo/markInvoicePaid", markInvoicePaid);
 /* Status + approval actions */
 jobCardRouter.put("/:jobCardNo/status", markStatus);
 jobCardRouter.post("/:jobCardNo/send-for-approval", sendForApproval);
+
+
+
+
+jobCardRouter.get("/gst-reports", getGSTReports);
+jobCardRouter.get("/income", getIncome);
+
 
 export default jobCardRouter;
 

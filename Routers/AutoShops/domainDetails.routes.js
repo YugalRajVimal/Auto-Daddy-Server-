@@ -1,8 +1,10 @@
 import express from "express";
 import { addDomainDetails, editDomainDetails, getDomainDetails } from "../../Controllers/AutoShops/domainDetails.controller.js";
+import jwtAuth from "../../middlewares/Auth/auth.middleware.js";
 
 const domainDetailsRouter = express.Router();
 
+domainDetailsRouter.use(jwtAuth);
 
 
 /**

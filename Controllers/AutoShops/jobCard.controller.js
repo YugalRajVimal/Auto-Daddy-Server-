@@ -1545,6 +1545,223 @@ export const getSendForApprovalJobCards = async (req, res) => {
 };
 
 
+// // Get all paid invoices for GST reports (status: "convertedToInvoice")
+// export const getGSTReports = async (req, res) => {
+//   try {
+//     const businessId = await getBusinessId(req.user.id);
+//     if (!businessId) {
+//       return res.status(404).json({ success: false, message: "Business profile not found" });
+//     }
+
+//     // status MUST MATCH enum: 'convertedToInvoice'
+//     const invoices = await JobCard.find({
+//       business: businessId,
+//       status: "convertedToInvoice",
+//       invoicePaid: true,
+//     }).sort({ updatedAt: -1 });
+
+//     return res.status(200).json({
+//       success: true,
+//       data: invoices,
+//       message: "Paid invoices (convertedToInvoice) fetched for GST reports",
+//     });
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch paid invoices for GST reports",
+//       error: error.message,
+//     });
+//   }
+// };
+
+// // Get total income: All paid invoices with status "convertedToInvoice" OR status "CashPaid"
+// export const getIncome = async (req, res) => {
+//   try {
+//     const businessId = await getBusinessId(req.user.id);
+//     if (!businessId) {
+//       return res.status(404).json({ success: false, message: "Business profile not found" });
+//     }
+
+//     // Query both 'convertedToInvoice' (with invoicePaid: true) and 'CashPaid' (considered paid in cash)
+//     const paidInvoices = await JobCard.find({
+//       business: businessId,
+//       $or: [
+//         { status: "convertedToInvoice", invoicePaid: true },
+//         { status: "CashPaid" }
+//       ]
+//     }).sort({ updatedAt: -1 });
+
+//     // If you want just the total sum, compute it
+//     const totalIncome = paidInvoices.reduce((sum, jc) => sum + (jc.totalAmount || 0), 0);
+
+//     return res.status(200).json({
+//       success: true,
+//       data: paidInvoices,
+//       totalIncome,
+//       message: "Total income (Paid invoices + CashPaid) fetched",
+//     });
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch income details",
+//       error: error.message,
+//     });
+//   }
+// };
+
+// async function getBusinessId(userId) {
+//   const user = await User.findById(userId).select("businessProfile");
+//   if (!user || !user.businessProfile) return null;
+//   return user.businessProfile;
+// }
+ 
+/**
+ * Build a Mongoose date-range filter object from optional
+ * startDate / endDate query params, applied to a given field.
+ * Returns undefined if neither param is present, so callers can
+ * safely spread/assign without adding an empty filter key.
+ *
+ * Accepts ISO strings or any Date-parseable string (e.g. "2026-04-01").
+ * endDate is treated as inclusive through the end of that day.
+ */
+function buildDateRangeFilter(startDate, endDate) {
+  if (!startDate && !endDate) return undefined;
+ 
+  const range = {};
+ 
+  if (startDate) {
+    const start = new Date(startDate);
+    if (isNaN(start.getTime())) {
+      throw new Error(`Invalid startDate: ${startDate}`);
+    }
+    range.$gte = start;
+  }
+ 
+  if (endDate) {
+    const end = new Date(endDate);
+    if (isNaN(end.getTime())) {
+      throw new Error(`Invalid endDate: ${endDate}`);
+    }
+    // Push to the end of the given day so the range is inclusive
+    // (e.g. endDate=2026-06-30 should include invoices updated at
+    // any time ON 2026-06-30, not just at 00:00:00).
+    end.setHours(23, 59, 59, 999);
+    range.$lte = end;
+  }
+ 
+  return range;
+}
+ 
+
+ 
+/* =========================================================
+   GST REPORTS
+   All paid invoices (status: "convertedToInvoice", invoicePaid: true),
+   optionally filtered by updatedAt date range.
+   Route: GET /jobCards/gst-reports?startDate=&endDate=
+========================================================= */
+export const getGSTReports = async (req, res) => {
+  try {
+    const businessId = await getBusinessId(req.user.id);
+    if (!businessId) {
+      return res.status(404).json({ success: false, message: "Business profile not found" });
+    }
+ 
+    const { startDate, endDate } = req.query;
+ 
+    let dateRange;
+    try {
+      dateRange = buildDateRangeFilter(startDate, endDate);
+    } catch (dateErr) {
+      return res.status(400).json({ success: false, message: dateErr.message });
+    }
+ 
+    // status MUST MATCH enum: 'convertedToInvoice'
+    const query = {
+      business: businessId,
+      status: "convertedToInvoice",
+      invoicePaid: true,
+    };
+    if (dateRange) query.updatedAt = dateRange;
+ 
+    const invoices = await JobCard.find(query).sort({ updatedAt: -1 });
+ 
+    return res.status(200).json({
+      success: true,
+      data: invoices,
+      message: "Paid invoices (convertedToInvoice) fetched for GST reports",
+      filters: {
+        startDate: startDate || null,
+        endDate: endDate || null,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch paid invoices for GST reports",
+      error: error.message,
+    });
+  }
+};
+ 
+/* =========================================================
+   INCOME REPORT
+   All paid invoices with status "convertedToInvoice" (invoicePaid: true)
+   OR status "CashPaid", optionally filtered by updatedAt date range.
+   Route: GET /jobCards/income?startDate=&endDate=
+========================================================= */
+export const getIncome = async (req, res) => {
+  try {
+    const businessId = await getBusinessId(req.user.id);
+    if (!businessId) {
+      return res.status(404).json({ success: false, message: "Business profile not found" });
+    }
+ 
+    const { startDate, endDate } = req.query;
+ 
+    let dateRange;
+    try {
+      dateRange = buildDateRangeFilter(startDate, endDate);
+    } catch (dateErr) {
+      return res.status(400).json({ success: false, message: dateErr.message });
+    }
+ 
+    // Query both 'convertedToInvoice' (with invoicePaid: true) and 'CashPaid' (considered paid in cash)
+    const query = {
+      business: businessId,
+      $or: [
+        { status: "convertedToInvoice", invoicePaid: true },
+        { status: "CashPaid" }
+      ]
+    };
+    if (dateRange) query.updatedAt = dateRange;
+ 
+    const paidInvoices = await JobCard.find(query).sort({ updatedAt: -1 });
+ 
+    // If you want just the total sum, compute it
+    const totalIncome = paidInvoices.reduce((sum, jc) => sum + (jc.totalAmount || 0), 0);
+ 
+    return res.status(200).json({
+      success: true,
+      data: paidInvoices,
+      totalIncome,
+      message: "Total income (Paid invoices + CashPaid) fetched",
+      filters: {
+        startDate: startDate || null,
+        endDate: endDate || null,
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch income details",
+      error: error.message,
+    });
+  }
+};
+ 
+
+
 
 /*
  * SCHEDULING NOTE: autoRejectStaleForBusiness() above only runs lazily,
