@@ -1,7 +1,15 @@
 import express from "express";
-import { addDomainDetails, editDomainDetails } from "../../Controllers/AutoShops/domainDetails.controller.js";
+import { addDomainDetails, editDomainDetails, getDomainDetails } from "../../Controllers/AutoShops/domainDetails.controller.js";
 
 const domainDetailsRouter = express.Router();
+
+
+
+/**
+ * GET /api/autoshops/domain-details/get
+ * Gets all domain details for a business profile.
+ */
+domainDetailsRouter.get("/get", getDomainDetails);
 
 /**
  * POST /api/autoshops/domain-details/add
@@ -14,5 +22,8 @@ domainDetailsRouter.post("/add", addDomainDetails);
  * Edits existing domain details by index or domainName.
  */
 domainDetailsRouter.put("/edit", editDomainDetails);
+
+
+
 
 export default domainDetailsRouter;

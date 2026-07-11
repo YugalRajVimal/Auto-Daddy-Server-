@@ -1,5 +1,24 @@
 import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 
+// Get all domain details for a business profile
+// Route: GET /api/autoshops/domain-details/get
+export const getDomainDetails = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("businessProfile");
+    if (!user || !user.businessProfile) {
+      return res.status(404).json({ success: false, message: "Business profile not found." });
+    }
+
+    const business = await BusinessProfileModel.findById(user.businessProfile).select("domainDetails");
+    if (!business) {
+      return res.status(404).json({ success: false, message: "Business not found." });
+    }
+
+    return res.status(200).json({ success: true, data: business.domainDetails });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: "Failed to fetch domain details.", error: error.message });
+  }
+};
 /**
  * Add new domain details to a business profile
  * Expects: req.body = { domainName, expiryDate, provider, status? }
