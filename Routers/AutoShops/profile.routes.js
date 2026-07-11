@@ -1,7 +1,7 @@
 import express from "express";
 import { upload } from "../../middlewares/ImageUploadMiddlewares/fileUpload.middleware.js";
 import jwtAuth from "../../middlewares/Auth/auth.middleware.js";
-import { getBusinessProfile, getPersonalProfile, updateBusinessProfile, updatePersonalProfile } from "../../Controllers/AutoShops/profile.controller.js";
+import { getBusinessProfile, getPersonalProfile, updateBusinessProfile, updateBusinessTemplateSlugs, updatePersonalProfile } from "../../Controllers/AutoShops/profile.controller.js";
 
 
 const autoShopProfileRouter = express.Router();
@@ -16,6 +16,18 @@ autoShopProfileRouter.put("/personal", upload.single("profilePhoto"), updatePers
 /* Business profile */
 autoShopProfileRouter.get("/business", getBusinessProfile);
 autoShopProfileRouter.put("/business", upload.single("businessLogo"), updateBusinessProfile);
+
+/**
+ * Update the invoiceTemplateSlug and/or jobCardTemplateSlug for the current user's business profile.
+ * PATCH /api/autoshopowner/profile/business/template-slugs
+ * Body: { invoiceTemplateSlug?: string, jobCardTemplateSlug?: string }
+ * Returns success/failure.
+ */
+autoShopProfileRouter.patch(
+  "/business/template-slugs",
+  updateBusinessTemplateSlugs
+);
+
 
 
 

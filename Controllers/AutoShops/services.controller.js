@@ -105,105 +105,105 @@ import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fil
   };
   
   
-  export const addToMyServices = async (req, res) => {
-    try {
-      const userId = req.user.id;
-      const { serviceId, status, date } = req.body;
+  // export const addToMyServices = async (req, res) => {
+  //   try {
+  //     const userId = req.user.id;
+  //     const { serviceId, status, date } = req.body;
   
-      if (!serviceId || !mongoose.Types.ObjectId.isValid(serviceId)) {
-        return res
-          .status(400)
-          .json({ success: false, message: "Valid serviceId is required" });
-      }
+  //     if (!serviceId || !mongoose.Types.ObjectId.isValid(serviceId)) {
+  //       return res
+  //         .status(400)
+  //         .json({ success: false, message: "Valid serviceId is required" });
+  //     }
   
-      if (status && !["Active", "Inactive"].includes(status)) {
-        return res
-          .status(400)
-          .json({ success: false, message: "Status must be either 'Active' or 'Inactive'" });
-      }
+  //     if (status && !["Active", "Inactive"].includes(status)) {
+  //       return res
+  //         .status(400)
+  //         .json({ success: false, message: "Status must be either 'Active' or 'Inactive'" });
+  //     }
   
-      let parsedDate = undefined;
-      if (date) {
-        const d = new Date(date);
-        if (isNaN(d.getTime())) {
-          return res.status(400).json({ success: false, message: "Invalid date format" });
-        }
-        parsedDate = d;
-      }
+  //     let parsedDate = undefined;
+  //     if (date) {
+  //       const d = new Date(date);
+  //       if (isNaN(d.getTime())) {
+  //         return res.status(400).json({ success: false, message: "Invalid date format" });
+  //       }
+  //       parsedDate = d;
+  //     }
   
-      const service = await servicesSchema.findById(serviceId);
-      if (!service) {
-        return res.status(404).json({ success: false, message: "Service not found" });
-      }
+  //     const service = await servicesSchema.findById(serviceId);
+  //     if (!service) {
+  //       return res.status(404).json({ success: false, message: "Service not found" });
+  //     }
   
-      const user = await User.findById(userId).select("businessProfile");
-      if (!user || !user.businessProfile) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Business profile not found" });
-      }
+  //     const user = await User.findById(userId).select("businessProfile");
+  //     if (!user || !user.businessProfile) {
+  //       return res
+  //         .status(404)
+  //         .json({ success: false, message: "Business profile not found" });
+  //     }
   
-      const business = await BusinessProfileModel.findById(user.businessProfile);
-      if (!business) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Business profile not found" });
-      }
+  //     const business = await BusinessProfileModel.findById(user.businessProfile);
+  //     if (!business) {
+  //       return res
+  //         .status(404)
+  //         .json({ success: false, message: "Business profile not found" });
+  //     }
   
-      const alreadyAdded = business.myServices.some(
-        (ms) => ms.service.toString() === serviceId
-      );
-      if (alreadyAdded) {
-        return res.status(409).json({
-          success: false,
-          message: "Service already added to your services",
-        });
-      }
+  //     const alreadyAdded = business.myServices.some(
+  //       (ms) => ms.service.toString() === serviceId
+  //     );
+  //     if (alreadyAdded) {
+  //       return res.status(409).json({
+  //         success: false,
+  //         message: "Service already added to your services",
+  //       });
+  //     }
   
-      business.myServices.push({
-        service: serviceId,
-        status: status || "Active",
-        date: parsedDate || new Date()
-      });
+  //     business.myServices.push({
+  //       service: serviceId,
+  //       status: status || "Active",
+  //       date: parsedDate || new Date()
+  //     });
   
-      await business.save();
+  //     await business.save();
   
-      // Populate the newly added service details for the response
-      const populatedBusiness = await BusinessProfileModel.findById(user.businessProfile)
-        .populate({
-          path: "myServices.service",
-          select: "name shopType status odoOutRequired"
-        });
+  //     // Populate the newly added service details for the response
+  //     const populatedBusiness = await BusinessProfileModel.findById(user.businessProfile)
+  //       .populate({
+  //         path: "myServices.service",
+  //         select: "name shopType status odoOutRequired"
+  //       });
   
-      // Send all myServices with detailed service info
-      const responseMyServices = (populatedBusiness.myServices || []).map(ms => {
-        if (ms && ms.service) {
-          return {
-            _id: ms.service._id,
-            name: ms.service.name,
-            shopType: ms.service.shopType,
-            status: ms.status || "Active",
-            date: ms.date,
-            odoOutRequired: ms.service.odoOutRequired,
-            // subServices and other fields can be included here as relevant
-          };
-        }
-        return null;
-      }).filter(Boolean);
+  //     // Send all myServices with detailed service info
+  //     const responseMyServices = (populatedBusiness.myServices || []).map(ms => {
+  //       if (ms && ms.service) {
+  //         return {
+  //           _id: ms.service._id,
+  //           name: ms.service.name,
+  //           shopType: ms.service.shopType,
+  //           status: ms.status || "Active",
+  //           date: ms.date,
+  //           odoOutRequired: ms.service.odoOutRequired,
+  //           // subServices and other fields can be included here as relevant
+  //         };
+  //       }
+  //       return null;
+  //     }).filter(Boolean);
   
-      return res.status(200).json({
-        success: true,
-        message: "Service added successfully",
-        data: responseMyServices,
-      });
-    } catch (error) {
-      return res.status(500).json({
-        success: false,
-        message: "Failed to add service",
-        error: error.message,
-      });
-    }
-  };
+  //     return res.status(200).json({
+  //       success: true,
+  //       message: "Service added successfully",
+  //       data: responseMyServices,
+  //     });
+  //   } catch (error) {
+  //     return res.status(500).json({
+  //       success: false,
+  //       message: "Failed to add service",
+  //       error: error.message,
+  //     });
+  //   }
+  // };
 /* =========================================================
    SUBSERVICES (on an existing myServices entry)
  
@@ -215,98 +215,204 @@ import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fil
    undefined and would silently break the lookup).
    ========================================================= */
  
-/**
- * Add subServices to an existing myService entry
- * Expects: req.body = {
- *   serviceId: String,
- *   subServices: [{ name, desc, price, quantity, tax }]
- * }
- */
+// /**
+//  * Add subServices to an existing myService entry
+//  * Expects: req.body = {
+//  *   serviceId: String,
+//  *   subServices: [{ name, desc, price, quantity, tax }]
+//  * }
+//  */
+// export const addSubServices = async (req, res) => {
+//     try {
+//       const { serviceId, subServices } = req.body;
+   
+//       if (!serviceId || !Array.isArray(subServices) || subServices.length === 0) {
+//         return res.status(400).json({
+//           success: false,
+//           message: "serviceId and subServices array are required",
+//         });
+//       }
+   
+//       const user = await User.findById(req.user.id).select("businessProfile");
+//       if (!user || !user.businessProfile) {
+//         return res
+//           .status(404)
+//           .json({ success: false, message: "Business profile not found" });
+//       }
+   
+//       const business = await BusinessProfileModel.findById(user.businessProfile);
+//       if (!business) {
+//         return res.status(404).json({ success: false, message: "Business not found" });
+//       }
+   
+//       const myService = business.myServices.find(
+//         (ms) => ms.service.toString() === serviceId
+//       );
+//       if (!myService) {
+//         return res
+//           .status(404)
+//           .json({ success: false, message: "Service not found in your services" });
+//       }
+
+//       // Collect existing subService names (case-insensitive)
+//       const existingNames = new Set(
+//         (myService.subServices || []).map(s => s.name && s.name.trim().toLowerCase())
+//       );
+
+//       // Check for names within payload also (prevent same name in batch)
+//       const namesToAdd = new Set();
+//       const validSubs = [];
+
+//       for (let sub of subServices) {
+//         if (sub.name) {
+//           const subNameKey = sub.name.trim().toLowerCase();
+//           if (existingNames.has(subNameKey) || namesToAdd.has(subNameKey)) {
+//             // Duplicate found, skip this sub or you can return error (preferred)
+//             continue;
+//           }
+//           namesToAdd.add(subNameKey);
+//           validSubs.push({
+//             name: sub.name,
+//             desc: sub.desc,
+//             price: sub.price,
+//             quantity: sub.quantity || 1,
+//             tax: sub.tax || 0,
+//           });
+//         }
+//       }
+
+//       if (validSubs.length === 0) {
+//         return res.status(409).json({
+//           success: false,
+//           message: "All given subService names already exist under this service.",
+//         });
+//       }
+
+//       validSubs.forEach(sub => {
+//         myService.subServices.push(sub);
+//       });
+   
+//       await business.save();
+//       return res.status(200).json({ 
+//         success: true, 
+//         message: `${validSubs.length} SubService(s) added`, 
+//         data: myService 
+//       });
+//     } catch (error) {
+//       return res.status(500).json({
+//         success: false,
+//         message: "Failed to add subServices",
+//         error: error.message,
+//       });
+//     }
+//   };
+   
 export const addSubServices = async (req, res) => {
-    try {
-      const { serviceId, subServices } = req.body;
-   
-      if (!serviceId || !Array.isArray(subServices) || subServices.length === 0) {
-        return res.status(400).json({
-          success: false,
-          message: "serviceId and subServices array are required",
-        });
-      }
-   
-      const user = await User.findById(req.user.id).select("businessProfile");
-      if (!user || !user.businessProfile) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Business profile not found" });
-      }
-   
-      const business = await BusinessProfileModel.findById(user.businessProfile);
-      if (!business) {
-        return res.status(404).json({ success: false, message: "Business not found" });
-      }
-   
-      const myService = business.myServices.find(
-        (ms) => ms.service.toString() === serviceId
-      );
-      if (!myService) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Service not found in your services" });
-      }
+  try {
+    const { serviceId, subServices } = req.body;
 
-      // Collect existing subService names (case-insensitive)
-      const existingNames = new Set(
-        (myService.subServices || []).map(s => s.name && s.name.trim().toLowerCase())
-      );
-
-      // Check for names within payload also (prevent same name in batch)
-      const namesToAdd = new Set();
-      const validSubs = [];
-
-      for (let sub of subServices) {
-        if (sub.name) {
-          const subNameKey = sub.name.trim().toLowerCase();
-          if (existingNames.has(subNameKey) || namesToAdd.has(subNameKey)) {
-            // Duplicate found, skip this sub or you can return error (preferred)
-            continue;
-          }
-          namesToAdd.add(subNameKey);
-          validSubs.push({
-            name: sub.name,
-            desc: sub.desc,
-            price: sub.price,
-            quantity: sub.quantity || 1,
-            tax: sub.tax || 0,
-          });
-        }
-      }
-
-      if (validSubs.length === 0) {
-        return res.status(409).json({
-          success: false,
-          message: "All given subService names already exist under this service.",
-        });
-      }
-
-      validSubs.forEach(sub => {
-        myService.subServices.push(sub);
-      });
-   
-      await business.save();
-      return res.status(200).json({ 
-        success: true, 
-        message: `${validSubs.length} SubService(s) added`, 
-        data: myService 
-      });
-    } catch (error) {
-      return res.status(500).json({
+    if (!serviceId || !Array.isArray(subServices) || subServices.length === 0) {
+      console.log("[addSubServices] Invalid input:", { serviceId, subServices });
+      return res.status(400).json({
         success: false,
-        message: "Failed to add subServices",
-        error: error.message,
+        message: "serviceId and subServices array are required",
       });
     }
-  };
-   
+
+    // NOTE: select shopType too
+    const user = await User.findById(req.user.id).select("businessProfile shopType");
+    if (!user || !user.businessProfile) {
+      console.log("[addSubServices] Business profile not found for user:", req.user.id);
+      return res
+        .status(404)
+        .json({ success: false, message: "Business profile not found" });
+    }
+
+    const business = await BusinessProfileModel.findById(user.businessProfile);
+    if (!business) {
+      console.log("[addSubServices] Business not found with ID:", user.businessProfile);
+      return res.status(404).json({ success: false, message: "Business not found" });
+    }
+
+    const myService = business.myServices.find(
+      (ms) => ms.service.toString() === serviceId
+    );
+    if (!myService) {
+      console.log("[addSubServices] Service not found in user's services:", serviceId);
+      return res
+        .status(404)
+        .json({ success: false, message: "Service not found in your services" });
+    }
+
+    // ---- NEW: shopType compatibility check ----
+    const service = await servicesSchema.findById(serviceId).select("shopType");
+    const userShopTypes = Array.isArray(user.shopType) ? user.shopType : [];
+    if (!service || !service.shopType || !userShopTypes.includes(service.shopType)) {
+      console.log("[addSubServices] ShopType mismatch or missing. Business shopTypes:", userShopTypes, "Service.shopType:", service && service.shopType);
+      return res.status(403).json({
+        success: false,
+        message: `This service's shopType is not among your business's shopTypes (${userShopTypes.join(", ") || "none set"}). Cannot add subServices.`,
+      });
+    }
+    // ---------------------------------------------
+
+    // Collect existing subService names (case-insensitive)
+    const existingNames = new Set(
+      (myService.subServices || []).map(s => s.name && s.name.trim().toLowerCase())
+    );
+
+    const namesToAdd = new Set();
+    const validSubs = [];
+
+    for (let sub of subServices) {
+      if (sub.name) {
+        const subNameKey = sub.name.trim().toLowerCase();
+        if (existingNames.has(subNameKey) || namesToAdd.has(subNameKey)) {
+          console.log(`[addSubServices] Duplicate subService name skipped: '${sub.name}'`);
+          continue;
+        }
+        namesToAdd.add(subNameKey);
+        validSubs.push({
+          name: sub.name,
+          desc: sub.desc,
+          price: sub.price,
+          quantity: sub.quantity || 1,
+          tax: sub.tax || 0,
+        });
+      } else {
+        console.log("[addSubServices] SubService without name skipped:", sub);
+      }
+    }
+
+    if (validSubs.length === 0) {
+      console.log("[addSubServices] All subService names already exist or input invalid for service:", serviceId);
+      return res.status(409).json({
+        success: false,
+        message: "All given subService names already exist under this service.",
+      });
+    }
+
+    validSubs.forEach(sub => {
+      myService.subServices.push(sub);
+    });
+
+    await business.save();
+    console.log("[addSubServices] SubServices added:", validSubs.length, "ServiceId:", serviceId, "BusinessId:", business._id);
+    return res.status(200).json({
+      success: true,
+      message: `${validSubs.length} SubService(s) added`,
+      data: myService
+    });
+  } catch (error) {
+    console.error("[addSubServices] Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to add subServices",
+      error: error.message,
+    });
+  }
+};
+
   /**
    * Edit a subService for a given myService entry
    * Expects: req.body = {
@@ -501,3 +607,112 @@ export const addSubServices = async (req, res) => {
 //       });
 //     }
 //   };
+
+
+export const addToMyServices = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { serviceId, status, date } = req.body;
+
+    if (!serviceId || !mongoose.Types.ObjectId.isValid(serviceId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Valid serviceId is required" });
+    }
+
+    if (status && !["Active", "Inactive"].includes(status)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Status must be either 'Active' or 'Inactive'" });
+    }
+
+    let parsedDate = undefined;
+    if (date) {
+      const d = new Date(date);
+      if (isNaN(d.getTime())) {
+        return res.status(400).json({ success: false, message: "Invalid date format" });
+      }
+      parsedDate = d;
+    }
+
+    const service = await servicesSchema.findById(serviceId);
+    if (!service) {
+      return res.status(404).json({ success: false, message: "Service not found" });
+    }
+
+    // NOTE: select shopType too, so we can validate against the service's shopType
+    const user = await User.findById(userId).select("businessProfile shopType");
+    if (!user || !user.businessProfile) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Business profile not found" });
+    }
+
+    // ---- NEW: shopType compatibility check ----
+    const userShopTypes = Array.isArray(user.shopType) ? user.shopType : [];
+    if (!service.shopType || !userShopTypes.includes(service.shopType)) {
+      return res.status(403).json({
+        success: false,
+        message: `This service belongs to shopType '${service.shopType}', which is not among your business's shopTypes (${userShopTypes.join(", ") || "none set"}).`,
+      });
+    }
+    // ---------------------------------------------
+
+    const business = await BusinessProfileModel.findById(user.businessProfile);
+    if (!business) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Business profile not found" });
+    }
+
+    const alreadyAdded = business.myServices.some(
+      (ms) => ms.service.toString() === serviceId
+    );
+    if (alreadyAdded) {
+      return res.status(409).json({
+        success: false,
+        message: "Service already added to your services",
+      });
+    }
+
+    business.myServices.push({
+      service: serviceId,
+      status: status || "Active",
+      date: parsedDate || new Date()
+    });
+
+    await business.save();
+
+    const populatedBusiness = await BusinessProfileModel.findById(user.businessProfile)
+      .populate({
+        path: "myServices.service",
+        select: "name shopType status odoOutRequired"
+      });
+
+    const responseMyServices = (populatedBusiness.myServices || []).map(ms => {
+      if (ms && ms.service) {
+        return {
+          _id: ms.service._id,
+          name: ms.service.name,
+          shopType: ms.service.shopType,
+          status: ms.status || "Active",
+          date: ms.date,
+          odoOutRequired: ms.service.odoOutRequired,
+        };
+      }
+      return null;
+    }).filter(Boolean);
+
+    return res.status(200).json({
+      success: true,
+      message: "Service added successfully",
+      data: responseMyServices,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to add service",
+      error: error.message,
+    });
+  }
+};

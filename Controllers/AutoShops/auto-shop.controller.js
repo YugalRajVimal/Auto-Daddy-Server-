@@ -533,7 +533,7 @@ class AutoShopController {
             // Find user and populate businessProfile if it exists
             // Only fetch necessary fields for AutoShop owner
             const user = await User.findById(userId)
-                .select("role businessProfile name email phone countryCode pincode address isAutoShopBusinessProfileComplete isProfileComplete isDisabled status createdAt updatedAt")
+                .select("role businessProfile name email phone city countryCode pincode address isAutoShopBusinessProfileComplete isProfileComplete isDisabled status createdAt updatedAt")
                 .lean();
             if (!user || user.role !== "autoshopowner") {
                 return res.status(404).json({ message: "Autoshopowner user not found." });
@@ -596,7 +596,7 @@ class AutoShopController {
             }
 
             // Only autoshopowner can proceed
-            const allowedFields = ["name", "email", "countryCode", "pincode", "address"];
+            const allowedFields = ["name", "email", "countryCode", "pincode", "address", "city"];
             const updateFields = {};
 
             for (const key of allowedFields) {
@@ -620,12 +620,12 @@ class AutoShopController {
             }
 
             // Return updated user profile (sensitive data omitted)
-            const { name, email, phone, countryCode, pincode, address } = updatedUser;
+            const { name, email, phone, countryCode, pincode, address, city } = updatedUser;
 
             return res.status(200).json({
                 success: true,
                 message: "Profile updated successfully.",
-                data: { name, email, phone, countryCode, pincode, address }
+                data: { name, email, phone, countryCode, pincode, address, city }
             });
         } catch (error) {
             console.error("[editProfile - AutoShopController] Error:", error);

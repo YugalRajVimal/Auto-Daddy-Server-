@@ -803,7 +803,8 @@ export const addVehicleToMyOnboardedCustomer = async (req, res) => {
       odometerReading,
     } = req.body;
 
-    console.log('Received request to add vehicle to onboarded customer:', {
+    // LOG: Request received with data
+    console.log('[addVehicleToMyOnboardedCustomer] Request data:', {
       customerId,
       carCompanyId,
       make,
@@ -814,16 +815,15 @@ export const addVehicleToMyOnboardedCustomer = async (req, res) => {
       odometerReading,
     });
 
-    // ----------- Correct checks for customer ----------- //
     // Validate customerId
     if (!mongoose.Types.ObjectId.isValid(customerId)) {
-      console.log('Invalid customerId:', customerId);
+      console.log('[addVehicleToMyOnboardedCustomer] Invalid customerId:', customerId);
       return res.status(400).json({ success: false, message: "Invalid customerId" });
     }
 
     // Validate carCompanyId
     if (!carCompanyId || !mongoose.Types.ObjectId.isValid(carCompanyId)) {
-      console.log('Invalid or missing carCompanyId:', carCompanyId);
+      console.log('[addVehicleToMyOnboardedCustomer] Invalid or missing carCompanyId:', carCompanyId);
       return res.status(400).json({
         success: false,
         message: "Valid carCompanyId is required",
@@ -832,7 +832,7 @@ export const addVehicleToMyOnboardedCustomer = async (req, res) => {
 
     // Basic required fields
     if (!make || !model || !year || !licensePlateNo || !vinNo) {
-      console.log('Missing required fields:', { make, model, year, licensePlateNo, vinNo });
+      console.log('[addVehicleToMyOnboardedCustomer] Missing required fields:', { make, model, year, licensePlateNo, vinNo });
       return res.status(400).json({
         success: false,
         message: "make, model, year, licensePlateNo and vinNo are required",
@@ -841,51 +841,50 @@ export const addVehicleToMyOnboardedCustomer = async (req, res) => {
 
     // Get businessId for this autoshop owner
     const businessId = await getBusinessId(req.user.id);
-    console.log('Fetched businessId:', businessId);
+    console.log('[addVehicleToMyOnboardedCustomer] Fetched businessId:', businessId);
     if (!businessId) {
-      console.log('Business profile not found for user:', req.user.id);
+      console.log('[addVehicleToMyOnboardedCustomer] Business profile not found for user:', req.user.id);
       return res
         .status(404)
         .json({ success: false, message: "Business profile not found" });
     }
 
-    // Find business profile, need both myCustomers and myOnboardedCustomers
+    // Find business profile, get myCustomers and myOnboardedCustomers
     const business = await BusinessProfileModel.findById(businessId).select("myCustomers myOnboardedCustomers");
     if (!business) {
-      console.log('Business not found for businessId:', businessId);
+      console.log('[addVehicleToMyOnboardedCustomer] Business not found for businessId:', businessId);
       return res.status(404).json({ success: false, message: "Business not found" });
     }
 
-    // CHECK 1: Is there a myOnboardedCustomers.<entry> whose .user equals customerId?
-    // (This is what actually indicates the mapping between onboarded customer entry and underlying User)
-    let onboardedEntry = business.myOnboardedCustomers.find(
-      (entry) =>
-        entry.user &&
-        typeof entry.user.toString === "function" &&
-        entry.user.toString() === customerId
+    // Check: customer is in myCustomers
+    const customerInMyCustomers = business.myCustomers.find(
+      (cust) =>
+        cust._id &&
+        cust._id.toString() === customerId
     );
-    if (!onboardedEntry) {
-      // For debug: show business.myOnboardedCustomers
-      console.log(
-        `Onboarded customer not found in business.myOnboardedCustomers for customerId: ${customerId}.`,
-        business.myOnboardedCustomers && business.myOnboardedCustomers.length > 0
-          ? business.myOnboardedCustomers.map(e => e.user && e.user.toString())
-          : business.myOnboardedCustomers
+    if (!customerInMyCustomers) {
+      console.log('[addVehicleToMyOnboardedCustomer] CustomerId not found in myCustomers. Requested:', customerId, 'Existing:', business.myCustomers && business.myCustomers.length > 0
+          ? business.myCustomers.map(e => e._id && e._id.toString())
+          : business.myCustomers
       );
       return res.status(404).json({
         success: false,
-        message: "Onboarded customer not found (or does not belong to your shop)",
+        message: "Customer not found in your shop's customer list",
       });
     }
 
-    // CHECK 2: Is the customerId present and approved in myCustomers?
+    // Check: customer is approved
     const approvedCustomer = business.myCustomers?.find(
       (customer) =>
         customer._id?.toString() === customerId &&
         customer.status === "approved"
     );
     if (!approvedCustomer) {
-      console.log('Approved customer not found in myCustomers. customerId:', customerId, business.myCustomers?.map(c => ({ id: c._id?.toString(), status: c.status })));
+      console.log(
+        '[addVehicleToMyOnboardedCustomer] Approved customer not found in myCustomers.',
+        'Requested:', customerId,
+        'Customers:', business.myCustomers?.map(c => ({ id: c._id?.toString(), status: c.status }))
+      );
       return res.status(404).json({
         success: false,
         message: "Customer not found or not approved (does not belong to your shop)",
@@ -894,9 +893,9 @@ export const addVehicleToMyOnboardedCustomer = async (req, res) => {
 
     // Validate car company exists
     const carCompanyExists = await CarCompany.exists({ _id: carCompanyId });
-    console.log('Car company exists:', carCompanyExists);
+    console.log('[addVehicleToMyOnboardedCustomer] Car company exists:', !!carCompanyExists);
     if (!carCompanyExists) {
-      console.log('carCompanyId does not reference an existing car company:', carCompanyId);
+      console.log('[addVehicleToMyOnboardedCustomer] carCompanyId does not reference an existing car company:', carCompanyId);
       return res.status(400).json({
         success: false,
         message: "carCompanyId does not reference an existing car company",
@@ -913,12 +912,17 @@ export const addVehicleToMyOnboardedCustomer = async (req, res) => {
       odometerReading: odometerReading || 0,
     });
 
-    console.log('Created vehicle:', vehicle);
+    console.log('[addVehicleToMyOnboardedCustomer] Created vehicle:', { 
+      id: vehicle._id, 
+      carCompany: vehicle.carCompany, 
+      licensePlateNo: vehicle.licensePlateNo, 
+      vinNo: vehicle.vinNo 
+    });
 
-    // Push vehicle._id to the actual onboarded user's myVehicles array (User._id = customerId)
+    // Push vehicle._id to the user's myVehicles array
     await User.findByIdAndUpdate(customerId, { $push: { myVehicles: vehicle._id } });
 
-    console.log('Pushed vehicle._id to User\'s myVehicles array:', {
+    console.log('[addVehicleToMyOnboardedCustomer] Added vehicle._id to User.myVehicles', {
       userId: customerId,
       vehicleId: vehicle._id,
     });
@@ -929,7 +933,7 @@ export const addVehicleToMyOnboardedCustomer = async (req, res) => {
       data: vehicle,
     });
   } catch (error) {
-    console.log('Error in addVehicleToMyOnboardedCustomer:', error);
+    console.log('[addVehicleToMyOnboardedCustomer] Error:', error);
     return res.status(500).json({
       success: false,
       message: "Failed to add vehicle",
@@ -961,17 +965,31 @@ export const searchExistingCustomers = async (req, res) => {
 
     const alreadyAddedIds = business.myCustomers.map((c) => c._id);
 
-    const filter = {
+    let filter = {
       role: "carowner",
       _id: { $nin: alreadyAddedIds },
     };
 
+    // Build search logic for license plate or user fields
     if (search) {
+      // To search vehicles by licensePlateNo, do an aggregate, or a two-step search.
+      // Step 1: Find vehicleIds matching license plate search
+      const vehicleMatch = await VehicleModel.find({
+        licensePlateNo: { $regex: search, $options: "i" },
+      }).select("_id");
+
+      const vehicleIds = vehicleMatch.map(v => v._id);
+
+      // $or will try user profile fields OR vehicles array contains a searched vehicle
       filter.$or = [
         { name: { $regex: search, $options: "i" } },
         { phone: { $regex: search, $options: "i" } },
         { email: { $regex: search, $options: "i" } },
       ];
+
+      if (vehicleIds.length > 0) {
+        filter.$or.push({ myVehicles: { $in: vehicleIds } });
+      }
     }
 
     const users = await User.find(filter)

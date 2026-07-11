@@ -508,6 +508,9 @@ const businessProfileSchema = new Schema({
   myOnboardedCustomers: [myOnboardedCustomerSchema],
   myCustomers: [myCustomerSchema],
 
+  invoiceTemplateSlug: { type: String, default: null },
+  jobCardTemplateSlug: { type: String, default: null },
+
   ads: [{ type: Types.ObjectId, ref: "Ads" }],
 
   createdAt: { type: Date, default: Date.now }
