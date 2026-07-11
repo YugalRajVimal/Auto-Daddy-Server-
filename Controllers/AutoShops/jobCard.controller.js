@@ -756,10 +756,13 @@ import mongoose from "mongoose";
 import Services from "../../Schema/services.schema.js";
 import AutoShopBank from "../../Schema/AutoShopAccounts/autoShopBank.schema.js";
 import JobCard from "../../Schema/jobCard.schema.js";
-import { getNextJobCardNo, peekNextJobCardNo } from "../../Schema/Jobcardcounter.schema.js";
+// import { getNextJobCardNo, peekNextJobCardNo } from "../../Schema/Jobcardcounter.schema.js";
+import { getNextJobCardIdentifiers } from "./jobCardIdentifier.helper.js";
 import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
 import { User } from "../../Schema/user.schema.js";
+import { peekNextJobCardIdentifiers } from "./Jobcardidentifier.helper.js";
+// import { peekNextJobCardIdentifiers } from "../../Schema/Jobcardidentifier.helper.js";
 
 const AUTO_REJECT_AFTER_DAYS = 7;
 
@@ -866,10 +869,16 @@ export const getJobCardPageDetails = async (req, res) => {
       });
     });
 
-    const [nextJobCardNo, myAllBanks] = await Promise.all([
-      peekNextJobCardNo(businessId),
+    // const [nextJobCardNo, myAllBanks] = await Promise.all([
+    //   peekNextJobCardNo(businessId),
+    //   AutoShopBank.find({ businessProfile: businessId }),
+    // ]);
+
+    const [nextJobCard, myAllBanks] = await Promise.all([
+      peekNextJobCardIdentifiers(businessId), // import from jobCardIdentifier.helper.js
       AutoShopBank.find({ businessProfile: businessId }),
     ]);
+    
 
     return res.status(200).json({
       success: true,
@@ -1068,11 +1077,22 @@ export const createJobCard = async (req, res) => {
       }
     }
 
-    const jobCardNo = await getNextJobCardNo(businessId);
+    // const jobCardNo = await getNextJobCardNo(businessId);
 
-    const jobCard = new JobCard({
-      business: businessId,
-      jobCardNo,
+    // const jobCard = new JobCard({
+    //   business: businessId,
+    //   jobCardNo,
+    let jobCardNo, jobCardId;
+try {
+  ({ jobCardNo, jobCardId } = await getNextJobCardIdentifiers(businessId));
+} catch (err) {
+  return res.status(err.status || 500).json({ success: false, message: err.message });
+}
+
+const jobCard = new JobCard({
+  business: businessId,
+  jobCardNo,
+  jobCardId, // NEW — e.g. "ABC-137"
       ...customerSnapshot,
       vehicleId,
       licensePlateNo: licensePlateNo || vehicle.licensePlateNo,
