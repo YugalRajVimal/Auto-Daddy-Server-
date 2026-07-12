@@ -692,7 +692,7 @@ import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 // import { getNextSequence } from "../../Schema/counter.schema.js";
 import { getNextSequence } from "../../Schema/Subscription/subsCounter.schema.js";
 
-import stripe from "../../Config/stripe.js";
+import stripe from "../../config/stripe.js";
 import {
   SUBSCRIPTION_PLANS,
   CURRENCY,
