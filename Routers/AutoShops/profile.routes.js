@@ -53,7 +53,7 @@ import {
   upsertSpecialDayOpenHours,
   removeSpecialDayOpenHours,
   getOpenHours,
-} from "../../Controllers/AutoShops/openHours.controller.js";
+} from "../../Controllers/AutoShops/Openhours.controller.js";
 
 const autoShopProfileRouter = express.Router();
 
