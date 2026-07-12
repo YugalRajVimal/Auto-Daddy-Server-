@@ -9,6 +9,7 @@ import domainDetailsRouter from "./domainDetails.routes.js";
 import websiteTemplateRouter from "./websiteTemplate.routes.js";
 import autoShopDealsRouter from "./deals.routes.js";
 import jobCardPrefixRouter from "./jobcardprefix.routes.js";
+import subscriptionRouter from "./subscription.routes.js";
 
 
 const autoShopNewRouter = express.Router();
@@ -35,6 +36,10 @@ autoShopNewRouter.use("/domain-details", domainDetailsRouter);
 autoShopNewRouter.use("/website-template", websiteTemplateRouter);
 
 autoShopNewRouter.use("/autoshop-deals", autoShopDealsRouter);
+
+
+autoShopNewRouter.use("/subscription", subscriptionRouter);
+
 
 
 // INSERT_YOUR_CODE
