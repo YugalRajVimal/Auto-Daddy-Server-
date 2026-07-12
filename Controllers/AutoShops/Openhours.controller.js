@@ -169,6 +169,12 @@ export const upsertSpecialDayOpenHours = async (req, res) => {
       action = "added";
     }
 
+    // Set isBusinessActive if editing today's date
+    const todayMidnight = normalizeToMidnight(new Date());
+    if (normalizedDate.getTime() === todayMidnight.getTime()) {
+      business.isBusinessActive = !isClosed;
+    }
+
     await business.save();
 
     return res.status(200).json({
@@ -214,6 +220,26 @@ export const removeSpecialDayOpenHours = async (req, res) => {
     business.specialDayOpenHours = business.specialDayOpenHours.filter(
       (d) => normalizeToMidnight(d.date).getTime() !== normalizedDate.getTime()
     );
+
+    // If we deleted a specialDayOpenHours entry for today, recalc isBusinessActive
+    const todayMidnight = normalizeToMidnight(new Date());
+    if (normalizedDate.getTime() === todayMidnight.getTime()) {
+      // Check if there is still a special override for today
+      const stillExists = business.specialDayOpenHours.some(
+        (d) => normalizeToMidnight(d.date).getTime() === todayMidnight.getTime() && !!d.isClosed
+      );
+      if (stillExists) {
+        // If somehow there's another "closed" override for today still present, keep inactive
+        business.isBusinessActive = false;
+      } else {
+        // Fallback to perDayOpenHours for today's weekday
+        const weekday = todayMidnight.toLocaleString("en-US", { weekday: "long" });
+        const dayEntry =
+          business.perDayOpenHours &&
+          business.perDayOpenHours.find((d) => d.day && d.day.toLowerCase() === weekday.toLowerCase());
+        business.isBusinessActive = !(dayEntry && dayEntry.isClosed);
+      }
+    }
 
     if (business.specialDayOpenHours.length === before) {
       return res.status(404).json({

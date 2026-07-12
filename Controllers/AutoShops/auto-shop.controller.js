@@ -475,55 +475,151 @@ class AutoShopController {
      * Expects: { isBusinessActive: Boolean } in body.
      * Accessible to autoshopowner users only.
      */
-    async updateBusinessActiveStatus(req, res) {
-        try {
-            const userId = req.user?.id;
-            if (!userId) {
-                return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
-            }
+    // async updateBusinessActiveStatus(req, res) {
+    //     try {
+    //         const userId = req.user?.id;
+    //         if (!userId) {
+    //             return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
+    //         }
 
-            // Only allow autoshopowner
-            const user = await User.findById(userId)
-                .select("role businessProfile")
-                .lean();
-            if (!user || user.role !== "autoshopowner") {
-                return res.status(404).json({ message: "Autoshopowner user not found." });
-            }
-            if (!user.businessProfile) {
-                return res.status(404).json({ message: "Business profile not found for user." });
-            }
+    //         // Only allow autoshopowner
+    //         const user = await User.findById(userId)
+    //             .select("role businessProfile")
+    //             .lean();
+    //         if (!user || user.role !== "autoshopowner") {
+    //             return res.status(404).json({ message: "Autoshopowner user not found." });
+    //         }
+    //         if (!user.businessProfile) {
+    //             return res.status(404).json({ message: "Business profile not found for user." });
+    //         }
 
-            const { isBusinessActive } = req.body;
-            if (typeof isBusinessActive !== "boolean") {
-                return res.status(400).json({ message: "`isBusinessActive` must be a boolean value." });
-            }
+    //         const { isBusinessActive } = req.body;
+    //         if (typeof isBusinessActive !== "boolean") {
+    //             return res.status(400).json({ message: "`isBusinessActive` must be a boolean value." });
+    //         }
 
-            const updatedBusinessProfile = await BusinessProfileModel.findByIdAndUpdate(
-                user.businessProfile,
-                { isBusinessActive },
-                { new: true }
-            ).lean();
+    //         const updatedBusinessProfile = await BusinessProfileModel.findByIdAndUpdate(
+    //             user.businessProfile,
+    //             { isBusinessActive },
+    //             { new: true }
+    //         ).lean();
 
-            if (!updatedBusinessProfile) {
-                return res.status(404).json({ message: "Business profile not found." });
-            }
+    //         if (!updatedBusinessProfile) {
+    //             return res.status(404).json({ message: "Business profile not found." });
+    //         }
 
-            return res.status(200).json({
-                success: true,
-                message: "Business active status updated successfully.",
-                businessProfile: updatedBusinessProfile
-            });
-        } catch (error) {
-            console.error("[updateBusinessActiveStatus]", error);
-            return res.status(500).json({ message: "Failed to update business active status.", error: error.message });
-        }
-    }
+    //         return res.status(200).json({
+    //             success: true,
+    //             message: "Business active status updated successfully.",
+    //             businessProfile: updatedBusinessProfile
+    //         });
+    //     } catch (error) {
+    //         console.error("[updateBusinessActiveStatus]", error);
+    //         return res.status(500).json({ message: "Failed to update business active status.", error: error.message });
+    //     }
+    // }
 
     //Profile
     /**
      * Get current user's business profile.
      * Accessible to autoshopowner users. Assumes authentication middleware runs before this.
      */
+
+    /**
+ * Normalize any incoming date input to midnight UTC, so date-only
+ * equality checks (for special-day overrides) are stable regardless of
+ * what time-of-day component the client happens to send. Same helper
+ * used in openHours.controller.js — kept identical here so "today" means
+ * the same calendar date in both places.
+ */
+ normalizeToMidnight(dateInput) {
+    const d = new Date(dateInput);
+    if (isNaN(d.getTime())) return null;
+    d.setUTCHours(0, 0, 0, 0);
+    return d;
+  }
+
+    async updateBusinessActiveStatus(req, res) {
+        try {
+          const userId = req.user?.id;
+          if (!userId) {
+            return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
+          }
+       
+          // Only allow autoshopowner
+          const user = await User.findById(userId).select("role businessProfile").lean();
+          if (!user || user.role !== "autoshopowner") {
+            return res.status(404).json({ message: "Autoshopowner user not found." });
+          }
+          if (!user.businessProfile) {
+            return res.status(404).json({ message: "Business profile not found for user." });
+          }
+       
+          const { isBusinessActive } = req.body;
+          if (typeof isBusinessActive !== "boolean") {
+            return res.status(400).json({ message: "`isBusinessActive` must be a boolean value." });
+          }
+       
+          const business = await BusinessProfileModel.findById(user.businessProfile);
+          if (!business) {
+            return res.status(404).json({ message: "Business profile not found." });
+          }
+       
+          business.isBusinessActive = isBusinessActive;
+       
+          // ---- Upsert today's specialDayOpenHours entry ----
+          const today = this.normalizeToMidnight(new Date());
+          const existingIndex = business.specialDayOpenHours.findIndex(
+            (d) => this.normalizeToMidnight(d.date)?.getTime() === today.getTime()
+          );
+       
+          const reason = isBusinessActive
+            ? "Reopened by owner"
+            : "Closed by owner (marked inactive)";
+       
+          if (existingIndex !== -1) {
+            // Entry for today already exists (e.g. a holiday closure) — update
+            // just the isClosed/reason fields, leave open/close times as-is
+            // unless closing, in which case they're irrelevant anyway.
+            business.specialDayOpenHours[existingIndex].isClosed = !isBusinessActive;
+            business.specialDayOpenHours[existingIndex].reason = reason;
+          } else {
+            business.specialDayOpenHours.push({
+              date: today,
+              isClosed: !isBusinessActive,
+              reason,
+            });
+          }
+          // ---------------------------------------------------
+       
+          // --- Alternative: fully revert today's override on reactivation
+          // instead of upserting isClosed: false ---
+          // if (isBusinessActive && existingIndex !== -1) {
+          //   business.specialDayOpenHours.splice(existingIndex, 1);
+          // } else if (!isBusinessActive) {
+          //   if (existingIndex !== -1) {
+          //     business.specialDayOpenHours[existingIndex].isClosed = true;
+          //     business.specialDayOpenHours[existingIndex].reason = reason;
+          //   } else {
+          //     business.specialDayOpenHours.push({ date: today, isClosed: true, reason });
+          //   }
+          // }
+       
+          await business.save();
+       
+          return res.status(200).json({
+            success: true,
+            message: "Business active status updated successfully.",
+            businessProfile: business.toObject(),
+          });
+        } catch (error) {
+          console.error("[updateBusinessActiveStatus]", error);
+          return res.status(500).json({ message: "Failed to update business active status.", error: error.message });
+        }
+      }
+       
+
+      
     async getProfile(req, res) {
         try {
             const userId = req.user?.id;
