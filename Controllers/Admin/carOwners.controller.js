@@ -29,9 +29,11 @@ async getAllCarOwners(req, res) {
         favoriteAutoShops: 1,
         myVehicles: 1,
         onboardedBy: 1,
-        status:1,
-        city:1,
-        createdAt:1
+        status: 1,
+        city: 1,
+        createdAt: 1,
+        profilePhoto: 1,
+        documents: 1
       }
     )
       .populate({
@@ -101,8 +103,20 @@ async getAllCarOwners(req, res) {
       jobCardsByOwner[ownerId].push(jobCard);
     }
 
+    // Helper: group user's documents by vehicleId for easier lookup
+    const groupDocumentsByVehicle = (documents = []) => {
+      const map = {};
+      for (const doc of documents) {
+        if (doc && doc.vehicleId) {
+          map[doc.vehicleId.toString()] = doc;
+        }
+      }
+      return map;
+    };
+
     // For each owner, build list of all distinct autoshops they received service from,
-    // and for each, also indicate isFav: true/false (present in favoriteAutoShops)
+    // and for each, also indicate isFav: true/false (present in favoriteAutoShops),
+    // and associate all vehicle details (from myVehicles) and all document details per-vehicle.
     carOwners = await Promise.all(
       carOwners.map(async owner => {
         const ownerId = owner._id.toString();
@@ -117,7 +131,6 @@ async getAllCarOwners(req, res) {
             const _idStr = business._id.toString();
             if (!serviceAutoshopsMap[_idStr]) {
               // --- POPULATE SERVICE NAMES FOR THIS BUSINESS PROFILE ---
-              // Populate myServices for this shop with service names
               let newBusiness = { ...business };
               if (Array.isArray(newBusiness.myServices)) {
                 // Fetch service names for all referenced service ids in myServices
@@ -135,12 +148,10 @@ async getAllCarOwners(req, res) {
                 newBusiness.myServices = newBusiness.myServices.map(ms => {
                   const msObj = (ms && typeof ms === "object") ? { ...ms } : {};
                   if (msObj.service && typeof msObj.service === "object" && msObj.service._id && msObj.service.name) {
-                    // Already populated (unlikely, but preserve)
                     msObj.serviceName = msObj.service.name;
                   } else if (msObj.service && serviceDocsMap[msObj.service.toString()]) {
                     msObj.serviceName = serviceDocsMap[msObj.service.toString()];
                   }
-                  // For convenience, still include the service id itself
                   msObj.serviceId = typeof msObj.service === "object" && msObj.service._id
                     ? msObj.service._id.toString()
                     : msObj.service?.toString?.() || '';
@@ -171,10 +182,28 @@ async getAllCarOwners(req, res) {
           };
         });
 
+        // Prepare map of document by vehicleId
+        const docsByVehicle = groupDocumentsByVehicle(owner.documents);
+
+        // Compose vehicles array with vehicle, and its documents (ownership, insurance, carImage, etc)
+        let myVehicles = [];
+        if (Array.isArray(owner.myVehicles)) {
+          myVehicles = owner.myVehicles.map(vehicle => {
+            const vId = (vehicle && vehicle._id) ? vehicle._id.toString() : vehicle?.toString?.();
+            const document = docsByVehicle[vId] || null;
+            return {
+              ...vehicle,
+              documents: document
+            };
+          });
+        }
+
         return {
           ...owner,
+          profileImage: owner.profilePhoto || null,
           jobCards,
           autoshopsReceivedServiceFrom: autoshopsUsed,
+          myVehicles,
         };
       })
     );

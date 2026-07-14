@@ -13,6 +13,7 @@ import Services from "../../Schema/services.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import WebsiteTemplateSchema from "../../Schema/WebsiteTemplateSchema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
+import { Admin } from "../../Schema/admin.schema.js";
 
 
 class AdminController {
@@ -23,78 +24,125 @@ class AdminController {
 // @access  Admin (authentication assumed at higher middleware)
 async getDashboardDetails(req, res) {
   try {
-    // 1. Car owners count (role === 'car-owner')
-    const carOwnersCount = await User.countDocuments({ role: 'carowner' });
+    // ----- CAR OWNERS -----
+    const carOwnersTotal = await User.countDocuments({ role: 'carowner' });
+    const carOwnersActive = await User.countDocuments({
+      role: 'carowner',
+      status: 'active',
+      isDisabled: false,
+    });
+    const carOwnersNonActive = await User.countDocuments({
+      role: 'carowner',
+      status: 'suspended',
+    });
+    const carOwnersClosed = await User.countDocuments({
+      role: 'carowner',
+      status: 'deleted',
+    });
 
-    // 2. Auto Shop Owners count (role === 'autoshop-owner')
-    const autoShopOwnersCount = await User.countDocuments({ role: 'autoshopowner' });
+    // ----- SHOPS -----
+    // Car Shops: shopType: 'autoShop'
+    const carShopsCount = await User.countDocuments({
+      role: 'autoshopowner',
+      shopType: { $in: ['autoShop'] }
+    });
+    // Car Wash: shopType: 'carWash'
+    const carWashCount = await User.countDocuments({
+      role: 'autoshopowner',
+      shopType: { $in: ['carWash'] }
+    });
+    // Tire Master: shopType: 'tyreShop'
+    const tireMasterCount = await User.countDocuments({
+      role: 'autoshopowner',
+      shopType: { $in: ['tyreShop'] }
+    });
+    // Tow Truck: shopType: 'towTruck'
+    const towTruckCount = await User.countDocuments({
+      role: 'autoshopowner',
+      shopType: { $in: ['towTruck'] }
+    });
 
-    // 3. All JobCards
-    const jobCardsCount = await JobCard.countDocuments({});
-
-    // --- Added: JobCards count per day (createdAt) for bar graph data ---
-    const jobCardsByDateAggregation = await JobCard.aggregate([
+    // ----- SUBSCRIPTIONS -----
+    // Subscription states: Received, Pending, In Process, Un-Answered
+    // Subscriptions are on BusinessProfileModel
+    // Received == Paid, Pending == Pending, In Process == "complete" in Stripe or "processing" in Cashfree, Un-Answered == Failed
+    const subscriptionAgg = await BusinessProfileModel.aggregate([
+      { $unwind: "$subscriptions" },
       {
         $group: {
-          _id: {
-            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" }
-          },
+          _id: "$subscriptions.paymentStatus",
           count: { $sum: 1 }
         }
-      },
-      { $sort: { _id: 1 } }
+      }
     ]);
-    const jobCardsByDate = jobCardsByDateAggregation.map(item => ({
-      date: item._id,
-      count: item.count
-    }));
 
-    // 4. All Deals
-    const dealsCount = await DealModel.countDocuments({});
+    let subscriptionsReceived = 0,
+        subscriptionsPending = 0,
+        subscriptionsInProcess = 0,
+        subscriptionsUnAnswered = 0;
 
-    // 5. All Services
-    const services = await Services.find({});
-    const servicesCount = services.length;
-
-    // 6. All SubServices (sum of all subservices in all Services)
-    let subServicesCount = 0;
-    for (const svc of services) {
-      if (svc.services && Array.isArray(svc.services)) {
-        subServicesCount += svc.services.length;
-      }
+    for (const sub of subscriptionAgg) {
+      if (sub._id === "Paid") subscriptionsReceived += sub.count;
+      else if (sub._id === "Pending") subscriptionsPending += sub.count;
+      else if (sub._id === "Failed") subscriptionsUnAnswered += sub.count;
     }
+    // Also include Stripe statuses for In Process
+    // Let's count any subscription where stripeStatus is "open" or cashfreeStatus is "processing" as "In Process"
+    const stripeInProcess = await BusinessProfileModel.countDocuments({
+      "subscriptions.stripeStatus": { $in: ["open"] }
+    });
+    const cashfreeInProcess = await BusinessProfileModel.countDocuments({
+      "subscriptions.cashfreeStatus": { $in: ["PROCESSING", "processing"] }
+    });
+    subscriptionsInProcess = stripeInProcess + cashfreeInProcess;
 
-    // Fetch latest DashboardData for thoughtOfTheDay and thoughtOfTheDayLike
-    let thoughtOfTheDay = '';
-    let thoughtOfTheDayLike = 0;
-    try {
-      const dashboardData = await DashboardDataModel.findOne({}, { thoughtOfTheDay: 1, thoughtOfTheDayLike: 1 })
-        .sort({ createdAt: -1 })
-        .lean();
-      if (dashboardData) {
-        if (typeof dashboardData.thoughtOfTheDay === 'string') {
-          thoughtOfTheDay = dashboardData.thoughtOfTheDay;
-        }
-        if (typeof dashboardData.thoughtOfTheDayLike === 'number') {
-          thoughtOfTheDayLike = dashboardData.thoughtOfTheDayLike;
-        }
-      }
-    } catch (e) {
-      // fallback: nothing extra required, send defaults
-    }
+    // ----- HELP (InviteHelp) -----
+    // Only where "to" == "Admin"
+    // Status: "resolved", "pending" (received), "reviewed" (in process), "rejected" (un-answered)
+    const helpResolved = await InviteHelpSchema.countDocuments({
+      to: "Admin",
+      status: "resolved"
+    });
+    const helpReceived = await InviteHelpSchema.countDocuments({
+      to: "Admin",
+      status: "pending"
+    });
+    const helpInProcess = await InviteHelpSchema.countDocuments({
+      to: "Admin",
+      status: "reviewed"
+    });
+    const helpUnAnswered = await InviteHelpSchema.countDocuments({
+      to: "Admin",
+      status: "rejected"
+    });
 
     return res.status(200).json({
       success: true,
       data: {
-        carOwnersCount,
-        autoShopOwnersCount,
-        jobCardsCount,
-        jobCardsByDate,
-        dealsCount,
-        servicesCount,
-        subServicesCount,
-        thoughtOfTheDay,     // newly added field
-        thoughtOfTheDayLike, // newly added field
+        carOwners: {
+          total: carOwnersTotal,
+          active: carOwnersActive,
+          nonActive: carOwnersNonActive,
+          closed: carOwnersClosed
+        },
+        shops: {
+          carShops: carShopsCount,
+          carWash: carWashCount,
+          tireMaster: tireMasterCount,
+          towTruck: towTruckCount
+        },
+        subscriptions: {
+          received: subscriptionsReceived,
+          pending: subscriptionsPending,
+          inProcess: subscriptionsInProcess,
+          unAnswered: subscriptionsUnAnswered
+        },
+        help: {
+          resolved: helpResolved,
+          received: helpReceived,
+          inProcess: helpInProcess,
+          unAnswered: helpUnAnswered
+        }
       }
     });
   } catch (err) {
@@ -1270,6 +1318,50 @@ async getDashboardDetails(req, res) {
 
 
 
+
+
+
+/**
+ * Get the profile details (name, email, phone, and permissions) for a given user ID.
+ * GET /admin/profile/:id
+ */
+async getProfile(req, res) {
+    try {
+        // Use authenticated admin id from req.user
+        const id = req.user && req.user.id;
+
+        if (!id) {
+            return res.status(401).json({ message: "Unauthorized: user id not found on request." });
+        }
+
+        // Find admin by id
+        const admin = await Admin.findById(id).lean();
+        if (!admin) {
+            return res.status(404).json({ message: "Admin not found." });
+        }
+        
+        // Send only allowed fields (matching Admin schema)
+        const profile = {
+            name: admin.name,
+            email: admin.email,
+            phone: admin.phone || "",
+            role: admin.role,
+            kycAutoApprove: admin.kycAutoApprove,
+            lastLogin: admin.lastLogin,
+            createdAt: admin.createdAt,
+            updatedAt: admin.updatedAt,
+            permissionAll:true
+            // Add additional fields if specifically needed, matching allowed fields in Admin schema
+        };
+
+        return res.status(200).json({ success: true, data: profile });
+    } catch (err) {
+        console.error("[getProfile] Error:", err);
+        return res.status(500).json({ message: "Failed to fetch profile", error: err.message });
+    }
+}
+
+
 /**
  * Create or update the global DashboardData config.
  * POST /admin/dashboard-data
@@ -2186,15 +2278,16 @@ async sendCustomNotificationToUser(req, res) {
  * Optional: filter by query parameters if needed (e.g., serviceId)
  */
 
- async  getInviteHelpToAdmin(req, res) {
+async getInviteHelpToAdmin(req, res) {
     try {
-        // Optionally, you can support filtering by serviceId, etc.
-        const filter = { to: "Admin" };
+        // const filter = { to: "Admin" };
+        const filter = {};
         if (req.query.serviceId) {
             filter.serviceId = req.query.serviceId;
         }
-        // Get all InviteHelp entries sent to Admin and populate user and their businessProfile
-        const invites = await InviteHelpSchema.find(filter)
+
+        // Explicitly exclude the audioBlob field from InviteHelp documents
+        const invites = await InviteHelpSchema.find(filter, { audioBlob: 0 })
             .populate({
                 path: "userId",
                 model: User,
@@ -2205,9 +2298,9 @@ async sendCustomNotificationToUser(req, res) {
                     select: "businessName businessEmail" // Only get businessName and businessEmail from BusinessProfile
                 }
             })
-       
-            .sort({ createdAt: -1 }); // Sort latest first
+            .sort({ createdAt: -1 });
 
+        console.log(invites);
         return res.status(200).json({
             success: true,
             data: invites,
@@ -2221,6 +2314,43 @@ async sendCustomNotificationToUser(req, res) {
         });
     }
 }
+
+/**
+ * Fetch the audioBlob for a specific InviteHelp document by its ID.
+ * @route GET /invite-help/:id/audio
+ */
+async getInviteHelpAudioBlob(req, res) {
+    try {
+        const { id } = req.params;
+
+        const inviteHelp = await InviteHelpSchema.findById(id).select('audioBlob');
+        console.log("[getInviteHelpAudioBlob] inviteHelp:", inviteHelp);
+
+        if (!inviteHelp) {
+            console.log("[getInviteHelpAudioBlob] InviteHelp not found for id:", id);
+            return res.status(404).json({
+                success: false,
+                message: "InviteHelp not found."
+            });
+        }
+
+   
+
+
+
+       
+
+        return res.status(200).send({audioBlob:inviteHelp.audioBlob});
+    } catch (error) {
+        console.error("[getInviteHelpAudioBlob] Error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch InviteHelp audio blob.",
+            error: error.message
+        });
+    }
+}
+
 
 /**
  * Update status of an InviteHelp request. 

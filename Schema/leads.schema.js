@@ -25,7 +25,6 @@ const leadSchema = new mongoose.Schema(
     },
     email: {
       type: String,
-      required: true,
       trim: true,
       lowercase: true,
       match: [EMAIL_REGEX, "Please provide a valid email address."],

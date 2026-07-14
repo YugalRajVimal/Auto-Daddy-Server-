@@ -160,35 +160,68 @@ export const editDomain = async (req, res) => {
 };
 
 /**
- * Fetch all domains, optional filters
- * GET /admin/domains?userType=autoshopowner&domainType=new&provider=GoDaddy&userId=...&expiringBefore=2026-12-31
+ * Fetch all domains, with filter and search on User Type, User Name, Domain, Domain Type, Expiry, Provider, DNS
+ * GET /admin/domains?userType=autoshopowner&userName=...&domain=...&domainType=new&expiry=YYYY-MM-DD&provider=GoDaddy&dns=ns1&expiringBefore=2026-12-31
  */
 export const getDomains = async (req, res) => {
   try {
-    const { userType, domainType, provider, userId, domain, expiringBefore } = req.query;
+    const { userType, userName, domain, domainType, expiry, provider, dns, userId, expiringBefore } = req.query;
     const filter = {};
 
+    // Field: User Type
     if (userType) filter.userType = userType;
-    if (domainType) filter.domainType = domainType;
-    if (provider) filter.provider = { $regex: provider, $options: "i" };
+
+    // Field: Domain Name (search, partial match)
     if (domain) filter.domain = { $regex: domain, $options: "i" };
+
+    // Field: Domain Type
+    if (domainType) filter.domainType = domainType;
+
+    // Field: Expiry (exact match, or use expiringBefore for range)
+    if (expiry) {
+      if (!isValidDate(expiry)) {
+        return res.status(400).json({ success: false, message: "Invalid expiry date." });
+      }
+      filter.expiry = new Date(expiry);
+    }
+    // Field: Expiring before (range query)
+    if (expiringBefore) {
+      if (!isValidDate(expiringBefore)) {
+        return res.status(400).json({ success: false, message: "Invalid expiringBefore date." });
+      }
+      // Merge with expiry field if also present
+      filter.expiry = filter.expiry
+        ? { ...filter.expiry, $lte: new Date(expiringBefore) }
+        : { $lte: new Date(expiringBefore) };
+    }
+    // Field: Provider (search, partial match)
+    if (provider) filter.provider = { $regex: provider, $options: "i" };
+
+    // Field: DNS (search, partial match)
+    if (dns) filter.dns = { $regex: dns, $options: "i" };
+
+    // Field: userId
     if (userId) {
       if (!isValidObjectId(userId)) {
         return res.status(400).json({ success: false, message: "Invalid userId." });
       }
       filter.userId = userId;
     }
-    if (expiringBefore) {
-      if (!isValidDate(expiringBefore)) {
-        return res.status(400).json({ success: false, message: "Invalid expiringBefore date." });
-      }
-      filter.expiry = { $lte: new Date(expiringBefore) };
-    }
 
-    const domains = await Domain.find(filter)
+    // 1. Find domains matching main filters (excluding userName, which requires user population)
+    let domains = await Domain.find(filter)
       .populate({ path: "userId", model: User, select: "name email phone role" })
       .sort({ createdAt: -1 });
- 
+
+    // 2. Filter by User Name (if provided)
+    if (userName) {
+      const searchVal = String(userName).toLowerCase();
+      domains = domains.filter(d =>
+        d.userId &&
+        d.userId.name &&
+        d.userId.name.toLowerCase().includes(searchVal)
+      );
+    }
 
     return res.status(200).json({ success: true, data: domains });
   } catch (err) {

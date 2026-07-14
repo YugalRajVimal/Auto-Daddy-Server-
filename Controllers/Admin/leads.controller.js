@@ -36,11 +36,12 @@ export const createLead = async (req, res) => {
     const { date, name, phone, city, email, website, notes, sentTo, status } =
       pickAllowedFields(req.body);
 
-    // Validate required fields
-    if (!date || !name || !phone || !city || !email) {
+    // Email is not mandatory anymore, nor are website or notes
+    // Validate required fields: date, name, phone, city
+    if (!date || !name || !phone || !city) {
       return res.status(400).json({
         success: false,
-        message: "date, name, phone, city and email are required.",
+        message: "date, name, phone, and city are required.",
       });
     }
 
@@ -48,8 +49,13 @@ export const createLead = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid date." });
     }
 
-    if (!EMAIL_REGEX.test(email.trim())) {
-      return res.status(400).json({ success: false, message: "Invalid email address." });
+    // Email: if provided, must be valid.
+    let validEmail = null;
+    if (email && email.trim()) {
+      if (!EMAIL_REGEX.test(email.trim())) {
+        return res.status(400).json({ success: false, message: "Invalid email address." });
+      }
+      validEmail = email.trim().toLowerCase();
     }
 
     const leadData = {
@@ -57,9 +63,9 @@ export const createLead = async (req, res) => {
       name: name.trim(),
       phone: phone.trim(),
       city: city.trim(),
-      email: email.trim().toLowerCase(),
     };
 
+    if (validEmail) leadData.email = validEmail;
     if (website) leadData.website = website.trim();
     if (notes) leadData.notes = notes.trim();
     if (sentTo) leadData.sentTo = sentTo.trim();
@@ -140,9 +146,10 @@ export const editLead = async (req, res) => {
       updateData.date = new Date(updateData.date);
     }
 
+    // Email: if provided, must be valid
     if (updateData.email) {
       const trimmedEmail = updateData.email.trim().toLowerCase();
-      if (!EMAIL_REGEX.test(trimmedEmail)) {
+      if (trimmedEmail && !EMAIL_REGEX.test(trimmedEmail)) {
         return res.status(400).json({ success: false, message: "Invalid email address." });
       }
       updateData.email = trimmedEmail;

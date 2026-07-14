@@ -762,6 +762,7 @@ import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import { getNextJobCardIdentifiers, peekNextJobCardIdentifiers } from "./Jobcardidentifier.helper.js";
+import { generateInvoiceId } from "./invoiceIdentifier.helper.js";
 
 
 
@@ -1376,38 +1377,95 @@ export const deleteJobCard = async (req, res) => {
 /* =========================================================
    6. MARK STATUS (convertedToInvoice / CashPaid)
    ========================================================= */
+// export const markStatus = async (req, res) => {
+//   try {
+//     const { jobCardNo } = req.params;
+//     const { status } = req.body;
+
+//     if (!["convertedToInvoice", "CashPaid"].includes(status)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "status must be 'convertedToInvoice' or 'CashPaid'",
+//       });
+//     }
+
+//     const businessId = await getBusinessId(req.user.id);
+//     if (!businessId) {
+//       return res.status(404).json({ success: false, message: "Business profile not found" });
+//     }
+
+//     const jobCard = await JobCard.findOne({ business: businessId, jobCardNo: Number(jobCardNo) });
+//     if (!jobCard) {
+//       return res.status(404).json({ success: false, message: "Job card not found" });
+//     }
+
+//     if (["convertedToInvoice", "CashPaid"].includes(jobCard.status)) {
+//       return res.status(409).json({
+//         success: false,
+//         message: `Job card is already ${jobCard.status}`,
+//       });
+//     }
+
+//     jobCard.status = status;
+//     await jobCard.save();
+
+//     return res.status(200).json({ success: true, message: `Job card marked ${status}`, data: jobCard });
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to update job card status",
+//       error: error.message,
+//     });
+//   }
+// };
+
+
 export const markStatus = async (req, res) => {
   try {
     const { jobCardNo } = req.params;
     const { status } = req.body;
-
+ 
     if (!["convertedToInvoice", "CashPaid"].includes(status)) {
       return res.status(400).json({
         success: false,
         message: "status must be 'convertedToInvoice' or 'CashPaid'",
       });
     }
-
+ 
     const businessId = await getBusinessId(req.user.id);
     if (!businessId) {
       return res.status(404).json({ success: false, message: "Business profile not found" });
     }
-
+ 
     const jobCard = await JobCard.findOne({ business: businessId, jobCardNo: Number(jobCardNo) });
     if (!jobCard) {
       return res.status(404).json({ success: false, message: "Job card not found" });
     }
-
+ 
     if (["convertedToInvoice", "CashPaid"].includes(jobCard.status)) {
       return res.status(409).json({
         success: false,
         message: `Job card is already ${jobCard.status}`,
       });
     }
-
+ 
+    // Generate the invoice ID ONLY the first time this job card gets
+    // converted — invoiceId is set once and never regenerated, even if
+    // status somehow gets flipped between convertedToInvoice/CashPaid later.
+    if (!jobCard.invoiceId) {
+      try {
+        jobCard.invoiceId = await generateInvoiceId(businessId);
+      } catch (err) {
+        if (err.code === "INVOICE_PREFIX_NOT_SET") {
+          return res.status(409).json({ success: false, message: err.message });
+        }
+        throw err;
+      }
+    }
+ 
     jobCard.status = status;
     await jobCard.save();
-
+ 
     return res.status(200).json({ success: true, message: `Job card marked ${status}`, data: jobCard });
   } catch (error) {
     return res.status(500).json({
@@ -1417,6 +1475,8 @@ export const markStatus = async (req, res) => {
     });
   }
 };
+ 
+
 
 /* =========================================================
    MARK INVOICE AS PAID

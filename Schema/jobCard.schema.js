@@ -248,6 +248,9 @@ const JobCardSchema = new Schema({
     default: 'pending',
   },
   invoicePaid: { type: Boolean, default: false },
+   // Set once, the first time status flips to 'convertedToInvoice' or 'CashPaid'.
+  // Format: "<prefix>-<seq>", e.g. "INV-137" — see invoiceIdentifier.helper.js.
+  invoiceId: { type: String, default: null },
 
 }, { timestamps: true });
 

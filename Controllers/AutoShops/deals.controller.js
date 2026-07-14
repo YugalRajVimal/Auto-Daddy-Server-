@@ -728,6 +728,7 @@ import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 import { User } from "../../Schema/user.schema.js";
 import DealModel from "../../Schema/deals.schema.js";
 import Services from "../../Schema/services.schema.js";
+import Dealer from "../../Schema/dealers.schema.js";
 
 /**
  * Create a new deal (Service, Parts, or Salvages) and link it to the creator's business profile.
@@ -1360,5 +1361,25 @@ export const fetchMyDeals = async (req, res) => {
   } catch (error) {
     console.error("[fetchMyDeals] Error:", error);
     return res.status(500).json({ success: false, message: "Error fetching deals", error: error.message });
+  }
+};
+
+/**
+ * Fetch all ACTIVE Dealers.
+ * Returns a list of dealer records where status is 'Active'.
+ */
+
+
+export const getAllDealers = async (req, res) => {
+  try {
+    const dealers = await Dealer.find({ status: "Active" }).lean();
+    return res.status(200).json({ success: true, data: dealers });
+  } catch (error) {
+    console.error("[getAllDealers] Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch dealers",
+      error: error.message,
+    });
   }
 };

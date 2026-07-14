@@ -573,30 +573,58 @@ export const fetchCommonCollection = async (req, res) => {
     }
     const filters = { ...req.query };
 
-    // Convert some fields, if present, to appropriate types
-    if (filters.date) {
-      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(filters.date);
-      if (m) {
-        const [, y, mth, d] = m;
-        filters.date = {
-          $gte: new Date(`${y}-${mth}-${d}T00:00:00.000Z`),
-          $lte: new Date(`${y}-${mth}-${d}T23:59:59.999Z`)
-        };
-      } else {
-        const dt = new Date(filters.date);
-        if (!isNaN(dt.getTime())) filters.date = dt;
+    let match = {};
+
+    if (collection === "thoughtOfTheDay") {
+      // Filtering for date (with range for YYYY-MM-DD), and partial search on subject, country, notes
+      if (filters.date) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(filters.date);
+        if (m) {
+          const [, y, mth, d] = m;
+          match.date = {
+            $gte: new Date(`${y}-${mth}-${d}T00:00:00.000Z`),
+            $lte: new Date(`${y}-${mth}-${d}T23:59:59.999Z`)
+          };
+        } else {
+          const dt = new Date(filters.date);
+          if (!isNaN(dt.getTime())) match.date = dt;
+        }
       }
-    }
-    if (filters.country) {
-      filters.country = { $regex: `^${filters.country.trim()}$`, $options: 'i' };
+      if (filters.country) {
+        match.country = { $regex: filters.country.trim(), $options: 'i' };
+      }
+      if (filters.subject) {
+        match.subject = { $regex: filters.subject.trim(), $options: 'i' };
+      }
+      if (filters.notes) {
+        match.notes = { $regex: filters.notes.trim(), $options: 'i' };
+      }
+    } else {
+      // Default for other collections (retains previous logic)
+      if (filters.date) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(filters.date);
+        if (m) {
+          const [, y, mth, d] = m;
+          match.date = {
+            $gte: new Date(`${y}-${mth}-${d}T00:00:00.000Z`),
+            $lte: new Date(`${y}-${mth}-${d}T23:59:59.999Z`)
+          };
+        } else {
+          const dt = new Date(filters.date);
+          if (!isNaN(dt.getTime())) match.date = dt;
+        }
+      }
+      if (filters.country) {
+        match.country = { $regex: `^${filters.country.trim()}$`, $options: 'i' };
+      }
     }
 
     const pipeline = [
       { $unwind: `$${collection}` },
       { $replaceRoot: { newRoot: `$${collection}` } }
     ];
-    if (Object.keys(filters).length > 0) {
-      pipeline.push({ $match: filters });
+    if (Object.keys(match).length > 0) {
+      pipeline.push({ $match: match });
     }
 
     const results = await CommonModel.aggregate(pipeline);

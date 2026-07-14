@@ -18,134 +18,174 @@ import { VehicleModel } from "../../Schema/vehicles.schema.js";
 class AutoShopOwnerController {
 
     async getAllAutoShopOwners(req, res) {
-  try {
-    // Find users with role 'autoshopowner', select specific fields only
-    const autoShopOwnersRaw = await User.find(
-      { role: "autoshopowner" },
-      {
-        name: 1,
-        email: 1,
-        countryCode: 1,
-        phone: 1,
-        pincode: 1,
-        address: 1,
-        isDisabled: 1,
-        isProfileComplete: 1,
-        isBusinessProfileCompleted: 1,
-        businessProfile: 1,
-        myCustomers: 1,
-        createdAt:1,
-        status:1,
-        shopType:1
-      }
-    )
-      .populate({
-        path: 'businessProfile',
-        model: 'BusinessProfile',
-        populate: [
+      try {
+        // Find users with role 'autoshopowner', select specific fields only
+        const autoShopOwnersRaw = await User.find(
+          { role: "autoshopowner" },
           {
-            path: 'myServices.service',
-            model: 'Services'
-          },
-          {
-            path: 'myDeals',
-            model: 'Deal'
+            name: 1,
+            email: 1,
+            countryCode: 1,
+            phone: 1,
+            pincode: 1,
+            address: 1,
+            isDisabled: 1,
+            isProfileComplete: 1,
+            isBusinessProfileCompleted: 1,
+            businessProfile: 1,
+            myCustomers: 1,
+            createdAt: 1,
+            status: 1,
+            shopType: 1
           }
-        ]
-      })
-      .populate({
-        path: 'myCustomers',
-        model: 'User',
-        select: 'name email phone' // Optional: select subset of customer info
-      })
-      .lean();
+        )
+          .populate({
+            path: "businessProfile",
+            model: "BusinessProfile",
+            populate: [
+              {
+                path: "myServices.service",
+                model: "Services",
+              },
+              {
+                path: "myDeals",
+                model: "Deal",
+              },
+            ],
+          })
+          .populate({
+            path: "myCustomers",
+            model: "User",
+            select: "name email phone", // send main details only
+          })
+          .lean();
 
-    // Helper function to populate valueId accordingly (unchanged)
-    async function populateDealValueIds(deals) {
-      if (!Array.isArray(deals)) return deals;
-      return Promise.all(
-        deals.map(async (deal) => {
-          if (deal.type === 'services' && deal.valueId) {
-            const ServiceModel = require('../../Schema/services.schema').default || require('../../Schema/services.schema');
-            const service = await ServiceModel.findById(deal.valueId).lean();
-            return { ...deal, value: service || null };
-          } else if (deal.type === 'subservices' && deal.valueId) {
-            const ServiceModel = require('../../Schema/services.schema').default || require('../../Schema/services.schema');
-            const serviceDoc = await ServiceModel.findOne({ "services._id": deal.valueId }, { "services.$": 1, name: 1 }).lean();
-            let subservice = null;
-            if (serviceDoc && serviceDoc.services && serviceDoc.services[0]) {
-              subservice = {
-                ...serviceDoc.services[0],
-                parentServiceName: serviceDoc.name
-              };
+        // Helper function to populate valueId accordingly (unchanged)
+        async function populateDealValueIds(deals) {
+          if (!Array.isArray(deals)) return deals;
+          return Promise.all(
+            deals.map(async (deal) => {
+              if (deal.type === "services" && deal.valueId) {
+                const ServiceModel =
+                  require("../../Schema/services.schema").default ||
+                  require("../../Schema/services.schema");
+                const service = await ServiceModel.findById(deal.valueId).lean();
+                return { ...deal, value: service || null };
+              } else if (deal.type === "subservices" && deal.valueId) {
+                const ServiceModel =
+                  require("../../Schema/services.schema").default ||
+                  require("../../Schema/services.schema");
+                const serviceDoc = await ServiceModel.findOne(
+                  { "services._id": deal.valueId },
+                  { "services.$": 1, name: 1 }
+                ).lean();
+                let subservice = null;
+                if (
+                  serviceDoc &&
+                  serviceDoc.services &&
+                  serviceDoc.services[0]
+                ) {
+                  subservice = {
+                    ...serviceDoc.services[0],
+                    parentServiceName: serviceDoc.name,
+                  };
+                }
+                return { ...deal, value: subservice || null };
+              }
+              return deal;
+            })
+          );
+        }
+
+        // For each autoShopOwner, populate their businessProfile.myDeals accordingly (if exists)
+        if (Array.isArray(autoShopOwnersRaw)) {
+          for (const owner of autoShopOwnersRaw) {
+            if (
+              owner.businessProfile &&
+              owner.businessProfile.myDeals &&
+              Array.isArray(owner.businessProfile.myDeals)
+            ) {
+              owner.businessProfile.myDeals =
+                await populateDealValueIds(owner.businessProfile.myDeals);
             }
-            return { ...deal, value: subservice || null };
           }
-          return deal;
-        })
-      );
-    }
-
-    // For each autoShopOwner, populate their businessProfile.myDeals accordingly (if exists)
-    if (Array.isArray(autoShopOwnersRaw)) {
-      for (const owner of autoShopOwnersRaw) {
-        if (
-          owner.businessProfile &&
-          owner.businessProfile.myDeals &&
-          Array.isArray(owner.businessProfile.myDeals)
-        ) {
-          owner.businessProfile.myDeals = await populateDealValueIds(owner.businessProfile.myDeals);
         }
+
+        // Collect all businessProfile _ids to fetch JobCards in one go
+        const businessProfileIds = autoShopOwnersRaw
+          .map((o) =>
+            o.businessProfile && o.businessProfile._id
+              ? o.businessProfile._id.toString()
+              : null
+          )
+          .filter((id) => !!id);
+
+        // Bulk fetch all JobCards where 'business' matches any auto shop owner's businessProfile _id
+        // Use .lean() for performance, unless you need Mongoose docs for virtuals etc.
+        const allJobCards = await JobCard.find({
+          business: { $in: businessProfileIds },
+        }).lean();
+
+        // Group JobCards by business (businessProfile _id)
+        const jobCardsByBusiness = {};
+        for (const jobCard of allJobCards) {
+          const businessId = jobCard.business?.toString();
+          if (!businessId) continue;
+          if (!jobCardsByBusiness[businessId]) {
+            jobCardsByBusiness[businessId] = [];
+          }
+          jobCardsByBusiness[businessId].push(jobCard);
+        }
+
+        // Prepare response with number of customers and their main details
+        const autoShopOwners = await Promise.all(
+          autoShopOwnersRaw.map(async (owner) => {
+            let deals = [];
+            if (owner.businessProfile?._id) {
+              deals = await DealModel.find({
+                createdBy: owner.businessProfile._id,
+              }).lean();
+            }
+            // Gather jobCards for this owner (their businessProfile._id)
+            const jobCards =
+              owner.businessProfile && owner.businessProfile._id
+                ? jobCardsByBusiness[owner.businessProfile._id.toString()] || []
+                : [];
+
+            // Customers main details and count
+            const customers = Array.isArray(owner.myCustomers)
+              ? owner.myCustomers.map((c) => ({
+                  _id: c._id,
+                  name: c.name,
+                  email: c.email,
+                  phone: c.phone,
+                }))
+              : [];
+            const customerCount = customers.length;
+
+            return {
+              ...owner,
+              deals,
+              jobCards,
+              customers,
+              customerCount, // number of customers
+            };
+          })
+        );
+
+        res
+          .status(200)
+          .json({ success: true, data: autoShopOwners });
+      } catch (err) {
+        res
+          .status(500)
+          .json({
+            success: false,
+            message: "Error fetching auto shop owners",
+            error: err.message,
+          });
       }
     }
-
-    // Collect all businessProfile _ids to fetch JobCards in one go
-    const businessProfileIds = autoShopOwnersRaw
-      .map(o => o.businessProfile && o.businessProfile._id ? o.businessProfile._id.toString() : null)
-      .filter(id => !!id);
-
-    // Bulk fetch all JobCards where 'business' matches any auto shop owner's businessProfile _id
-    // Use .lean() for performance, unless you need Mongoose docs for virtuals etc.
-    const allJobCards = await JobCard.find({ business: { $in: businessProfileIds } }).lean();
-
-    // Group JobCards by business (businessProfile _id)
-    const jobCardsByBusiness = {};
-    for (const jobCard of allJobCards) {
-      const businessId = jobCard.business?.toString();
-      if (!businessId) continue;
-      if (!jobCardsByBusiness[businessId]) {
-        jobCardsByBusiness[businessId] = [];
-      }
-      jobCardsByBusiness[businessId].push(jobCard);
-    }
-
-    // Fetch deals for each auto shop owner, and attach jobCards array for each owner (by their businessProfile)
-    const autoShopOwners = await Promise.all(
-      autoShopOwnersRaw.map(async (owner) => {
-        let deals = [];
-        if (owner.businessProfile?._id) {
-          deals = await DealModel.find(
-            { createdBy: owner.businessProfile._id }
-          ).lean();
-        }
-        // Gather jobCards for this owner (their businessProfile._id)
-        const jobCards = owner.businessProfile && owner.businessProfile._id
-          ? (jobCardsByBusiness[owner.businessProfile._id.toString()] || [])
-          : [];
-
-        return {
-          ...owner,
-          deals,
-          jobCards
-        };
-      })
-    );
-
-    res.status(200).json({ success: true, data: autoShopOwners });
-  } catch (err) {
-    res.status(500).json({ success: false, message: "Error fetching auto shop owners", error: err.message });
-  }
-}
 
 
   // ─── CREATE AUTO SHOP OWNER ─────────────────────────────────────────────────

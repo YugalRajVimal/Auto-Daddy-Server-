@@ -10,6 +10,7 @@ import websiteTemplateRouter from "./websiteTemplate.routes.js";
 import autoShopDealsRouter from "./deals.routes.js";
 import jobCardPrefixRouter from "./jobcardprefix.routes.js";
 import subscriptionRouter from "./subscription.routes.js";
+import invoicePrefixRouter from "./invoiceprefix.routes.js";
 
 
 const autoShopNewRouter = express.Router();
@@ -29,6 +30,9 @@ autoShopNewRouter.use("/jobcards", jobCardRouter);
 
 
 autoShopNewRouter.use("/jobcard-prefix", jobCardPrefixRouter);
+
+autoShopNewRouter.use("/invoice-prefix", invoicePrefixRouter);
+
 
 
 autoShopNewRouter.use("/domain-details", domainDetailsRouter);

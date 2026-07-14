@@ -35,4 +35,14 @@ autoShopDealsRouter.get(
   fetchMyDeals
 );
 
+import { getAllDealers } from "../../Controllers/AutoShops/deals.controller.js";
+
+// Fetch all active dealers
+autoShopDealsRouter.get(
+  "/dealers",
+  jwtAuth,
+  getAllDealers
+);
+
+
 export default autoShopDealsRouter;

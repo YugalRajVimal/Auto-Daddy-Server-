@@ -820,8 +820,7 @@ adminRouter.post(
   (req, res) => adminController.sendCustomNotificationToUser(req, res)
 );
 
-// ─── Invite Help ──────────────────────────────────────────────────────────────
-adminRouter.get("/invite-help", (req, res) => adminController.getInviteHelpToAdmin(req, res));
+
 
 //New
 //New
@@ -860,11 +859,36 @@ adminRouter.use("/accounts", accountsRouter);
 
 adminRouter.use("/domains", domainRouter);
 
+// Route to fetch the audioBlob for a specific InviteHelp document by its ID
+adminRouter.get(
+  "/invite-help/audio/:id",
+  async (req, res) => {
+    await adminController.getInviteHelpAudioBlob(req, res);
+  }
+);
+
 adminRouter.patch(
-  "/invite-help/:id/status",
+  "/invite-help/status/:id/",
   jwtAuth,
   async (req, res) => {
     await adminController.updateInviteHelpStatus(req, res);
+  }
+);
+
+// ─── Invite Help ──────────────────────────────────────────────────────────────
+adminRouter.get("/invite-help", (req, res) => adminController.getInviteHelpToAdmin(req, res));
+
+
+
+
+
+
+// Route to get the profile details for a given user ID
+adminRouter.get(
+  "/profile",
+  jwtAuth,
+  async (req, res) => {
+    await adminController.getProfile(req, res);
   }
 );
 
