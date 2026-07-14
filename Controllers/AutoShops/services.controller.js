@@ -49,26 +49,26 @@ import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fil
   export const getMyServices = async (req, res) => {
     try {
       const userId = req.user.id;
-  
+
       const user = await User.findById(userId).select("businessProfile");
       if (!user || !user.businessProfile) {
         return res
           .status(404)
           .json({ success: false, message: "Business profile not found" });
       }
-  
+
       const business = await BusinessProfileModel.findById(user.businessProfile)
         .populate({
           path: "myServices.service",
           select: "name shopType status odoOutRequired"
         });
-  
+
       if (!business) {
         return res
           .status(404)
           .json({ success: false, message: "Business profile not found" });
       }
-  
+
       const services = (business.myServices || []).map(ms => {
         if (ms && ms.service) {
           return {
@@ -83,14 +83,16 @@ import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fil
               desc: sub.desc,
               price: sub.price,
               quantity: sub.quantity, // added quantity
-              tax: sub.tax // added tax
+              tax: sub.tax, // added tax
+              model: sub.model, // add model property in subServices
+              make: sub.make   // add make property in subServices
             })) : []
           };
         }
-   
+
         return null;
       }).filter(Boolean);
-  
+
       return res.status(200).json({
         success: true,
         data: services
