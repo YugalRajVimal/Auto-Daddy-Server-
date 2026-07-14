@@ -6,13 +6,13 @@ class DealerController {
   /**
    * Add a new dealer, with optional dealerImage upload
    * POST /admin/dealer
-   * Body: { name, email, phone, dealership, city, websiteUrl?, status? }
+   * Body: { name, email, phone, dealership, city, address?, websiteUrl?, status? }
    * File: dealerImage (optional image upload via multipart/form-data)
    */
   async addDealer(req, res) {
     let imagePath = null;
     try {
-      const { name, email, phone, dealership, city, websiteUrl, status } = req.body;
+      const { name, email, phone, dealership, city, address, websiteUrl, status } = req.body;
 
       if (!name || !email || !phone || !dealership || !city) {
         if (req.files?.dealerImage?.[0]) deleteUploadedFile(req.files.dealerImage[0]);
@@ -38,6 +38,7 @@ class DealerController {
         phone,
         dealership,
         city,
+        address: address || undefined,
         websiteUrl: websiteUrl || undefined,
         image: imagePath || null,
         status: status || "Active"
@@ -64,10 +65,10 @@ class DealerController {
     let imagePath = null;
     try {
       const { id } = req.params;
-      const { name, email, phone, dealership, city, websiteUrl, status, listings, leads } = req.body;
+      const { name, email, phone, dealership, city, address, websiteUrl, status, listings, leads } = req.body;
 
       const hasTextUpdate = name || email || phone || dealership || city ||
-        websiteUrl || status || listings !== undefined || leads !== undefined;
+        address || websiteUrl || status || listings !== undefined || leads !== undefined;
 
       if (!hasTextUpdate && !req.files?.dealerImage) {
         if (req.files?.dealerImage?.[0]) deleteUploadedFile(req.files.dealerImage[0]);
@@ -80,6 +81,7 @@ class DealerController {
       if (phone) updateFields.phone = phone;
       if (dealership) updateFields.dealership = dealership;
       if (city) updateFields.city = city;
+      if (address !== undefined) updateFields.address = address;
       if (websiteUrl) updateFields.websiteUrl = websiteUrl;
       if (status) updateFields.status = status;
       if (listings !== undefined) updateFields.listings = listings;

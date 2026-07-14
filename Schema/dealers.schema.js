@@ -28,6 +28,11 @@ const dealerSchema = new mongoose.Schema({
     required: true,
     trim: true
   },
+  address: {
+    // Optional street address for the dealer/dealership
+    type: String,
+    trim: true
+  },
   websiteUrl: {
     type: String,
     trim: true
