@@ -866,6 +866,8 @@ export const getJobCardPageDetails = async (req, res) => {
           price: sub.price,
           quantity: sub.quantity,
           tax: sub.tax,
+          make:sub.make,
+          model:sub.model,
           odoOutRequired: parent?.odoOutRequired || false,
         });
       });

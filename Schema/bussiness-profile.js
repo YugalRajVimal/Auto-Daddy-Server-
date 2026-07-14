@@ -358,7 +358,10 @@ const selectedSubServiceSchema = new Schema({
   desc: { type: String },
   price: { type: Number },
   quantity: { type: Number, default: 1 },
-  tax: { type: Number, default: 0 }
+  tax: { type: Number, default: 0 },
+  // ADDED FIELDS for model and make
+  model: { type: String }, // model of the subservice, e.g. car model
+  make: { type: String }   // make of the subservice, e.g. car manufacturer/brand
 }, { _id: false });
 
 // MyService Schema
@@ -383,26 +386,6 @@ const notificationSchema = new Schema({
 }, { _id: false });
 
 // --- Subscription Schema ---
-// const subscriptionSchema = new Schema({
-//   days: { type: Number, required: true },
-//   amount: { type: Number, required: true },
-//   subTotal: { type: Number, required: true },
-//   hst: { type: Number, required: true },
-//   hstAmount: { type: Number, required: true },
-//   total: { type: Number, required: true },
-//   purchasedOn: { type: Date, default: Date.now },
-//   invoiceNo: { type: String, required: true },
-//   paymentStatus: { type: String, enum: ["Paid", "Pending", "Failed"], default: "Paid" },
-//   paymentMethod: { type: String },
-//   referenceId: { type: String },
-//   remarks: { type: String },
-//   cashfreeOrderToken: { type: String },
-//   cashfreePaymentSessionId: { type: String },
-//   cashfreeOrderId: { type: String },
-//   cashfreeStatus: { type: String },
-//   cashfreePayload: { type: Schema.Types.Mixed },
-// }, { _id: false, timestamps: false });
-
 const subscriptionSchema = new Schema({
   days: { type: Number, required: true },
   amount: { type: Number, required: true },
@@ -441,9 +424,6 @@ const perDayTimingSchema = new Schema({
 }, { _id: false });
 
 // --- Special/Override Day Timing Schema ---
-// A one-off override for a SPECIFIC calendar date (e.g. closed for a
-// holiday, or shortened hours for a single day) — takes priority over
-// perDayOpenHours for that date only, without touching the weekly default.
 const specialDayTimingSchema = new Schema({
   date: { type: Date, required: true }, // stored normalized to midnight UTC — see normalizeToMidnight() in the controller
   open: { type: String },   // ignored if isClosed: true
@@ -538,7 +518,7 @@ const businessProfileSchema = new Schema({
 
   websiteTemplateId: { type: Types.ObjectId, ref: 'WebsiteTemplate', default: null },
   domainName: { type: String, default: null },
-  domainDetails: [domainDetailsSchema], // <-- Added this line
+  domainDetails: [domainDetailsSchema],
 
   subscriptions: [subscriptionSchema],
 

@@ -306,7 +306,7 @@ import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fil
 //       });
 //     }
 //   };
-   
+
 export const addSubServices = async (req, res) => {
   try {
     const { serviceId, subServices } = req.body;
@@ -378,6 +378,8 @@ export const addSubServices = async (req, res) => {
           price: sub.price,
           quantity: sub.quantity || 1,
           tax: sub.tax || 0,
+          model: sub.model || null, // add model
+          make: sub.make || null,   // add make
         });
       } else {
         console.log("[addSubServices] SubService without name skipped:", sub);
@@ -413,88 +415,87 @@ export const addSubServices = async (req, res) => {
   }
 };
 
-  /**
-   * Edit a subService for a given myService entry
-   * Expects: req.body = {
-   *   serviceId: String,
-   *   subServiceIndex: Number,
-   *   update: { name, desc, price, quantity, tax }
-   * }
-   */
-  export const editSubService = async (req, res) => {
-    try {
-      const { serviceId, subServiceIndex, update } = req.body;
-   
-      if (
-        !serviceId ||
-        typeof subServiceIndex !== "number" ||
-        !update ||
-        Object.keys(update).length === 0
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "serviceId, subServiceIndex, and update object are required",
-        });
-      }
-   
-      const user = await User.findById(req.user.id).select("businessProfile");
-      if (!user || !user.businessProfile) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Business profile not found" });
-      }
-   
-      const business = await BusinessProfileModel.findById(user.businessProfile);
-      if (!business) {
-        return res.status(404).json({ success: false, message: "Business not found" });
-      }
-   
-      const myService = business.myServices.find(
-        (ms) => ms.service.toString() === serviceId
-      );
-      if (!myService) {
-        return res
-          .status(404)
-          .json({ success: false, message: "Service not found in your services" });
-      }
-   
-      if (subServiceIndex < 0 || subServiceIndex >= myService.subServices.length) {
-        return res.status(404).json({ success: false, message: "SubService not found" });
-      }
+/**
+ * Edit a subService for a given myService entry
+ * Expects: req.body = {
+ *   serviceId: String,
+ *   subServiceIndex: Number,
+ *   update: { name, desc, price, quantity, tax, model, make }
+ * }
+ */
+export const editSubService = async (req, res) => {
+  try {
+    const { serviceId, subServiceIndex, update } = req.body;
 
-      // If updating 'name', check for duplicates
-      if (
-        update.name &&
-        (
-          myService.subServices.findIndex((s, idx) =>
-            idx !== subServiceIndex &&
-            s.name &&
-            s.name.trim().toLowerCase() === update.name.trim().toLowerCase()
-          ) !== -1
-        )
-      ) {
-        return res.status(409).json({
-          success: false,
-          message: `A subService with name '${update.name}' already exists under this service.`,
-        });
-      }
-   
-      const subService = myService.subServices[subServiceIndex];
-      ["name", "desc", "price", "quantity", "tax"].forEach((field) => {
-        if (update[field] !== undefined) subService[field] = update[field];
-      });
-   
-      await business.save();
-      return res.status(200).json({ success: true, message: "SubService updated", data: subService });
-    } catch (error) {
-      return res.status(500).json({
+    if (
+      !serviceId ||
+      typeof subServiceIndex !== "number" ||
+      !update ||
+      Object.keys(update).length === 0
+    ) {
+      return res.status(400).json({
         success: false,
-        message: "Failed to update subService",
-        error: error.message,
+        message: "serviceId, subServiceIndex, and update object are required",
       });
     }
-  };
-   
+
+    const user = await User.findById(req.user.id).select("businessProfile");
+    if (!user || !user.businessProfile) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Business profile not found" });
+    }
+
+    const business = await BusinessProfileModel.findById(user.businessProfile);
+    if (!business) {
+      return res.status(404).json({ success: false, message: "Business not found" });
+    }
+
+    const myService = business.myServices.find(
+      (ms) => ms.service.toString() === serviceId
+    );
+    if (!myService) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Service not found in your services" });
+    }
+
+    if (subServiceIndex < 0 || subServiceIndex >= myService.subServices.length) {
+      return res.status(404).json({ success: false, message: "SubService not found" });
+    }
+
+    // If updating 'name', check for duplicates
+    if (
+      update.name &&
+      (
+        myService.subServices.findIndex((s, idx) =>
+          idx !== subServiceIndex &&
+          s.name &&
+          s.name.trim().toLowerCase() === update.name.trim().toLowerCase()
+        ) !== -1
+      )
+    ) {
+      return res.status(409).json({
+        success: false,
+        message: `A subService with name '${update.name}' already exists under this service.`,
+      });
+    }
+
+    const subService = myService.subServices[subServiceIndex];
+    ["name", "desc", "price", "quantity", "tax", "model", "make"].forEach((field) => {
+      if (update[field] !== undefined) subService[field] = update[field];
+    });
+
+    await business.save();
+    return res.status(200).json({ success: true, message: "SubService updated", data: subService });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update subService",
+      error: error.message,
+    });
+  }
+};
   /**
    * Delete a subService from a given myService entry
    * Expects: req.body = { serviceId: String, subServiceIndex: Number }
