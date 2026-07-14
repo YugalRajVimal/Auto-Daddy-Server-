@@ -1,4 +1,4 @@
-import InvoicePrefix, { getInvoicePrefixForYear, setInvoicePrefix } from "../../Schema/Invoiceprefix.schema.js";
+import InvoicePrefix, { getInvoicePrefixForYear, setInvoicePrefix } from "../../Schema/invoiceprefix.schema.js";
 import { User } from "../../Schema/user.schema.js";
 
 /**
