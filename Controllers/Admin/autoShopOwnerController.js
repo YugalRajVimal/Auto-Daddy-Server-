@@ -197,13 +197,18 @@ class AutoShopOwnerController {
    */
   createAutoShopOwner = async (req, res) => {
     try {
-      const { name, email, phone, countryCode, pincode, address, shopType } = req.body;
+      let { name, email, phone, countryCode, pincode, address, shopType } = req.body;
+
+      // If countryCode not present, use +1 by default
+      if (!countryCode) {
+        countryCode = "+1";
+      }
 
       // ── Required field check ─────────────────────────────────────────────
-      if (!name || !email || !phone || !countryCode || !pincode || !shopType) {
+      if (!name || !email || !phone || !pincode || !shopType) {
         return res.status(400).json({
           success: false,
-          message: "Fields name, email, phone, countryCode, pincode, and shopType are required.",
+          message: "Fields name, email, phone, pincode, and shopType are required.",
         });
       }
 
