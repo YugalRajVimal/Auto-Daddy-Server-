@@ -285,58 +285,110 @@ export const updateBusinessProfile = async (req, res) => {
       shopTypes, // array, JSON string, or comma-separated string
     } = req.body;
 
-    const user = await User.findById(userId).select("businessProfile shopType");
-    if (!user || !user.businessProfile) {
+    let user = await User.findById(userId).select("businessProfile shopType");
+    if (!user) {
       if (req.file) deleteUploadedFile(req.file);
       return res
         .status(404)
-        .json({ success: false, message: "Business profile not found" });
+        .json({ success: false, message: "User not found" });
     }
 
-    const businessId = user.businessProfile;
+    let business;
+    let isNewBusinessProfile = false;
 
-    // Duplicate check on phone / email against OTHER business profiles only
-    if (businessPhone || businessEmail) {
-      const dupQuery = { _id: { $ne: businessId }, $or: [] };
+    // If user doesn't have a businessProfile, create one
+    if (!user.businessProfile) {
+      // Validate required fields for creating a new business profile
+      if (!businessName || !businessPhone || !city) {
+        if (req.file) deleteUploadedFile(req.file);
+        return res.status(400).json({
+          success: false,
+          message: "Missing required fields to create a new business profile (businessName, businessPhone, city).",
+        });
+      }
+      // Duplicate check on phone/email if present
+      const dupQuery = { $or: [] };
       if (businessPhone) dupQuery.$or.push({ businessPhone });
       if (businessEmail) dupQuery.$or.push({ businessEmail });
 
-      const duplicate = await BusinessProfileModel.findOne(dupQuery);
-      if (duplicate) {
-        if (req.file) deleteUploadedFile(req.file);
-        const field =
-          businessPhone && duplicate.businessPhone === businessPhone
-            ? "Phone number"
-            : "Email";
-        return res.status(409).json({
-          success: false,
-          message: `${field} is already in use by another business profile`,
-        });
+      if (dupQuery.$or.length > 0) {
+        const duplicate = await BusinessProfileModel.findOne(dupQuery);
+        if (duplicate) {
+          if (req.file) deleteUploadedFile(req.file);
+          const field =
+            businessPhone && duplicate.businessPhone === businessPhone
+              ? "Phone number"
+              : "Email";
+          return res.status(409).json({
+            success: false,
+            message: `${field} is already in use by another business profile`,
+          });
+        }
       }
+
+      business = new BusinessProfileModel({
+        businessName,
+        businessPhone,
+        city,
+        businessAddress,
+        pincode,
+        businessHSTNumber,
+        gst,
+        businessEmail,
+        myServices: [],
+        businessLogo: req.file ? req.file.path : undefined,
+      });
+
+      await business.save();
+      user.businessProfile = business._id;
+      isNewBusinessProfile = true;
+    } else {
+      // Existing business profile logic
+      const businessId = user.businessProfile;
+
+      // Duplicate check on phone / email against OTHER business profiles only
+      if (businessPhone || businessEmail) {
+        const dupQuery = { _id: { $ne: businessId }, $or: [] };
+        if (businessPhone) dupQuery.$or.push({ businessPhone });
+        if (businessEmail) dupQuery.$or.push({ businessEmail });
+
+        const duplicate = await BusinessProfileModel.findOne(dupQuery);
+        if (duplicate) {
+          if (req.file) deleteUploadedFile(req.file);
+          const field =
+            businessPhone && duplicate.businessPhone === businessPhone
+              ? "Phone number"
+              : "Email";
+          return res.status(409).json({
+            success: false,
+            message: `${field} is already in use by another business profile`,
+          });
+        }
+      }
+
+      business = await BusinessProfileModel.findById(businessId);
+      if (!business) {
+        if (req.file) deleteUploadedFile(req.file);
+        return res
+          .status(404)
+          .json({ success: false, message: "Business profile not found" });
+      }
+
+      // Only set fields if they're present (don't overwrite with undefined)
+      if (businessName !== undefined) business.businessName = businessName;
+      if (businessPhone !== undefined) business.businessPhone = businessPhone;
+      if (city !== undefined) business.city = city;
+      if (businessAddress !== undefined) business.businessAddress = businessAddress;
+      if (pincode !== undefined) business.pincode = pincode;
+      if (businessHSTNumber !== undefined) business.businessHSTNumber = businessHSTNumber;
+      if (gst !== undefined) business.gst = gst;
+      if (businessEmail !== undefined) business.businessEmail = businessEmail;
     }
-
-    const business = await BusinessProfileModel.findById(businessId);
-    if (!business) {
-      if (req.file) deleteUploadedFile(req.file);
-      return res
-        .status(404)
-        .json({ success: false, message: "Business profile not found" });
-    }
-
-    const oldLogo = business.businessLogo;
-
-    if (businessName !== undefined) business.businessName = businessName;
-    if (businessPhone !== undefined) business.businessPhone = businessPhone;
-    if (city !== undefined) business.city = city;
-    if (businessAddress !== undefined) business.businessAddress = businessAddress;
-    if (pincode !== undefined) business.pincode = pincode;
-    if (businessHSTNumber !== undefined) business.businessHSTNumber = businessHSTNumber;
-    if (gst !== undefined) business.gst = gst;
-    if (businessEmail !== undefined) business.businessEmail = businessEmail;
 
     let parsedShopTypes;
     let removedServicesCount = 0;
     let removedServiceNames = [];
+    const oldLogo = business.businessLogo;
 
     if (shopTypes !== undefined) {
       parsedShopTypes = shopTypes;
@@ -366,60 +418,63 @@ export const updateBusinessProfile = async (req, res) => {
         });
       }
 
-      // ---- NEW: prune myServices whose service.shopType is no longer offered ----
-      if (business.myServices && business.myServices.length > 0) {
-        const serviceIds = business.myServices.map((ms) => ms.service);
-        const servicesDocs = await servicesSchema
-          .find({ _id: { $in: serviceIds } })
-          .select("name shopType");
+      if (!isNewBusinessProfile) {
+        // ---- prune myServices whose service.shopType is no longer offered ----
+        if (business.myServices && business.myServices.length > 0) {
+          const serviceIds = business.myServices.map((ms) => ms.service);
+          const servicesDocs = await servicesSchema
+            .find({ _id: { $in: serviceIds } })
+            .select("name shopType");
 
-        const shopTypeByServiceId = new Map(
-          servicesDocs.map((s) => [s._id.toString(), s.shopType])
-        );
+          const shopTypeByServiceId = new Map(
+            servicesDocs.map((s) => [s._id.toString(), s.shopType])
+          );
 
-        const keptServices = [];
-        const removedServices = [];
+          const keptServices = [];
+          const removedServices = [];
 
-        for (const ms of business.myServices) {
-          const svcShopType = shopTypeByServiceId.get(ms.service.toString());
-          // Keep only if the service's shopType is still in the new shopTypes list.
-          // If the service doc itself is missing/deleted, drop it too (defensive).
-          if (svcShopType && parsedShopTypes.includes(svcShopType)) {
-            keptServices.push(ms);
-          } else {
-            removedServices.push(ms);
+          for (const ms of business.myServices) {
+            const svcShopType = shopTypeByServiceId.get(ms.service.toString());
+            // Keep only if the service's shopType is still in the new shopTypes list.
+            // If the service doc itself is missing/deleted, drop it too (defensive).
+            if (svcShopType && parsedShopTypes.includes(svcShopType)) {
+              keptServices.push(ms);
+            } else {
+              removedServices.push(ms);
+            }
           }
-        }
 
-        if (removedServices.length > 0) {
-          business.myServices = keptServices;
-          removedServicesCount = removedServices.length;
-          removedServiceNames = removedServices.map((ms) => {
-            const doc = servicesDocs.find(
-              (s) => s._id.toString() === ms.service.toString()
-            );
-            return doc ? doc.name : ms.service.toString();
-          });
+          if (removedServices.length > 0) {
+            business.myServices = keptServices;
+            removedServicesCount = removedServices.length;
+            removedServiceNames = removedServices.map((ms) => {
+              const doc = servicesDocs.find(
+                (s) => s._id.toString() === ms.service.toString()
+              );
+              return doc ? doc.name : ms.service.toString();
+            });
+          }
         }
       }
       // -----------------------------------------------------------------------
-
       user.shopType = parsedShopTypes;
     }
 
     if (req.file) business.businessLogo = req.file.path;
 
     await business.save();
-    if (shopTypes !== undefined) await user.save();
+    if (typeof user.save === "function") await user.save();
 
-    if (req.file && oldLogo) deleteUploadedFile(oldLogo);
+    if (req.file && oldLogo && oldLogo !== business.businessLogo) deleteUploadedFile(oldLogo);
 
     return res.status(200).json({
       success: true,
       message:
         removedServicesCount > 0
           ? `Business profile updated successfully. ${removedServicesCount} service(s) removed as their shopType is no longer offered: ${removedServiceNames.join(", ")}`
-          : "Business profile updated successfully",
+          : isNewBusinessProfile
+            ? "Business profile created and saved successfully"
+            : "Business profile updated successfully",
       data: {
         businessName: business.businessName,
         businessPhone: business.businessPhone,

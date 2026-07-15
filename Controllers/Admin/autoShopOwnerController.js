@@ -36,7 +36,8 @@ class AutoShopOwnerController {
             myCustomers: 1,
             createdAt: 1,
             status: 1,
-            shopType: 1
+            shopType: 1,
+            city:1
           }
         )
           .populate({
@@ -197,7 +198,9 @@ class AutoShopOwnerController {
    */
   createAutoShopOwner = async (req, res) => {
     try {
-      let { name, email, phone, countryCode, pincode, address, shopType } = req.body;
+      let { name, email, phone, countryCode, pincode, address, shopType, city } = req.body;
+
+     
 
       // If countryCode not present, use +1 by default
       if (!countryCode) {
@@ -205,10 +208,10 @@ class AutoShopOwnerController {
       }
 
       // ── Required field check ─────────────────────────────────────────────
-      if (!name || !email || !phone || !pincode || !shopType) {
+      if (!name || !email || !phone || !pincode || !shopType || !city) {
         return res.status(400).json({
           success: false,
-          message: "Fields name, email, phone, pincode, and shopType are required.",
+          message: "Fields name, email, phone, pincode, shopType, and city are required.",
         });
       }
 
@@ -259,6 +262,7 @@ class AutoShopOwnerController {
         countryCode,
         pincode: pincode.trim(),
         address: address ? String(address).trim().slice(0, 100) : "",
+        city: city ? String(city).trim() : "",
         role: "autoshopowner",
         shopType,
         isProfileComplete: false,
@@ -279,6 +283,7 @@ class AutoShopOwnerController {
           countryCode: newOwner.countryCode,
           pincode: newOwner.pincode,
           address: newOwner.address,
+          city: newOwner.city,
           role: newOwner.role,
           shopType: newOwner.shopType,
           status: newOwner.status,
@@ -328,7 +333,8 @@ class AutoShopOwnerController {
       const updateFields = {};
 
       // ── Scalar fields ────────────────────────────────────────────────────
-      const plainFields = ["name", "phone", "countryCode", "pincode", "address", "shopType"];
+      // Make shopType an array of multiple shopTypes
+      const plainFields = ["name", "phone", "countryCode", "pincode", "address", "city"];
       for (const field of plainFields) {
         if (req.body[field] !== undefined && req.body[field] !== null) {
           let val = String(req.body[field]).trim();
@@ -337,6 +343,23 @@ class AutoShopOwnerController {
           }
           updateFields[field] = val;
         }
+      }
+
+      // Process shopType as array
+      if (req.body.shopType !== undefined && req.body.shopType !== null) {
+        let shopTypeArray = req.body.shopType;
+        if (!Array.isArray(shopTypeArray)) {
+          // Try to coerce to array if it's not already
+          if (typeof shopTypeArray === "string") {
+            // Comma separated, or single value
+            shopTypeArray = shopTypeArray.split(",").map(s => s.trim()).filter(Boolean);
+          } else {
+            shopTypeArray = [String(shopTypeArray).trim()];
+          }
+        }
+        // Filter blanks, trim, dedupe
+        shopTypeArray = [...new Set(shopTypeArray.map(s => String(s).trim()).filter(Boolean))];
+        updateFields.shopType = shopTypeArray;
       }
 
       // ── Validate countryCode if changed ──────────────────────────────────
@@ -353,10 +376,13 @@ class AutoShopOwnerController {
       // ── Validate shopType if changed ─────────────────────────────────────
       if (updateFields.shopType) {
         const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
-        if (!allowedShopTypes.includes(updateFields.shopType)) {
+        const invalidTypes = updateFields.shopType.filter(
+          (type) => !allowedShopTypes.includes(type)
+        );
+        if (invalidTypes.length > 0) {
           return res.status(400).json({
             success: false,
-            message: `Invalid shopType. Allowed: ${allowedShopTypes.join(", ")}.`,
+            message: `Invalid shopType(s): ${invalidTypes.join(", ")}. Allowed: ${allowedShopTypes.join(", ")}.`,
           });
         }
       }
@@ -392,7 +418,7 @@ class AutoShopOwnerController {
         { $set: updateFields },
         { new: true }
       ).select(
-        "name email phone countryCode pincode address shopType role status " +
+        "name email phone countryCode pincode address city shopType role status " +
         "isProfileComplete isBusinessProfileCompleted isDisabled createdAt updatedAt"
       );
 
