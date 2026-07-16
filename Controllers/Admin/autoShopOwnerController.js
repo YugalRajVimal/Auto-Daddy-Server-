@@ -200,12 +200,12 @@ class AutoShopOwnerController {
     try {
       let { name, email, phone, countryCode, pincode, address, shopType, city } = req.body;
 
-     
-
       // If countryCode not present, use +1 by default
       if (!countryCode) {
         countryCode = "+1";
       }
+
+      console.log(shopType);
 
       // ── Required field check ─────────────────────────────────────────────
       if (!name || !email || !phone || !pincode || !shopType || !city) {
@@ -225,13 +225,18 @@ class AutoShopOwnerController {
       }
 
       // ── ShopType code whitelist ──────────────────────────────────────────
-      const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
-      if (!allowedShopTypes.includes(shopType)) {
+      const allowedShopTypes = ["autoShop", "carWash", "tyreShop", "towTruck"];
+      if (
+        !Array.isArray(shopType) ||
+        shopType.length === 0 ||
+        !shopType.every((type) => allowedShopTypes.includes(type))
+      ) {
         return res.status(400).json({
           success: false,
-          message: `Invalid shopType. Allowed values: ${allowedShopTypes.join(", ")}.`,
+          message: `Invalid shopType. Must be a non-empty array with only allowed values: ${allowedShopTypes.join(", ")}.`,
         });
       }
+ 
 
       // ── Duplicate email check ────────────────────────────────────────────
       const existingEmail = await User.findOne({
@@ -254,7 +259,16 @@ class AutoShopOwnerController {
         });
       }
 
-      // ── Create ───────────────────────────────────────────────────────────
+      // ── Create BusinessProfile ───────────────────────────────────────────
+      // We'll use the name, businessAddress, city, pincode, businessPhone = phone, businessEmail = email
+      // Other values can be left blank or default per schema
+
+      const businessProfileData = {
+        businessPhone: String(phone).trim(),
+      };
+      const newBusinessProfile = await BusinessProfileModel.create(businessProfileData);
+
+      // ── Create Auto Shop Owner (User) ────────────────────────────────────
       const newOwner = await User.create({
         name: name.trim(),
         email: email.trim().toLowerCase(),
@@ -270,7 +284,13 @@ class AutoShopOwnerController {
         otpAttempts: 0,
         status: "active",
         isDisabled: false,
+        businessProfile: newBusinessProfile._id,
       });
+
+      // Optionally, you might want to do the reverse as well (set the owner's ID on the BusinessProfile)
+      // If your schema or workflow requires it, uncomment below:
+      // newBusinessProfile.owner = newOwner._id;
+      // await newBusinessProfile.save();
 
       return res.status(201).json({
         success: true,
@@ -289,6 +309,7 @@ class AutoShopOwnerController {
           status: newOwner.status,
           isProfileComplete: newOwner.isProfileComplete,
           isBusinessProfileCompleted: newOwner.isBusinessProfileCompleted,
+          businessProfile: newBusinessProfile, // include business profile
           createdAt: newOwner.createdAt,
         },
       });

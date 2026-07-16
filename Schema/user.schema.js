@@ -150,7 +150,7 @@ const UserSchema = new mongoose.Schema(
     //Profile
     name: { type: String },
     email: { type: String, sparse: true },
-    countryCode: { type: String },
+    countryCode: { type: String, default: "+1" },
     phone: { type: String, default: "" },
     pincode: { type: String, default: null },
     address: { type: String, default: null },

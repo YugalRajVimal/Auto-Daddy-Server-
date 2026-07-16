@@ -485,10 +485,10 @@ const domainDetailsSchema = new Schema({
 
 // --- Business Profile Schema ---
 const businessProfileSchema = new Schema({
-  businessName: { type: String, required: true },
-  businessAddress: { type: String, required: true },
+  businessName: { type: String},
+  businessAddress: { type: String},
   city: { type: String, default: null },
-  pincode: { type: String, required: true },
+  pincode: { type: String},
   businessMapLocation: {
     type: {
       lat: { type: Number },
@@ -497,7 +497,7 @@ const businessProfileSchema = new Schema({
     required: false
   },
   businessPhone: { type: String, required: true },
-  businessEmail: { type: String, required: true },
+  businessEmail: { type: String},
   businessHSTNumber: { type: String },
   gst: { type: Number },
 

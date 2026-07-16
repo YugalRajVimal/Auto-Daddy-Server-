@@ -41,6 +41,10 @@ const leadSchema = new mongoose.Schema(
       type: String,
       trim: true,
     },
+    image: {
+      type: String,
+      default: null,
+    },
     status: {
       type: String,
       trim: true,

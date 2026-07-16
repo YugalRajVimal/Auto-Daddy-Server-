@@ -233,7 +233,12 @@ onboardCarOwner = async (req, res) => {
   };
 
   try {
-    const { name, email, phone, countryCode, pincode, role, address, vehicles } = req.body;
+    // add city to destructure
+    const { name, email, phone, countryCode, pincode, address, city, vehicles } = req.body;
+
+    console.log(req.body);
+
+    const role = 'carowner';
 
     let vehiclesArray = vehicles;
     if (typeof vehicles === "string") {
@@ -242,24 +247,25 @@ onboardCarOwner = async (req, res) => {
     }
 
     // ── Validation ──────────────────────────────────────────────────────────
-    if (!name || !email || !phone || !countryCode || !pincode || !role || !address) {
+    // Optionally require city (uncomment line if city is required)
+    if (!name || !phone   || !role || !address /*|| !city*/) {
       await cleanupUploads();
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
-        message: "All owner fields (name, email, phone, countryCode, pincode, role, address) are required.",
+        message: "All owner fields (name, phone,  role, address) are required.",
       });
     }
 
-    const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
-    if (!allowedCountryCodes.includes(countryCode)) {
-      await cleanupUploads();
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        message: "Invalid country code. Allowed: +1, +61, +44, +91.",
-      });
-    }
+    // const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
+    // if (!allowedCountryCodes.includes(countryCode)) {
+    //   await cleanupUploads();
+    //   await session.abortTransaction();
+    //   session.endSession();
+    //   return res.status(400).json({
+    //     message: "Invalid country code. Allowed: +1, +61, +44, +91.",
+    //   });
+    // }
 
     if (role !== "carowner") {
       await cleanupUploads();
@@ -310,6 +316,7 @@ onboardCarOwner = async (req, res) => {
       name, email, phone, countryCode, pincode, role, address,
       isProfileComplete: true, otpAttempts: 0,
       onboardedBy,
+      ...(city ? { city } : {}), // Include city if present
       ...(profilePhotoPath ? { profilePhoto: profilePhotoPath } : {}),
     };
 
@@ -433,6 +440,7 @@ onboardCarOwner = async (req, res) => {
         pincode:           newCarOwner.pincode,
         role:              newCarOwner.role,
         address:           newCarOwner.address,
+        city:              newCarOwner.city, // add city to response
         isProfileComplete: newCarOwner.isProfileComplete,
         status:            newCarOwner.status,
         onboardedBy:       newCarOwner.onboardedBy,

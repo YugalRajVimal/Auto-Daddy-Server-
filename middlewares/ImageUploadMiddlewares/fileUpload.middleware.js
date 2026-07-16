@@ -304,6 +304,9 @@ const storage = multer.diskStorage({
     else if (file.fieldname === "dealImage") {
       uploadPath = "./Uploads/Deals";
     }
+    else if (file.fieldname === "leadImage") {
+      uploadPath = "./Uploads/Leads";
+    }
 
     console.log("[MULTER] Storing file:", {
       destination: uploadPath,
@@ -350,7 +353,8 @@ const fileFilter = (req, file, cb) => {
     "dealerImage",
     "expenseImage",
     "incomeImage",
-    "dealImage", // FIX: was missing, so no MIME-type check applied
+    "dealImage", 
+    "leadImage",
   ];
 
   const isIndexedCarImage = /^carImage_\d+$/.test(file.fieldname);
