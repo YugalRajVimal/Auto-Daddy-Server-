@@ -92,10 +92,15 @@ class SubAdminController {
    */
   async create(req, res) {
     try {
-      const { name, email, phone, password, permissions } = req.body;
+      let { name, email, phone, password, permissions } = req.body;
 
-      if (!name || !email || !password)
-        return res.status(400).json({ success: false, message: "name, email, and password are required." });
+      if (!name || !email)
+        return res.status(400).json({ success: false, message: "name and email are required." });
+
+      // If password not provided, use default
+      if (!password) {
+        password = "Admin123";
+      }
 
       const exists = await SubAdmin.findOne({ email: email.toLowerCase() });
       if (exists)

@@ -491,25 +491,25 @@ editCustomer = async (req, res) => {
       catch (e) { vehiclesFromBody = undefined; }
     }
 
-
     if (!carOwnerId) {
       await cleanupUploads();
       return res.status(400).json({ message: "carOwnerId is required." });
     }
 
-
-
     // ── Fetch customer ───────────────────────────────────────────────────────
     // Use lean: false so we can mutate documents array below
-    const customer = await User.findOne({ _id: carOwnerId, role: "carowner" });
+    const customer = await User.findOne({ _id: carOwnerId, role: "carowner" }).populate("myVehicles");
     if (!customer) {
       await cleanupUploads();
       return res.status(404).json({ message: "Car owner not found." });
     }
 
-    const existingVehicleIds = Array.isArray(customer.myVehicles)
-      ? customer.myVehicles.map(id => id.toString())
-      : [];
+    const existingVehicleDocs = Array.isArray(customer.myVehicles) ? customer.myVehicles : [];
+    const existingVehicleIds = existingVehicleDocs.map(doc => doc._id.toString());
+    const existingLicenseMap = {}; // licensePlateNo -> Vehicle document
+    existingVehicleDocs.forEach(v => {
+      if (v.licensePlateNo) existingLicenseMap[v.licensePlateNo] = v;
+    });
 
     // ── Build user update fields ─────────────────────────────────────────────
     const allowedUserFields = [
@@ -530,82 +530,130 @@ editCustomer = async (req, res) => {
     }
 
     // ── Process vehicles ─────────────────────────────────────────────────────
-    let updatedVehicleObjectIds = [...existingVehicleIds]; // preserve existing
+    let updatedVehicleObjectIds = existingVehicleIds ? [...existingVehicleIds] : [];
+
+    // Helper: Compare only updatable fields between two vehicle objects
+    const vehicleFieldsToCompare = [
+      "licensePlateNo", "licensePlateFrontImagePath", "licensePlateBackImagePath",
+      "carOwnershipCertificate", "insuranceCertificate", "vinNo", "year",
+      "odometerReading", "disabled"
+    ];
+    const extraToCompare = [
+      { body: "vehicleName", db: "make.name" },
+      { body: "model", db: "make.model" }
+    ];
+    function fieldsAreEqual(a, b, vBody, vDb) {
+      for (const field of vehicleFieldsToCompare) {
+        if ((a[field] ?? null) !== (b[field] ?? null)) return false;
+      }
+      // vehicleName/model
+      for (const ext of extraToCompare) {
+        const [bodyVal, dbVal] =
+          ext.db === "make.name"
+            ? [vBody["vehicleName"], vDb.make?.name]
+            : [vBody["model"], vDb.make?.model];
+        if ((bodyVal ?? null) !== (dbVal ?? null)) return false;
+      }
+      // Compare carImages (by length and values, if present)
+      const aImgs = (a.carImages && Array.isArray(a.carImages)) ? a.carImages : [];
+      const bImgs = (b.carImages && Array.isArray(b.carImages)) ? b.carImages : [];
+      if (aImgs.length !== bImgs.length) return false;
+      for (let i = 0; i < aImgs.length; i++) {
+        if (aImgs[i] !== bImgs[i]) return false;
+      }
+      return true;
+    }
 
     if (Array.isArray(vehiclesFromBody)) {
       for (let i = 0; i < vehiclesFromBody.length; i++) {
         const v = vehiclesFromBody[i];
 
-        // ✅ carImage for this specific vehicle via carImage_0, carImage_1, etc.
+        // carImage for this specific vehicle via carImage_0, carImage_1, etc.
         const vehicleImagePath = req.files?.[`carImage_${i}`]?.[0]?.path || null;
 
-        // ── EDIT EXISTING VEHICLE ────────────────────────────────────────────
-        if (v.vId && mongoose.Types.ObjectId.isValid(v.vId)) {
-          const vehId = v.vId.toString();
-          if (!existingVehicleIds.includes(vehId)) {
-            await cleanupUploads();
-            return res.status(400).json({
-              message: `Invalid vehicle id (${vehId}) for this customer.`,
-            });
-          }
+        // Determine vehicle license plate (required for update logic)
+        const lic = v.licensePlateNo;
 
-          const allowedVehicleFields = [
-            "licensePlateNo", "licensePlateFrontImagePath", "licensePlateBackImagePath",
-            "carOwnershipCertificate", "insuranceCertificate", "vinNo", "year",
-            "odometerReading", "disabled",
-          ];
-          let vehicleUpdateFields = {};
-          for (const field of allowedVehicleFields) {
-            if (v[field] !== undefined) vehicleUpdateFields[field] = v[field];
-          }
-          if (v.vehicleName !== undefined) vehicleUpdateFields["make.name"] = v.vehicleName;
-          if (v.model !== undefined) vehicleUpdateFields["make.model"] = v.model;
+        // If license plate exists in DB for this owner, possible update
+        const existingVehicle = lic ? existingLicenseMap[lic] : null;
 
-          // Handle carImages (uploaded file takes priority, then body value)
-          if (vehicleImagePath) {
-            vehicleUpdateFields.carImages = [vehicleImagePath];
-          } else if (typeof v.carImages === "string") {
+        // Only allow changes for vehicles by license plate logic!
+        if (existingVehicle) {
+          // This is either an edit to the vehicle, or nothing needs to change
+          // Check if incoming fields differ from current db
+          const vehicleBodyObj = {
+            ...v,
+            carImages:
+              vehicleImagePath
+                ? [vehicleImagePath]
+                : (typeof v.carImages === "string"
+                    ? (() => { try { const arr = JSON.parse(v.carImages); return Array.isArray(arr) ? arr : []; } catch { return []; }})()
+                    : Array.isArray(v.carImages) ? v.carImages : [])
+          };
+          const vehicleDbObj = {
+            ...existingVehicle.toObject(),
+            carImages: existingVehicle.carImages || []
+          };
+          // Attach make.name, make.model into vehicleDbObj
+          if (existingVehicle.make && typeof existingVehicle.make === "object") {
+            vehicleDbObj["make.name"] = existingVehicle.make.name || null;
+            vehicleDbObj["make.model"] = existingVehicle.make.model || null;
+          }
+          // Compare. If changed, update it.
+          if (!fieldsAreEqual(vehicleBodyObj, vehicleDbObj, v, existingVehicle)) {
+            // Only store the fields that are updatable
+            const allowedVehicleFields = [
+              "licensePlateNo", "licensePlateFrontImagePath", "licensePlateBackImagePath",
+              "carOwnershipCertificate", "insuranceCertificate", "vinNo", "year",
+              "odometerReading", "disabled"
+            ];
+            let vehicleUpdateFields = {};
+            for (const field of allowedVehicleFields) {
+              if (v[field] !== undefined) vehicleUpdateFields[field] = v[field];
+            }
+            if (v.vehicleName !== undefined) vehicleUpdateFields["make.name"] = v.vehicleName;
+            if (v.model !== undefined) vehicleUpdateFields["make.model"] = v.model;
+
+            // carImages
+            if (vehicleImagePath) {
+              vehicleUpdateFields.carImages = [vehicleImagePath];
+            } else if (typeof v.carImages === "string") {
+              try {
+                const imgs = JSON.parse(v.carImages);
+                if (Array.isArray(imgs)) vehicleUpdateFields.carImages = imgs;
+              } catch (e) {}
+            } else if (Array.isArray(v.carImages)) {
+              vehicleUpdateFields.carImages = v.carImages;
+            }
+
             try {
-              const imgs = JSON.parse(v.carImages);
-              if (Array.isArray(imgs)) vehicleUpdateFields.carImages = imgs;
-            } catch (e) {}
-          } else if (Array.isArray(v.carImages)) {
-            vehicleUpdateFields.carImages = v.carImages;
-          }
-
-          try {
-            if (Object.keys(vehicleUpdateFields).length > 0) {
               await VehicleModel.findOneAndUpdate(
-                { _id: vehId },
+                { _id: existingVehicle._id },
                 { $set: vehicleUpdateFields },
                 { new: true }
               );
+            } catch (err) {
+              await cleanupUploads();
+              return res.status(500).json({ message: "Vehicle update failed." });
             }
-          } catch (err) {
-            await cleanupUploads();
-            return res.status(500).json({ message: "Vehicle update failed." });
-          }
 
-          // ✅ Update User.documents entry for this vehicleId
-          if (vehicleImagePath) {
-            const docEntry = customer.documents.find(
-              d => d.vehicleId?.toString() === vehId
-            );
-            if (docEntry) {
-              docEntry.carImage = vehicleImagePath; // update existing
-            } else {
-              customer.documents.push({ vehicleId: vehId, carImage: vehicleImagePath });
+            // Update User.documents entry for this vehicleId's carImage if uploaded
+            if (vehicleImagePath) {
+              const docEntry = customer.documents.find(d => d.vehicleId?.toString() === existingVehicle._id.toString());
+              if (docEntry) {
+                docEntry.carImage = vehicleImagePath;
+              } else {
+                customer.documents.push({ vehicleId: existingVehicle._id, carImage: vehicleImagePath });
+              }
             }
           }
-
-        }
-        // ── ADD NEW VEHICLE ──────────────────────────────────────────────────
-        else if (!v.vId) {
+          // No else: do nothing, same state
+        } else {
+          // license plate is new, add new vehicle
           const requiredFields = ["licensePlateNo", "vehicleName", "model", "year", "vinNo", "odometerReading"];
           const hasAllRequired = requiredFields.every(
             field => v[field] !== undefined && v[field] !== null && v[field] !== ""
           );
-
           if (hasAllRequired) {
             let newCarImages = [];
             if (vehicleImagePath) {
@@ -643,8 +691,7 @@ editCustomer = async (req, res) => {
               const newVehicleDoc = await VehicleModel.create(newVehicleData);
               if (newVehicleDoc?._id) {
                 updatedVehicleObjectIds.push(newVehicleDoc._id.toString());
-
-                // ✅ Add new entry in User.documents for new vehicle
+                // Add new entry in User.documents for new vehicle
                 const docEntry = {
                   vehicleId: newVehicleDoc._id,
                   ...(vehicleImagePath ? { carImage: vehicleImagePath } : {}),
@@ -660,6 +707,8 @@ editCustomer = async (req, res) => {
         }
       }
 
+      // Remove duplicate IDs (though logic above should prevent, cautious)
+      updatedVehicleObjectIds = [...new Set(updatedVehicleObjectIds)];
       updateFields.myVehicles = updatedVehicleObjectIds;
     }
 
@@ -668,7 +717,7 @@ editCustomer = async (req, res) => {
       return res.status(400).json({ message: "No update fields provided." });
     }
 
-    // ✅ Persist documents mutations + other fields
+    // Persist documents mutations + other fields
     updateFields.documents = customer.documents;
 
     let customerDoc;
