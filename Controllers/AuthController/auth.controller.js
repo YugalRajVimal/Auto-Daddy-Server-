@@ -895,6 +895,86 @@ class AuthController {
   }
 }
 
+/**
+ * POST /api/auth/loginas
+ * Superadmin "login as" another user (carowner or autoshopowner) by userId.
+ * Requires: req.user.role === "admin" (superadmin)
+ * Body params: { userId }
+ * Returns: { success, token, user }
+ */
+loginAs = async (req, res) => {
+  try {
+    // Only allow superadmin/admin
+    if (!req.user || req.user.role !== "admin") {
+      console.log("Access denied: Not admin or no req.user:", req.user);
+      return res.status(403).json({ success: false, message: "Forbidden: Only superadmin can login as another user." });
+    }
+
+    const { userId } = req.body;
+    if (!userId) {
+      console.log("loginAs - Missing userId in body:", req.body);
+      return res.status(400).json({ success: false, message: "userId is required." });
+    }
+
+    // Find user (only carowner or autoshopowner)
+    const user = await User.findOne({
+      _id: userId,
+      role: { $in: ["carowner", "autoshopowner"] },
+    }).select("-password");
+
+    if (!user) {
+      console.log(`loginAs - User not found or not allowed: userId=${userId}`);
+      return res.status(404).json({ success: false, message: "User not found or not eligible for loginAs." });
+    }
+
+    // Fail fast on suspended/deleted (middleware also enforces this on every request)
+    if (["suspended", "deleted"].includes(user.status)) {
+      console.log(`loginAs - User ${user._id} is ${user.status}; denied impersonation`);
+      return res.status(403).json({
+        success: false,
+        message: `Cannot login as a ${user.status} user.`,
+      });
+    }
+
+    // Shorter-lived token for impersonation sessions, flagged so the
+    // frontend can show an "Exit impersonation" banner and so you can
+    // add extra guards later (e.g. block password/email change routes
+    // when isImpersonation is true).
+    const tokenPayload = {
+      id: user._id,
+      role: user.role,
+      impersonatedBy: req.user.id,
+      isImpersonation: true,
+    };
+    console.log(`loginAs - Creating impersonation token for user ${user._id} by ${req.user.id}`);
+
+    const token = jwt.sign(
+      tokenPayload,
+      process.env.JWT_SECRET,
+      { expiresIn: "2h" }
+    );
+
+    console.log(token);
+
+
+    return res.status(200).json({
+      success: true,
+      token,
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        role: user.role,
+      },
+    });
+  } catch (err) {
+    console.log("loginAs - Exception:", err);
+    return res.status(500).json({ success: false, message: "loginAs failed", error: err.message });
+  }
+};
+
+
 }
 
 export default AuthController;

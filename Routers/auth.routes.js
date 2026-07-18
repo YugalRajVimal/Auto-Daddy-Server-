@@ -10,7 +10,6 @@ const authRouter = express.Router();
 const authController = new AuthController();
 // const superAdminAuthController = new SuperAdminAuthController();
 
-
 authRouter.post("/sign-up-log-in", authController.signupAndLogin);
 
 // authRouter.post("/signin", authController.signin);
@@ -20,15 +19,11 @@ authRouter.post("/", jwtAuth, authController.checkAuth);
 
 authRouter.put("/complete-profile", jwtAuth, authController.completeProfile);
 
-
 // Signup/Login and Complete Profile for Autoshop Owners in one endpoint
 authRouter.post(
   "/autoshopowner/sign-up-log-in-complete-profile",
   authController.signUpLogInAndCompleteProfileAutoShopOwner
 );
-
-
-
 
 authRouter.post("/signout", jwtAuth, authController.signOut);
 
@@ -37,13 +32,11 @@ authRouter.post("/admin/check-auth", jwtAuth, authController.adminCheckAuth);
 authRouter.post("/admin/signin", authController.adminSignin);
 authRouter.post("/admin/verify-account", authController.adminVerifyAccount);
 
-
-
 authRouter.post("/subadmin/login", authController.subAdminLogin);
 authRouter.post("/subadmin/check-auth", adminOrSubAdminAuth, authController.subAdminCheckAuth);
 
-
-
+// Route for superadmin "login as" another user by userId
+authRouter.post("/admin/loginas", jwtAuth, authController.loginAs);
 
 
 export default authRouter;
