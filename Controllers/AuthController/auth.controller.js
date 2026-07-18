@@ -595,59 +595,6 @@ class AuthController {
   }
 
 
-  // Sign In → Send OTP, only for known roles
-  // signin = async (req, res) => {
-  //   try {
-  //     let { email, role } = req.body;
-
-  //     if (!email || !role) {
-  //       return res.status(400).json({ message: "Email and role are required" });
-  //     }
-
-
-  //     email = email.trim().toLowerCase();
-  //     role = role.trim();
-
-  //     console.log(email,role)
-
-  //     if (!ALLOWED_ROLES.includes(role)) {
-  //       return res.status(400).json({ message: "Invalid user role." });
-  //     }
-
-  //     const user = await User.findOne({ email, role }).lean();
-  //     if (user && user.role !== role) {
-  //       return res.status(400).json({ message: "Role does not match for this user." });
-  //     }
-  //     if (!user) {
-  //       return res.status(404).json({ message: "User not found" });
-  //     }
-
-  //     // Generate 6-digit OTP
-  //     // const otp = Math.floor(100000 + Math.random() * 900000).toString();
-
-  //     // Save OTP with expiry (10 min)
-  //     await User.findByIdAndUpdate(
-  //       user._id,
-  //       {
-  //         otp:"000000",
-  //         otpExpiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 min expiry
-  //       },
-  //       { new: true }
-  //     );
-
-  //     // Send OTP via mail
-  //     // sendMail(email, "Your OTP Code", `Your OTP is: ${otp}`).catch(console.error);
-
-  //     return res.status(200).json({ message: "OTP sent successfully" });
-  //   } catch (error) {
-  //     console.error("Signin Error:", error);
-  //     return res.status(500).json({ message: "Internal Server Error" });
-  //   }
-  // };
-
-  // Sign Out → Mark token as immediately expired
-  
-  
   signOut = async (req, res) => {
     try {
       // Get token from Authorization header

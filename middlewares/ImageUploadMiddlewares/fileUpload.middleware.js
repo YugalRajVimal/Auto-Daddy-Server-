@@ -307,6 +307,9 @@ const storage = multer.diskStorage({
     else if (file.fieldname === "leadImage") {
       uploadPath = "./Uploads/Leads";
     }
+    else if (file.fieldname === "itemImage") {
+      uploadPath = "./Uploads/Items";
+    }
 
     console.log("[MULTER] Storing file:", {
       destination: uploadPath,
@@ -355,6 +358,7 @@ const fileFilter = (req, file, cb) => {
     "incomeImage",
     "dealImage", 
     "leadImage",
+    "itemImage"
   ];
 
   const isIndexedCarImage = /^carImage_\d+$/.test(file.fieldname);
