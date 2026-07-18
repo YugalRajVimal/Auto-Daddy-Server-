@@ -564,6 +564,35 @@ editCustomer = async (req, res) => {
       return true;
     }
 
+    // --- VEHICLE REMOVAL/ADDITION/UPDATE LOGIC STARTS HERE ---
+    // 1. Build list of licensePlateNos present in vehiclesFromBody (request)
+    let vehiclesFromBodyArray = Array.isArray(vehiclesFromBody) ? vehiclesFromBody : [];
+    let requestLicensePlates = vehiclesFromBodyArray
+      .map(v => (v && v.licensePlateNo) ? v.licensePlateNo : null)
+      .filter(l => !!l);
+
+    // 2. Remove vehicles no longer present: (vehicle is in DB but not in request array)
+    let vehiclesToRemove = existingVehicleDocs.filter(
+      v => !requestLicensePlates.includes(v.licensePlateNo)
+    );
+
+    for (const removeVehicle of vehiclesToRemove) {
+      // Remove from DB
+      try {
+        await VehicleModel.deleteOne({ _id: removeVehicle._id });
+      } catch (err) {
+        // Don't abort request, but log for audit
+        console.error(`[editCustomer] Failed to remove vehicle ${removeVehicle._id}:`, err);
+      }
+      // Remove from customer's document tracking
+      updatedVehicleObjectIds = updatedVehicleObjectIds.filter(id => id !== removeVehicle._id.toString());
+      // Remove from documents array
+      customer.documents = customer.documents.filter(
+        doc => doc.vehicleId?.toString() !== removeVehicle._id.toString()
+      );
+    }
+
+    // Now handle existing or new vehicles
     if (Array.isArray(vehiclesFromBody)) {
       for (let i = 0; i < vehiclesFromBody.length; i++) {
         const v = vehiclesFromBody[i];
@@ -647,7 +676,10 @@ editCustomer = async (req, res) => {
               }
             }
           }
-          // No else: do nothing, same state
+          // Make sure vehicle id is present in updatedVehicleObjectIds since it was kept
+          if (!updatedVehicleObjectIds.includes(existingVehicle._id.toString())) {
+            updatedVehicleObjectIds.push(existingVehicle._id.toString());
+          }
         } else {
           // license plate is new, add new vehicle
           const requiredFields = ["licensePlateNo", "vehicleName", "model", "year", "vinNo", "odometerReading"];
