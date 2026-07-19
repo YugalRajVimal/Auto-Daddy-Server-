@@ -26,12 +26,52 @@ const productFeatureItemSchema = new mongoose.Schema(
   }
 );
 
+const PAGE_SLUG_ENUM = [
+  "Home - AutoShopOwner",
+  "Profile - AutoShopOwner",
+  "People - AutoShopOwner",
+  "Services - AutoShopOwner",
+  "JobCards - AutoShopOwner",
+  "Wallet - AutoShopOwner",
+  "MyWebsite - AutoShopOwner",
+  "Reports - AutoShopOwner",
+  "Deals - AutoShopOwner",
+  "Help - AutoShopOwner",
+  "Notifications - AutoShopOwner",
+
+  "Home - Mechanic",
+  "Profile - Mechanic",
+  "People - Mechanic",
+  "Services - Mechanic",
+  "JobCards - Mechanic",
+  "Wallet - Mechanic",
+  "MyWebsite - Mechanic",
+  "Reports - Mechanic",
+  "Deals - Mechanic",
+  "Help - Mechanic",
+  "Notifications - Mechanic",
+
+
+  "Home - CarOwner",
+  "Profile - CarOwner",
+  "MyVehicles - CarOwner",
+  "Documents - CarOwner",
+  "AutoShops - CarOwner",
+  "Deals - CarOwner",
+  "Expenses - CarOwner",
+  "Digital Diary - CarOwner",
+  "Reports - CarOwner",
+  "Notifications - CarOwner",
+  "Help - CarOwner"
+];
+
 const faqItemSchema = new mongoose.Schema(
   {
     role: { type: String, trim: true },
     date: { type: Date },
     question: { type: String, trim: true },
-    answer: { type: String, trim: true }
+    answer: { type: String, trim: true },
+    pageSlug: { type: String, enum: PAGE_SLUG_ENUM }
   }
 );
 
