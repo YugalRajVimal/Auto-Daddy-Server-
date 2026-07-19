@@ -3,7 +3,7 @@ import express from "express";
 import AuthController from "../Controllers/AuthController/auth.controller.js";
 import jwtAuth from "../middlewares/Auth/auth.middleware.js";
 // import SuperAdminAuthController from "../Controllers/AuthController/super-admin.auth.controller.js";
-import { adminOrSubAdminAuth } from "../middlewares/Auth/permission.middleware.js";
+// import { adminOrSubAdminAuth } from "../middlewares/Auth/permission.middleware.js";
 
 const authRouter = express.Router();
 
@@ -25,7 +25,7 @@ authRouter.post(
   authController.signUpLogInAndCompleteProfileAutoShopOwner
 );
 
-authRouter.post("/signout", jwtAuth, authController.signOut);
+// authRouter.post("/signout", jwtAuth, authController.signOut);
 
 // ===== ADMIN AUTH ROUTES =====
 authRouter.post("/admin/check-auth", jwtAuth, authController.adminCheckAuth);
@@ -33,7 +33,7 @@ authRouter.post("/admin/signin", authController.adminSignin);
 authRouter.post("/admin/verify-account", authController.adminVerifyAccount);
 
 authRouter.post("/subadmin/login", authController.subAdminLogin);
-authRouter.post("/subadmin/check-auth", adminOrSubAdminAuth, authController.subAdminCheckAuth);
+authRouter.post("/subadmin/check-auth", jwtAuth, authController.subAdminCheckAuth);
 
 // Route for superadmin "login as" another user by userId
 authRouter.post("/admin/loginas", jwtAuth, authController.loginAs);

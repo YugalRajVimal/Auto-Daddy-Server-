@@ -36,4 +36,4 @@ const AdminSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export const Admin = mongoose.model("Admin", AdminSchema);
+export const Admin2 = mongoose.model("Admin", AdminSchema);

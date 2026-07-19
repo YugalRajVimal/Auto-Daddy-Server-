@@ -13,7 +13,8 @@ import Services from "../../Schema/services.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import WebsiteTemplateSchema from "../../Schema/WebsiteTemplateSchema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
-import { Admin } from "../../Schema/admin.schema.js";
+// import { Admin } from "../../Schema/admin.schema.js";
+import { StaffUser } from "../../Schema/RolesAndPermissions/Staffuser.schema.js";
 
 
 class AdminController {
@@ -153,6 +154,54 @@ async getDashboardDetails(req, res) {
     });
   }
 }
+
+/**
+ * Get the profile details (name, email, phone, role, and permissions) for the authenticated staff user.
+ * GET /admin/profile
+ * Uses StaffUser schema for Admin/SuperAdmin profile.
+ */
+
+async getProfile(req, res) {
+  try {
+    // Use authenticated staff user id from req.user
+    const id = req.user && req.user.id;
+    if (!id) {
+      return res.status(401).json({ message: "Unauthorized: user id not found on request." });
+    }
+
+    // Find staff user by id
+    const staff = await StaffUser.findById(id).lean();
+    if (!staff) {
+      return res.status(404).json({ message: "Staff user not found." });
+    }
+
+    // Remove password property if any (shouldn't be returned)
+    if (staff.password !== undefined) {
+      delete staff.password;
+    }
+
+    // Response: Pick only relevant fields based on schema
+    const profile = {
+      name: staff.name,
+      email: staff.email,
+      phone: staff.phone || "",
+      role: staff.role,
+      isActive: staff.isActive,
+      lastLogin: staff.lastLogin,
+      createdAt: staff.createdAt,
+      updatedAt: staff.updatedAt,
+      permissions: staff.permissions || {},
+      // SuperAdmin (role: admin) gets permissionAll: true
+      permissionAll: staff.role === "admin"
+    };
+
+    return res.status(200).json({ success: true, data: profile });
+  } catch (err) {
+    console.error("[getProfile] Error:", err);
+    return res.status(500).json({ message: "Failed to fetch profile", error: err.message });
+  }
+}
+
 
 // // Add a new service
 // async addService(req, res) {
@@ -1321,45 +1370,6 @@ async getDashboardDetails(req, res) {
 
 
 
-/**
- * Get the profile details (name, email, phone, and permissions) for a given user ID.
- * GET /admin/profile/:id
- */
-async getProfile(req, res) {
-    try {
-        // Use authenticated admin id from req.user
-        const id = req.user && req.user.id;
-
-        if (!id) {
-            return res.status(401).json({ message: "Unauthorized: user id not found on request." });
-        }
-
-        // Find admin by id
-        const admin = await Admin.findById(id).lean();
-        if (!admin) {
-            return res.status(404).json({ message: "Admin not found." });
-        }
-        
-        // Send only allowed fields (matching Admin schema)
-        const profile = {
-            name: admin.name,
-            email: admin.email,
-            phone: admin.phone || "",
-            role: admin.role,
-            kycAutoApprove: admin.kycAutoApprove,
-            lastLogin: admin.lastLogin,
-            createdAt: admin.createdAt,
-            updatedAt: admin.updatedAt,
-            permissionAll:true
-            // Add additional fields if specifically needed, matching allowed fields in Admin schema
-        };
-
-        return res.status(200).json({ success: true, data: profile });
-    } catch (err) {
-        console.error("[getProfile] Error:", err);
-        return res.status(500).json({ message: "Failed to fetch profile", error: err.message });
-    }
-}
 
 
 /**

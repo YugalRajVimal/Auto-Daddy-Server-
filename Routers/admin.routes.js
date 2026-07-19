@@ -3,7 +3,7 @@ import express from "express";
 import AdminController from "../Controllers/Admin/admin.controller.js";
 import { brandLogoUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/brandLogoUpload.middleware.js";
 import { adsUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/adsUpload.middleware.js";
-import { subAdminManagementRouter } from "./subadmin.routes.js";
+// import { subAdminManagementRouter } from "./subadmin.routes.js";
 import jwtAuth from "../middlewares/Auth/auth.middleware.js";
 import { onboardCarOwnerUploadMiddleware } from "../middlewares/ImageUploadMiddlewares/onboardCustomerImageUpload.middleware.js";
 import commonRoutes from "./Admin/common.routes.js";
@@ -17,13 +17,14 @@ import accountsRouter from "./Admin/accounts.router.js";
 import domainRouter from "./Admin/domain.router.js";
 import autoShopOwnersRouter from "./Admin/autoShopOwners.routes.js";
 import invoiceRouter from "./Admin/invoices.routes.js";
+import staffUserManagementRouter from "./Admin/Staffuser.routes .js";
 
 
 const adminRouter = express.Router();
 const adminController = new AdminController();
 
 // ─── Sub Admin Management ─────────────────────────────────────────────────────
-adminRouter.use("/subadmins", subAdminManagementRouter);
+// adminRouter.use("/subadmins", subAdminManagementRouter);
 
 // ─── Health check ─────────────────────────────────────────────────────────────
 adminRouter.get("/", (req, res) => {
@@ -157,6 +158,10 @@ adminRouter.get(
 );
 
 adminRouter.use("/invoices", invoiceRouter);
+
+
+adminRouter.use("/staff-users", staffUserManagementRouter);
+
 
 
 

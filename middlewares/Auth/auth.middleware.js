@@ -119,9 +119,14 @@
 import jwt from "jsonwebtoken";
 import ExpiredTokenModel from "../../Schema/expired-token.schema.js";
 import { User } from "../../Schema/user.schema.js";
-import { Admin } from "../../Schema/admin.schema.js";
-import { SubAdmin } from "../../Schema/subadmin.schema.js"; // ← FIX: was "Subadmin.schema.js"
+import { StaffUser } from "../../Schema/RolesAndPermissions/Staffuser.schema.js";
 
+/**
+ * jwtAuth middleware
+ * - For any staff user (admin/role_admin/sub_admin/associates), uses the unified StaffUser schema.
+ * - Handles regular users off the User collection.
+ * - Attaches req.user = { id, role, ... } with role-specific data.
+ */
 const jwtAuth = async (req, res, next) => {
   const token = req.headers["authorization"];
 
@@ -140,8 +145,7 @@ const jwtAuth = async (req, res, next) => {
             message: "Unauthorized: Token expired, please log in again.",
           });
         }
-        // Token is in blacklist but not yet expired — allow through
-        // (covers the case where signout records a future-expiry token)
+        // Token in list but not yet expired—allow through
       } else {
         // No expiry set → deny by default
         return res.status(401).json({
@@ -165,53 +169,35 @@ const jwtAuth = async (req, res, next) => {
     return res.status(401).json({ message: "Unauthorized: Malformed token" });
   }
 
-  // 3. Attach base user info — role-specific enrichment below
-  req.user = {
-    id:   payload.id,
-    role: payload.role,
-  };
-
-  // ── Admin ──────────────────────────────────────────────────────────────────
-  if (payload.role === "admin") {
+  // 3. Staff Users (admin, role_admin, sub_admin, associates)
+  // Only those roles exist in StaffUser
+  const STAFF_ROLES = ["admin", "role_admin", "sub_admin", "associates"];
+  if (payload.role && STAFF_ROLES.includes(payload.role)) {
     try {
-      const dbAdmin = await Admin.findOne({ _id: payload.id, role: "admin" }).lean();
-      if (!dbAdmin) {
-        return res.status(401).json({ message: "Unauthorized: Admin not found" });
+      // Always make sure staff account is active
+      const staff = await StaffUser.findOne({ _id: payload.id, role: payload.role }).lean();
+      if (!staff) {
+        return res.status(401).json({ message: "Unauthorized: Staff account not found" });
       }
-      req.user.name = dbAdmin.name;
-      req.user.email = dbAdmin.email;
+      if (!staff.isActive) {
+        return res.status(403).json({ message: "Your account is inactive. Contact the SuperAdmin." });
+      }
+
+      req.user = {
+        id: String(staff._id),
+        role: staff.role,
+        name: staff.name,
+        email: staff.email,
+        permissions: staff.role === "admin" ? null : staff.permissions,
+        isSuperAdmin: staff.role === "admin"
+      };
       return next();
     } catch {
       return res.status(500).json({ message: "Internal Server Error" });
     }
   }
 
-  // ── SubAdmin ───────────────────────────────────────────────────────────────
-  if (payload.role === "subadmin") {
-    try {
-      // Always re-fetch from DB so permissions are fresh
-      const dbSubAdmin = await SubAdmin.findOne({
-        _id: payload.id,
-        role: "subadmin",
-        isActive: true,
-      }).lean();
-
-      if (!dbSubAdmin) {
-        return res.status(401).json({
-          message: "Unauthorized: SubAdmin not found or account is inactive",
-        });
-      }
-
-      req.user.name        = dbSubAdmin.name;
-      req.user.email       = dbSubAdmin.email;
-      req.user.permissions = dbSubAdmin.permissions; // fresh from DB, not JWT
-      return next();
-    } catch {
-      return res.status(500).json({ message: "Internal Server Error" });
-    }
-  }
-
-  // ── Regular user (carowner / autoshopowner) ────────────────────────────────
+  // 4. Regular user (carowner / autoshopowner etc — not in StaffUser)
   try {
     const dbUser = await User.findOne({ _id: payload.id }).lean();
     if (!dbUser) {
@@ -222,9 +208,14 @@ const jwtAuth = async (req, res, next) => {
         message: `Account is ${dbUser.status}. Please contact support.`,
       });
     }
-    req.user.phone = dbUser.phone;
-    req.user.role = dbUser.role;
-
+    req.user = {
+      id: String(dbUser._id),
+      role: dbUser.role,
+      name: dbUser.name,
+      email: dbUser.email,
+      phone: dbUser.phone,
+      // No permissions for regular users
+    };
     return next();
   } catch {
     return res.status(500).json({ message: "Internal Server Error" });
