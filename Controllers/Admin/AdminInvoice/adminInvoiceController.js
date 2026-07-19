@@ -2,7 +2,8 @@ import mongoose from "mongoose";
 import AdminInvoiceItem from "../../../Schema/AdminInvoices/AdminInvoiceItem.js";
 import AdminInvoiceSchema from "../../../Schema/AdminInvoices/AdminInvoice.schema.js";
 
-
+// The only allowed unitTypes for items are "Unit" and "Days"
+// All stock/HSN/itemType logic is removed
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
@@ -24,6 +25,10 @@ async function buildInvoiceItems(rawLineItems) {
     if (!itemDoc) {
       throw new Error(`Item not found for id ${line.itemRefId}`);
     }
+    // Enforce unitType as only "Unit" or "Days", fallback to "Unit" if anything else
+    let unitType = (itemDoc.unitType || "Unit").toString();
+    if (!["Unit", "Days"].includes(unitType)) unitType = "Unit";
+
     const unitPrice = Number(line.unitPrice) || 0;
     const units = Number(line.units) || 0;
     const gstPercent = Number(line.gstPercent) || 0;
@@ -32,6 +37,7 @@ async function buildInvoiceItems(rawLineItems) {
       ItemRefId: itemDoc._id,
       Item: itemDoc.itemName,
       Description: line.description || "",
+      UnitType: unitType,
       UnitPrice: unitPrice,
       Units: units,
       GSTPercent: gstPercent,
@@ -49,18 +55,7 @@ function computeTotals(items, roundOffEnabled, roundOffAmount) {
   return { subtotal, gst, roundOff, invoiceTotal };
 }
 
-// Decrements openingStock for each line item by its Units count.
-// Only applied to items where itemType === "Goods" is irrelevant here —
-// we decrement stock for anything with a numeric openingStock tracked.
-async function adjustStock(items, direction) {
-  // direction: -1 to decrement (invoice created/units increased), +1 to increment (invoice deleted/units decreased)
-  for (const line of items) {
-    await AdminInvoiceItem.findByIdAndUpdate(line.ItemRefId, {
-      $inc: { openingStock: direction * line.Units },
-    });
-  }
-}
-
+// Removed adjustStock and all stock/HSN code
 // GET /api/admin/invoices?view=active&search=&page=1&limit=10
 export const getInvoices = async (req, res) => {
   try {
@@ -174,8 +169,7 @@ export const createInvoice = async (req, res) => {
       view: "active",
     });
 
-    // Decrement stock for each line item now that the invoice exists
-    await adjustStock(items, -1);
+    // No stock decrement or adjustment
 
     res.status(201).json({ success: true, invoice });
   } catch (err) {
@@ -188,8 +182,7 @@ export const createInvoice = async (req, res) => {
 };
 
 // PUT /api/admin/invoices/:id
-// Same body shape as create. Stock is reconciled: old line quantities are restored,
-// then new line quantities are deducted.
+// Same body shape as create. No stock to reconcile, just update invoice.
 export const updateInvoice = async (req, res) => {
   try {
     const existing = await AdminInvoiceSchema.findById(req.params.id);
@@ -229,11 +222,6 @@ export const updateInvoice = async (req, res) => {
       newItems = await buildInvoiceItems(lineItems);
     }
 
-    // Restore stock for the OLD items first, then deduct for the NEW items.
-    // This correctly handles items being added, removed, or quantities changed.
-    await adjustStock(existing.items, +1);
-    await adjustStock(newItems, -1);
-
     const { subtotal, gst, roundOff, invoiceTotal } = computeTotals(
       newItems,
       roundOffEnabled !== undefined ? roundOffEnabled : existing.roundOff > 0,
@@ -270,8 +258,7 @@ export const updateInvoice = async (req, res) => {
 };
 
 // PATCH /api/admin/invoices/bulk  { ids: [], action: "archive" | "delete" | "restore" | "send" | "markPaid" | "markDraft" }
-// Stock is only released back on "delete" (permanent removal from active circulation).
-// Archive/restore/status changes do not touch stock.
+// All stock logic removed.
 export const bulkUpdateInvoices = async (req, res) => {
   try {
     const { ids, action } = req.body;
@@ -280,10 +267,6 @@ export const bulkUpdateInvoices = async (req, res) => {
     }
 
     if (action === "delete") {
-      const invoices = await AdminInvoiceSchema.find({ _id: { $in: ids } });
-      for (const inv of invoices) {
-        await adjustStock(inv.items, +1); // release stock back
-      }
       await AdminInvoiceSchema.updateMany({ _id: { $in: ids } }, { $set: { view: "deleted" } });
       return res.json({ success: true, message: "Invoice(s) deleted." });
     }
@@ -307,8 +290,7 @@ export const bulkUpdateInvoices = async (req, res) => {
 };
 
 // POST /api/admin/invoices/copy  { ids: [], invoiceCode, startingSeq }
-// Duplicates invoices as new Draft invoices. Also deducts stock again for the copies,
-// since a copy represents a brand new invoice consuming stock.
+// Duplicates invoices as new Draft invoices. No stock processed.
 export const copyInvoices = async (req, res) => {
   try {
     const { ids, nextInvoiceNumbers } = req.body; // nextInvoiceNumbers: array of strings, same order as ids
@@ -340,7 +322,7 @@ export const copyInvoices = async (req, res) => {
         status: "Draft",
         view: "active",
       });
-      await adjustStock(copy.items, -1);
+      // No adjustStock performed on copies
       created.push(copy);
     }
 

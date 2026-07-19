@@ -38,8 +38,8 @@ const leadSchema = new mongoose.Schema(
       trim: true,
     },
     sentTo: {
-      type: String,
-      trim: true,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "StaffUser",
     },
     image: {
       type: String,

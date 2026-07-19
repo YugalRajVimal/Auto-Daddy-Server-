@@ -78,14 +78,11 @@ export const createItem = async (req, res) => {
   try {
     const {
       itemName,
-      hsnCode,
-      itemType,
       description,
       unitCost,
       quantity,
       unitType,
       gstPercent,
-      openingStock,
     } = req.body;
 
     if (!itemName || !itemName.trim()) {
@@ -95,19 +92,17 @@ export const createItem = async (req, res) => {
       return res.status(400).json({ success: false, message: "Unit cost is required." });
     }
 
-    const stockValue = openingStock !== undefined && openingStock !== "" ? Number(openingStock) : 0;
+    // UnitType must be "Unit" or "Days"
+    const allowedUnitTypes = ["Unit", "Days"];
+    const resolvedUnitType = allowedUnitTypes.includes(unitType) ? unitType : "Unit";
 
     const item = await AdminInvoiceItem.create({
       itemName: itemName.trim(),
-      hsnCode: hsnCode?.trim() || "",
-      itemType: itemType || "Goods",
       description: description?.trim() || "",
       unitCost: Number(unitCost),
       quantity: quantity ? Number(quantity) : 1,
-      unitType: unitType || "",
+      unitType: resolvedUnitType,
       gstPercent: gstPercent !== undefined && gstPercent !== "" ? Number(gstPercent) : 0,
-      initialStock: stockValue,
-      openingStock: stockValue,
       image: req.file ? req.file.filename : "",
       view: "active",
     });
@@ -127,14 +122,11 @@ export const updateItem = async (req, res) => {
 
     const {
       itemName,
-      hsnCode,
-      itemType,
       description,
       unitCost,
       quantity,
       unitType,
       gstPercent,
-      openingStock,
     } = req.body;
 
     if (itemName !== undefined) {
@@ -143,18 +135,15 @@ export const updateItem = async (req, res) => {
       }
       existing.itemName = itemName.trim();
     }
-    if (hsnCode !== undefined) existing.hsnCode = hsnCode.trim();
-    if (itemType !== undefined) existing.itemType = itemType;
     if (description !== undefined) existing.description = description.trim();
     if (unitCost !== undefined && unitCost !== "") existing.unitCost = Number(unitCost);
     if (quantity !== undefined && quantity !== "") existing.quantity = Number(quantity);
-    if (unitType !== undefined) existing.unitType = unitType;
-    if (gstPercent !== undefined) existing.gstPercent = gstPercent === "" ? 0 : Number(gstPercent);
-    // Editing openingStock directly from the form adjusts the live count manually.
-    // It does NOT touch initialStock (that stays as the original baseline).
-    if (openingStock !== undefined && openingStock !== "") {
-      existing.openingStock = Number(openingStock);
+    if (unitType !== undefined) {
+      // Only allow Unit or Days
+      const allowedUnitTypes = ["Unit", "Days"];
+      existing.unitType = allowedUnitTypes.includes(unitType) ? unitType : "Unit";
     }
+    if (gstPercent !== undefined) existing.gstPercent = gstPercent === "" ? 0 : Number(gstPercent);
 
     if (req.file) {
       deleteFileIfExists(existing.image);
