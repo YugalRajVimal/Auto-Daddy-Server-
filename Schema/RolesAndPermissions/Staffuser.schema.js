@@ -1,4 +1,8 @@
-// Schema/staffUser.schema.js
+import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
+import { buildDefaultPermissions, buildAllTruePermissions } from "../../constants/permissionModules.js";
+
+// Schema/RolesAndPermissions/Staffuser.schema.js
 //
 // Replaces the old separate Admin / SubAdmin models with ONE unified
 // collection. All non-portal staff (SuperAdmin, Admin, SubAdmin, Business
@@ -15,17 +19,7 @@
 // in normal operation (enforced at the controller level, not the schema,
 // since Mongoose doesn't support "at most one" constraints natively).
 
-import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
-import { buildDefaultPermissions } from "../../constants/permissionModules.js";
-
 export const STAFF_ROLES = ["admin", "role_admin", "sub_admin", "associates"];
-
-// Mongoose-friendly nested schema mirroring buildDefaultPermissions() shape.
-// Stored as Mixed rather than a fully-typed nested schema so new nav/sub-nav
-// keys can be added in constants/permissionModules.js without a migration —
-// the application layer (not Mongoose) validates shape against the tree.
-const PermissionsSchema = new mongoose.Schema({}, { _id: false, strict: false });
 
 const StaffUserSchema = new mongoose.Schema(
   {
@@ -40,8 +34,7 @@ const StaffUserSchema = new mongoose.Schema(
     phone: { type: String, default: "" },
     password: { type: String, required: true },
 
-    // OTP and verification fields for staff user
-    otp: { type: String, default: null }, // Store current OTP (e.g., for login/verify flows)
+    otp: { type: String, default: null },
     otpExpiresAt: { type: Date, default: null },
     otpGeneratedAt: { type: Date, default: null },
     otpAttempts: { type: Number, default: 0 },
@@ -52,12 +45,17 @@ const StaffUserSchema = new mongoose.Schema(
       required: true,
     },
 
+    // NEW: points at the Role doc that actually holds the permission grants.
+    // Required for role_admin / sub_admin / associates. Null for "admin"
+    // (SuperAdmin bypasses permission checks entirely, no Role needed).
+    roleRef: { type: mongoose.Schema.Types.ObjectId, ref: "Role", default: null },
+
     isActive: { type: Boolean, default: true },
     lastLogin: { type: Date, default: null },
 
-    // Ignored/bypassed entirely for role: "admin" (SuperAdmin sees everything).
-    // Populated with buildDefaultPermissions() shape for the other 3 roles.
-    permissions: { type: PermissionsSchema, default: () => ({}) },
+    // REMOVED: permissions no longer live on the staff user — they live on
+    // the referenced Role. Field intentionally deleted (not just unused) so
+    // nobody accidentally reads/writes stale per-user permissions again.
 
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
@@ -71,6 +69,13 @@ const StaffUserSchema = new mongoose.Schema(
 StaffUserSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
   this.password = await bcrypt.hash(this.password, 12);
+  next();
+});
+
+StaffUserSchema.pre("validate", function (next) {
+  if (this.role !== "admin" && !this.roleRef) {
+    return next(new Error("roleRef is required for non-SuperAdmin staff users."));
+  }
   next();
 });
 
@@ -89,9 +94,13 @@ StaffUserSchema.methods.isSuperAdmin = function () {
   return this.role === "admin";
 };
 
-// Convenience static so callers don't hand-build the default tree.
+// Convenience statics so callers don't hand-build the trees.
 StaffUserSchema.statics.defaultPermissions = function () {
   return buildDefaultPermissions();
+};
+
+StaffUserSchema.statics.allTruePermissions = function () {
+  return buildAllTruePermissions();
 };
 
 export const StaffUser =

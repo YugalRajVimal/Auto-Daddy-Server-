@@ -123,7 +123,7 @@ import { StaffUser } from "../../Schema/RolesAndPermissions/Staffuser.schema.js"
 
 /**
  * jwtAuth middleware
- * - For any staff user (admin/role_admin/sub_admin/associates), uses the unified StaffUser schema.
+ * - For any staff user (admin/role_admin/sub_admin/associates), uses the unified StaffUserSchema schema.
  * - Handles regular users off the User collection.
  * - Attaches req.user = { id, role, ... } with role-specific data.
  */
@@ -131,6 +131,7 @@ const jwtAuth = async (req, res, next) => {
   const token = req.headers["authorization"];
 
   if (!token) {
+    console.log("[jwtAuth] Missing token in headers");
     return res.status(401).json({ message: "Unauthorized: Token missing" });
   }
 
@@ -141,19 +142,23 @@ const jwtAuth = async (req, res, next) => {
       if (existingExpiredToken.tokenExpiry) {
         const now = new Date();
         if (now > existingExpiredToken.tokenExpiry) {
+          console.log("[jwtAuth] Token found in expired-token list and already expired");
           return res.status(401).json({
             message: "Unauthorized: Token expired, please log in again.",
           });
         }
         // Token in list but not yet expired—allow through
+        console.log("[jwtAuth] Token found in expired-token list but not expired yet. Allowing through.");
       } else {
         // No expiry set → deny by default
+        console.log("[jwtAuth] Token found in expired-token list with no expiry. Denying.");
         return res.status(401).json({
           message: "Unauthorized: Token expired, please log in again.",
         });
       }
     }
-  } catch {
+  } catch (err) {
+    console.error("[jwtAuth] Error while checking expired-token list:", err);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 
@@ -161,25 +166,29 @@ const jwtAuth = async (req, res, next) => {
   let payload;
   try {
     payload = jwt.verify(token, process.env.JWT_SECRET);
-  } catch {
+  } catch (err) {
+    console.log("[jwtAuth] JWT verification failed:", err);
     return res.status(401).json({ message: "Unauthorized: Invalid token" });
   }
 
   if (!payload?.id) {
+    console.log("[jwtAuth] JWT payload missing 'id'");
     return res.status(401).json({ message: "Unauthorized: Malformed token" });
   }
 
   // 3. Staff Users (admin, role_admin, sub_admin, associates)
-  // Only those roles exist in StaffUser
+  // Only those roles exist in StaffUserSchema
   const STAFF_ROLES = ["admin", "role_admin", "sub_admin", "associates"];
   if (payload.role && STAFF_ROLES.includes(payload.role)) {
     try {
       // Always make sure staff account is active
       const staff = await StaffUser.findOne({ _id: payload.id, role: payload.role }).lean();
       if (!staff) {
+        console.log(`[jwtAuth] No staff found for id=${payload.id} role=${payload.role}`);
         return res.status(401).json({ message: "Unauthorized: Staff account not found" });
       }
       if (!staff.isActive) {
+        console.log(`[jwtAuth] Staff id=${payload.id} is not active`);
         return res.status(403).json({ message: "Your account is inactive. Contact the SuperAdmin." });
       }
 
@@ -191,19 +200,23 @@ const jwtAuth = async (req, res, next) => {
         permissions: staff.role === "admin" ? null : staff.permissions,
         isSuperAdmin: staff.role === "admin"
       };
+      console.log(`[jwtAuth] Staff user authed: ${staff.email}, role=${staff.role}, id=${staff._id}`);
       return next();
-    } catch {
+    } catch (err) {
+      console.error("[jwtAuth] Error querying StaffUserSchema:", err);
       return res.status(500).json({ message: "Internal Server Error" });
     }
   }
 
-  // 4. Regular user (carowner / autoshopowner etc — not in StaffUser)
+  // 4. Regular user (carowner / autoshopowner etc — not in StaffUserSchema)
   try {
     const dbUser = await User.findOne({ _id: payload.id }).lean();
     if (!dbUser) {
+      console.log(`[jwtAuth] No regular user found for id=${payload.id}`);
       return res.status(401).json({ message: "Unauthorized: User not found" });
     }
     if (["suspended", "deleted"].includes(dbUser.status)) {
+      console.log(`[jwtAuth] User id=${dbUser._id} is ${dbUser.status}`);
       return res.status(403).json({
         message: `Account is ${dbUser.status}. Please contact support.`,
       });
@@ -216,8 +229,10 @@ const jwtAuth = async (req, res, next) => {
       phone: dbUser.phone,
       // No permissions for regular users
     };
+    console.log(`[jwtAuth] Regular user authed: ${dbUser.email}, id=${dbUser._id}`);
     return next();
-  } catch {
+  } catch (err) {
+    console.error("[jwtAuth] Error querying User schema:", err);
     return res.status(500).json({ message: "Internal Server Error" });
   }
 };

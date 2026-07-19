@@ -7,6 +7,8 @@ import { SubAdminActivity } from "../../Schema/subadmin-activity.schema.js";
 import { SubAdmin } from "../../Schema/subadmin.schema.js";
 import { StaffUser, STAFF_ROLES } from "../../Schema/RolesAndPermissions/Staffuser.schema.js";
 
+import { Role } from "../../Schema/RolesAndPermissions/Role.schema.js";
+import { buildAllTruePermissions } from "../../constants/permissionModules.js";
 // Allowed roles from user.schema.js (see enum in file_context_2 line 8)
 const ALLOWED_ROLES = ["patient", "therapist", "admin", "carowner", "autoshopowner"];
 
@@ -350,67 +352,116 @@ class AuthController {
   // --- STAFF USER REPLACEMENT CODE ---
   // All admin/subadmin routes use StaffUser, not Admin/SubAdmin schemas.
 
-  /**
-   * Admin/Staff: Check Auth (admin dashboard)
-   * req.user injected by permission middleware: { id, role }
-   * Allows: Superadmin (`admin`) and all staff roles
-   */
+  // /**
+  //  * Admin/Staff: Check Auth (admin dashboard)
+  //  * req.user injected by permission middleware: { id, role }
+  //  * Allows: Superadmin (`admin`) and all staff roles
+  //  */
+  // adminCheckAuth = async (req, res) => {
+  //   try {
+  //     const { id, role } = req.user || {};
+  //     // Only allow staff-user roles
+  //     if (!id || (typeof role !== "string") || !STAFF_ROLES.includes(role)) {
+  //       return res.status(401).json({ message: "Unauthorized: Staff only" });
+  //     }
+
+  //     // Find staff user by ID and role
+  //     const staffUser = await StaffUser.findOne({ _id: id, role })
+  //       .select("-password");
+
+  //     if (!staffUser) {
+  //       return res.status(401).json({ message: "Staff user not found" });
+  //     }
+
+  //     // Compose base staff data for frontend, include role
+  //     const result = {
+  //       message: "Staff authorized",
+  //       name: staffUser.name,
+  //       email: staffUser.email,
+  //       role: staffUser.role, // explicitly send role
+  //     };
+
+  //     // If superadmin ("admin" role), send all permissions true
+  //     if (staffUser.role === "admin" || staffUser.isSuperAdmin?.()) {
+  //       // Use the app's default permission tree but set every permission action to true
+  //       const defaultPerms = StaffUser.defaultPermissions
+  //         ? StaffUser.defaultPermissions()
+  //         : {}; // fallback for older codebases
+
+  //       function makeTrueTree(node) {
+  //         if (Array.isArray(node)) {
+  //           return node.map(makeTrueTree);
+  //         }
+  //         if (node && typeof node === "object") {
+  //           const copy = { ...node };
+  //           if ("view" in copy) copy.view = true;
+  //           if ("create" in copy) copy.create = true;
+  //           if ("update" in copy) copy.update = true;
+  //           if ("delete" in copy) copy.delete = true;
+  //           if (copy.subNav && typeof copy.subNav === "object") {
+  //             copy.subNav = Object.fromEntries(
+  //               Object.entries(copy.subNav).map(([key, val]) => [key, makeTrueTree(val)])
+  //             );
+  //           }
+  //           return copy;
+  //         }
+  //         return node;
+  //       }
+
+  //       result.permissions = makeTrueTree(defaultPerms);
+  //     } else if (typeof staffUser.permissions === "object" && !staffUser.isSuperAdmin?.()) {
+  //       // Provide their real permissions
+  //       result.permissions = staffUser.permissions;
+  //     }
+  //     // Always send the role field explicitly in the response
+  //     result.role = staffUser.role;
+
+  //     return res.status(200).json(result);
+  //   } catch (error) {
+  //     console.error("[adminCheckAuth] Error encountered:", error);
+  //     return res.status(401).json({ message: "Unauthorized" });
+  //   }
+  // };
+
+
+
+  
   adminCheckAuth = async (req, res) => {
     try {
       const { id, role } = req.user || {};
-      // Only allow staff-user roles
       if (!id || (typeof role !== "string") || !STAFF_ROLES.includes(role)) {
         return res.status(401).json({ message: "Unauthorized: Staff only" });
       }
-
-      // Find staff user by ID and role
+  
       const staffUser = await StaffUser.findOne({ _id: id, role })
-        .select("-password");
-
+        .select("-password")
+        .populate({ path: "roleRef", model: Role, select: "name type permissions isActive" });
+  
       if (!staffUser) {
         return res.status(401).json({ message: "Staff user not found" });
       }
-
-      // Compose base staff data for frontend
+  
       const result = {
         message: "Staff authorized",
         name: staffUser.name,
         email: staffUser.email,
-        role: staffUser.role,
+        role: staffUser.role, // keep as-is: "admin" | "role_admin" | "sub_admin" | "associates"
       };
-
-      // If superadmin ("admin" role), send all permissions true
+  
       if (staffUser.role === "admin" || staffUser.isSuperAdmin?.()) {
-        // Use the app's default permission tree but set every permission action to true
-        const defaultPerms = StaffUser.defaultPermissions
-          ? StaffUser.defaultPermissions()
-          : {}; // fallback for older codebases
-
-        function makeTrueTree(obj) {
-          if (Array.isArray(obj)) {
-            return obj.map(makeTrueTree);
-          }
-          if (obj && typeof obj === "object") {
-            if (Object.prototype.hasOwnProperty.call(obj, "view") &&
-                Object.prototype.hasOwnProperty.call(obj, "create") &&
-                Object.prototype.hasOwnProperty.call(obj, "update") &&
-                Object.prototype.hasOwnProperty.call(obj, "delete")) {
-              return { view: true, create: true, update: true, delete: true };
-            }
-            // recurse object
-            const copy = {};
-            for (const k of Object.keys(obj)) copy[k] = makeTrueTree(obj[k]);
-            return copy;
-          }
-          return obj;
-        }
-
-        result.permissions = makeTrueTree(defaultPerms);
-      } else if (typeof staffUser.permissions === "object" && !staffUser.isSuperAdmin?.()) {
-        // Provide their real permissions
-        result.permissions = staffUser.permissions;
+        result.permissions = buildAllTruePermissions();
+        result.roleName = "Super Admin"; // display name only — role stays "admin"
+      } else if (staffUser.roleRef && staffUser.roleRef.isActive) {
+        result.permissions = staffUser.roleRef.permissions;
+        result.roleName = staffUser.roleRef.name; // e.g. "Sub Admin", "Regional Sub Admin"
+      } else {
+        console.warn(
+          `[adminCheckAuth] StaffUser ${staffUser._id} has no active roleRef — denying all permissions.`
+        );
+        result.permissions = StaffUser.defaultPermissions();
+        result.roleName = null;
       }
-      console.log(result);
+  
       return res.status(200).json(result);
     } catch (error) {
       console.error("[adminCheckAuth] Error encountered:", error);
@@ -463,92 +514,261 @@ class AuthController {
   };
 
   /**
-   * Admin/Staff: Verify OTP & Generate Token (POST /api/auth/admin/verify)
-   */
-  adminVerifyAccount = async (req, res) => {
-    try {
-      let { email, otp, role } = req.body;
-      if (!email || !otp || !role) {
-        console.log("Missing fields in adminVerifyAccount:", { email, otp, role });
-        return res.status(400).json({ message: "Email, OTP, and Role are required" });
-      }
-      email = email.trim().toLowerCase();
-      role = role.trim();
+ * Admin/Staff: Verify OTP & Generate Token (POST /api/auth/admin/verify)
+ */
+// adminVerifyAccount = async (req, res) => {
+//   try {
+//     let { email, otp, role } = req.body;
+//     if (!email || !otp || !role) {
+//       console.log("Missing fields in adminVerifyAccount:", { email, otp, role });
+//       return res.status(400).json({ message: "Email, OTP, and Role are required" });
+//     }
+//     email = email.trim().toLowerCase();
+//     role = role.trim();
 
-      if (!STAFF_ROLES.includes(role)) {
-        console.log("Invalid user role in adminVerifyAccount:", role);
-        return res.status(400).json({ message: "Invalid user role." });
-      }
+//     if (!STAFF_ROLES.includes(role)) {
+//       console.log("Invalid user role in adminVerifyAccount:", role);
+//       return res.status(400).json({ message: "Invalid user role." });
+//     }
 
-      console.log(req.body);
-      // Find staffUser by email, role and OTP
-      const staffUser = await StaffUser.findOneAndUpdate(
-        { email, otp },
-        { $unset: { otp: 1, otpExpiresAt: 1, otpAttempts: 1, otpGeneratedAt: 1 }, lastLogin: new Date() },
-        { new: true }
-      ).lean();
+//     // Find staffUser by email, role and OTP
+//     const staffUser = await StaffUser.findOneAndUpdate(
+//       { email, otp },
+//       { $unset: { otp: 1, otpExpiresAt: 1, otpAttempts: 1, otpGeneratedAt: 1 }, lastLogin: new Date() },
+//       { new: true }
+//     ).populate("roleRef", "name type permissions isActive");
 
-      console.log(staffUser);
+//     if (!staffUser) {
+//       console.log("Invalid credentials or OTP in adminVerifyAccount for:", { email, role });
+//       return res.status(401).json({ message: "Invalid credentials or OTP" });
+//     }
 
-      if (!staffUser) {
-        console.log("Invalid credentials or OTP in adminVerifyAccount for:", { email, role });
-        return res.status(401).json({ message: "Invalid credentials or OTP" });
-      }
+//     // Prepare permission logic for admin role:
+//     let returnedPermissions;
+//     let roleName = null;
 
-      // Prepare permission logic for admin role:
-      let returnedPermissions;
-      if (staffUser.role === "admin") {
-        // Use the application's buildDefaultPermissions and set all actions to true recursively.
-        const defaultPerms = StaffUser.defaultPermissions
-          ? StaffUser.defaultPermissions()
-          : {};
-        function makeTrueTree(obj) {
-          if (Array.isArray(obj)) {
-            return obj.map(makeTrueTree);
-          }
-          if (obj && typeof obj === "object") {
-            if (
-              Object.prototype.hasOwnProperty.call(obj, "view") &&
-              Object.prototype.hasOwnProperty.call(obj, "create") &&
-              Object.prototype.hasOwnProperty.call(obj, "update") &&
-              Object.prototype.hasOwnProperty.call(obj, "delete")
-            ) {
-              return { view: true, create: true, update: true, delete: true };
-            }
-            const copy = {};
-            for (const k of Object.keys(obj)) copy[k] = makeTrueTree(obj[k]);
-            return copy;
-          }
-          return obj;
-        }
-        returnedPermissions = makeTrueTree(defaultPerms);
-      } else {
-        returnedPermissions = staffUser.permissions || {};
-      }
+//     if (staffUser.role === "admin") {
+//       // Use the application's buildDefaultPermissions and set all actions to true recursively.
+//       const defaultPerms = StaffUser.defaultPermissions
+//         ? StaffUser.defaultPermissions()
+//         : {};
 
-      const tokenPayload = {
-        id: staffUser._id,
-        email: staffUser.email,
-        role: staffUser.role
-      };
-      // Only attach real permissions in token if NOT super admin (like checkAuth does)
-      if (staffUser.role !== "admin" && returnedPermissions) {
-        tokenPayload.permissions = returnedPermissions;
-      }
-      const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "1d" });
+//       function makeTrueTree(obj) {
+//         if (Array.isArray(obj)) {
+//           return obj.map(makeTrueTree);
+//         }
+//         if (obj && typeof obj === "object") {
+//           if (
+//             Object.prototype.hasOwnProperty.call(obj, "view") &&
+//             Object.prototype.hasOwnProperty.call(obj, "create") &&
+//             Object.prototype.hasOwnProperty.call(obj, "update") &&
+//             Object.prototype.hasOwnProperty.call(obj, "delete")
+//           ) {
+//             return { view: true, create: true, update: true, delete: true };
+//           }
+//           const copy = {};
+//           for (const k of Object.keys(obj)) copy[k] = makeTrueTree(obj[k]);
+//           return copy;
+//         }
+//         return obj;
+//       }
 
-      // NOTE: do not log tokens into ExpiredTokenModel at creation, only mark as expired on signout.
+//       returnedPermissions = makeTrueTree(defaultPerms);
+//     } else {
+//       // Non-superadmin: permissions live on the linked Role now.
+//       if (staffUser.roleRef && staffUser.roleRef.isActive) {
+//         returnedPermissions = staffUser.roleRef.permissions || {};
+//         roleName = staffUser.roleRef.name;
+//       } else {
+//         console.warn(
+//           `[adminVerifyAccount] StaffUser ${staffUser._id} has no active roleRef — denying all permissions.`
+//         );
+//         returnedPermissions = StaffUser.defaultPermissions ? StaffUser.defaultPermissions() : {};
+//       }
+//     }
 
-      console.log("adminVerifyAccount: successfully verified:", { id: staffUser._id, email: staffUser.email, role: staffUser.role });
+//     const tokenPayload = {
+//       id: staffUser._id,
+//       email: staffUser.email,
+//       role: staffUser.role,
+//     };
+//     // Only attach real permissions in token if NOT super admin (like checkAuth does)
+//     if (staffUser.role !== "admin" && returnedPermissions) {
+//       tokenPayload.permissions = returnedPermissions;
+//     }
+//     const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "1d" });
 
-      return res
-        .status(200)
-        .json({ message: "Account verified successfully", token, permissions: returnedPermissions });
-    } catch (error) {
-      console.error("AdminVerifyAccount Error:", error);
-      return res.status(500).json({ message: "Internal Server Error" });
+//     // NOTE: do not log tokens into ExpiredTokenModel at creation, only mark as expired on signout.
+
+//     return res
+//       .status(200)
+//       .json({
+//         message: "Account verified successfully",
+//         token,
+//         permissions: returnedPermissions,
+//         role: staffUser.role, // send role explicitly
+//         roleName, // NEW: name of the assigned Role (null for SuperAdmin)
+//       });
+//   } catch (error) {
+//     console.error("AdminVerifyAccount Error:", error);
+//     return res.status(500).json({ message: "Internal Server Error" });
+//   }
+// };
+
+
+
+adminVerifyAccount = async (req, res) => {
+  try {
+    let { email, otp, role } = req.body;
+    if (!email || !otp || !role) {
+      return res.status(400).json({ message: "Email, OTP, and Role are required" });
     }
-  };
+    email = email.trim().toLowerCase();
+    role = role.trim();
+
+    if (!STAFF_ROLES.includes(role)) {
+      return res.status(400).json({ message: "Invalid user role." });
+    }
+
+    const staffUser = await StaffUser.findOneAndUpdate(
+      { email, otp },
+      { $unset: { otp: 1, otpExpiresAt: 1, otpAttempts: 1, otpGeneratedAt: 1 }, lastLogin: new Date() },
+      { new: true }
+    ).populate({ path: "roleRef", model: Role, select: "name type permissions isActive" });
+
+    if (!staffUser) {
+      return res.status(401).json({ message: "Invalid credentials or OTP" });
+    }
+
+    let returnedPermissions;
+    let roleName = null;
+
+    if (staffUser.role === "admin") {
+      returnedPermissions = buildAllTruePermissions();
+      roleName = "Super Admin";
+    } else if (staffUser.roleRef && staffUser.roleRef.isActive) {
+      console.log(staffUser);
+      returnedPermissions = staffUser.roleRef.permissions || {};
+      roleName = staffUser.roleRef.name;
+    } else {
+      console.warn(
+        `[adminVerifyAccount] StaffUser ${staffUser._id} has no active roleRef — denying all permissions.`
+      );
+      returnedPermissions = StaffUser.defaultPermissions();
+    }
+
+    const tokenPayload = {
+      id: staffUser._id,
+      email: staffUser.email,
+      role: staffUser.role,
+    };
+    if (staffUser.role !== "admin" && returnedPermissions) {
+      tokenPayload.permissions = returnedPermissions;
+    }
+    const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "1d" });
+
+    return res.status(200).json({
+      message: "Account verified successfully",
+      token,
+      permissions: returnedPermissions,
+      role: staffUser.role,   // "admin" | "role_admin" | "sub_admin" | "associates" — single key, no dupe
+      roleName,                // display name, e.g. "Sub Admin" / "Super Admin" / null if unassigned
+    });
+  } catch (error) {
+    console.error("AdminVerifyAccount Error:", error);
+    return res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+  // /**
+  //  * Admin/Staff: Verify OTP & Generate Token (POST /api/auth/admin/verify)
+  //  */
+  // adminVerifyAccount = async (req, res) => {
+  //   try {
+  //     let { email, otp, role } = req.body;
+  //     if (!email || !otp || !role) {
+  //       console.log("Missing fields in adminVerifyAccount:", { email, otp, role });
+  //       return res.status(400).json({ message: "Email, OTP, and Role are required" });
+  //     }
+  //     email = email.trim().toLowerCase();
+  //     role = role.trim();
+
+  //     if (!STAFF_ROLES.includes(role)) {
+  //       console.log("Invalid user role in adminVerifyAccount:", role);
+  //       return res.status(400).json({ message: "Invalid user role." });
+  //     }
+
+  //     // Find staffUser by email, role and OTP
+  //     const staffUser = await StaffUser.findOneAndUpdate(
+  //       { email, otp },
+  //       { $unset: { otp: 1, otpExpiresAt: 1, otpAttempts: 1, otpGeneratedAt: 1 }, lastLogin: new Date() },
+  //       { new: true }
+  //     ).lean();
+
+  //     if (!staffUser) {
+  //       console.log("Invalid credentials or OTP in adminVerifyAccount for:", { email, role });
+  //       return res.status(401).json({ message: "Invalid credentials or OTP" });
+  //     }
+
+  //     // Prepare permission logic for admin role:
+  //     let returnedPermissions;
+  //     if (staffUser.role === "admin") {
+  //       // Use the application's buildDefaultPermissions and set all actions to true recursively.
+  //       const defaultPerms = StaffUser.defaultPermissions
+  //         ? StaffUser.defaultPermissions()
+  //         : {};
+
+  //       function makeTrueTree(obj) {
+  //         if (Array.isArray(obj)) {
+  //           return obj.map(makeTrueTree);
+  //         }
+  //         if (obj && typeof obj === "object") {
+  //           if (
+  //             Object.prototype.hasOwnProperty.call(obj, "view") &&
+  //             Object.prototype.hasOwnProperty.call(obj, "create") &&
+  //             Object.prototype.hasOwnProperty.call(obj, "update") &&
+  //             Object.prototype.hasOwnProperty.call(obj, "delete")
+  //           ) {
+  //             return { view: true, create: true, update: true, delete: true };
+  //           }
+  //           const copy = {};
+  //           for (const k of Object.keys(obj)) copy[k] = makeTrueTree(obj[k]);
+  //           return copy;
+  //         }
+  //         return obj;
+  //       }
+
+  //       returnedPermissions = makeTrueTree(defaultPerms);
+  //     } else {
+  //       returnedPermissions = staffUser.permissions || {};
+  //     }
+
+  //     const tokenPayload = {
+  //       id: staffUser._id,
+  //       email: staffUser.email,
+  //       role: staffUser.role
+  //     };
+  //     // Only attach real permissions in token if NOT super admin (like checkAuth does)
+  //     if (staffUser.role !== "admin" && returnedPermissions) {
+  //       tokenPayload.permissions = returnedPermissions;
+  //     }
+  //     const token = jwt.sign(tokenPayload, process.env.JWT_SECRET, { expiresIn: "1d" });
+
+  //     // NOTE: do not log tokens into ExpiredTokenModel at creation, only mark as expired on signout.
+
+  //     return res
+  //       .status(200)
+  //       .json({ 
+  //         message: "Account verified successfully", 
+  //         token, 
+  //         permissions: returnedPermissions, 
+  //         role: staffUser.role // send role explicitly
+  //       });
+  //   } catch (error) {
+  //     console.error("AdminVerifyAccount Error:", error);
+  //     return res.status(500).json({ message: "Internal Server Error" });
+  //   }
+  // };
 
   // ---[ The rest (subAdminLogin, subAdminCheckAuth, loginAs) stays as legacy, requires upgrade to staffUser eventually. ]---
 

@@ -18,6 +18,7 @@ import domainRouter from "./Admin/domain.router.js";
 import autoShopOwnersRouter from "./Admin/autoShopOwners.routes.js";
 import invoiceRouter from "./Admin/invoices.routes.js";
 import staffUserManagementRouter from "./Admin/Staffuser.routes .js";
+import roleRouter from "./Admin/role.routes.js";
 
 
 const adminRouter = express.Router();
@@ -118,6 +119,7 @@ adminRouter.use("/autoshopowners", autoShopOwnersRouter);
 adminRouter.use("/dealer", dealerRouter);
 
 
+console.log("Mounting /leads route with leadsRouter");
 adminRouter.use("/leads", leadsRouter);
 
 adminRouter.use("/accounts", accountsRouter);
@@ -159,7 +161,7 @@ adminRouter.get(
 
 adminRouter.use("/invoices", invoiceRouter);
 
-
+adminRouter.use("/roles", roleRouter);
 adminRouter.use("/staff-users", staffUserManagementRouter);
 
 

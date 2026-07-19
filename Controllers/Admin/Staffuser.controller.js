@@ -13,6 +13,7 @@ import {
   isValidSubNav,
   BASE_ACTIONS,
 } from "../../constants/permissionModules.js";
+import { Role, ONBOARDABLE_ROLE_TYPES } from "../../Schema/RolesAndPermissions/Role.schema.js";
 
 const ONBOARDABLE_ROLES = ["role_admin", "sub_admin", "associates"]; // SuperAdmin never re-created via onboarding
 
@@ -79,50 +80,32 @@ function mergePermissions(base, patch) {
   return merged;
 }
 
-class StaffUserController {
-  // ─── AUTH ────────────────────────────────────────────────────────────────
+// staffUser.controller.js — only the changed methods shown
 
-  /**
-   * POST /api/auth/staff/login
-   * Body: { email, password }
-   * Single login endpoint for all 4 roles — role is read from the DB record,
-   * never trusted from the request body.
-   */
+
+// (remove the permission-payload validate/merge helpers — those now live in role.controller.js)
+
+class StaffUserController {
   async login(req, res) {
     try {
       const { email, password } = req.body;
-      if (!email || !password) {
-        return res.status(400).json({ success: false, message: "Email and password are required." });
-      }
+      if (!email || !password) return res.status(400).json({ success: false, message: "Email and password are required." });
 
-      const staff = await StaffUser.findOne({ email: email.trim().toLowerCase() });
-      if (!staff) {
-        return res.status(401).json({ success: false, message: "Invalid credentials." });
-      }
-      if (!staff.isActive) {
-        return res.status(403).json({ success: false, message: "Your account is inactive. Contact the SuperAdmin." });
-      }
+      const staff = await StaffUser.findOne({ email: email.trim().toLowerCase() }).populate("roleRef");
+      if (!staff) return res.status(401).json({ success: false, message: "Invalid credentials." });
+      if (!staff.isActive) return res.status(403).json({ success: false, message: "Your account is inactive. Contact the SuperAdmin." });
 
       const valid = await staff.comparePassword(password);
-      if (!valid) {
-        return res.status(401).json({ success: false, message: "Invalid credentials." });
-      }
+      if (!valid) return res.status(401).json({ success: false, message: "Invalid credentials." });
 
       staff.lastLogin = new Date();
       await staff.save();
 
-      const token = jwt.sign({ id: staff._id, role: staff.role }, process.env.JWT_SECRET, {
-        expiresIn: "7d",
-      });
+      const token = jwt.sign({ id: staff._id, role: staff.role }, process.env.JWT_SECRET, { expiresIn: "7d" });
 
       await logActivity({
-        performedBy: staff._id,
-        performedByRole: staff.role,
-        performedByName: staff.name,
-        action: "LOGIN",
-        description: "Staff user logged in",
-        targetStaffUser: staff._id,
-        ipAddress: getIp(req),
+        performedBy: staff._id, performedByRole: staff.role, performedByName: staff.name,
+        action: "LOGIN", description: "Staff user logged in", targetStaffUser: staff._id, ipAddress: getIp(req),
       });
 
       return res.status(200).json({
@@ -133,7 +116,9 @@ class StaffUserController {
           name: staff.name,
           email: staff.email,
           role: staff.role,
-          permissions: staff.role === "admin" ? null : staff.permissions,
+          roleName: staff.roleRef?.name ?? null,
+          // SuperAdmin: null (bypasses checks). Everyone else: their role's permissions.
+          permissions: staff.role === "admin" ? null : staff.roleRef?.permissions ?? null,
         },
       });
     } catch (err) {
@@ -141,71 +126,52 @@ class StaffUserController {
     }
   }
 
-  // ─── ONBOARDING / CRUD (SuperAdmin only — gate with requireSuperAdmin) ────
-
-  /**
-   * POST /api/admin/staff-users
-   * Body: { name, email, phone, password, role, permissions? }
-   * SuperAdmin onboards a new Admin / SubAdmin / Business Associate.
-   */
+  /** POST /api/admin/staff-users  Body: { name, email, phone, password, roleId } */
   async create(req, res) {
     try {
-      const { name, email, phone, password, role, permissions } = req.body;
+      const { name, email, phone, password, roleId } = req.body;
 
-      if (!name || !email || !password || !role) {
-        return res.status(400).json({ success: false, message: "name, email, password, and role are required." });
+      if (!name || !email || !password || !roleId) {
+        return res.status(400).json({ success: false, message: "name, email, password, and roleId are required." });
       }
-      if (!ONBOARDABLE_ROLES.includes(role)) {
-        return res.status(400).json({
-          success: false,
-          message: `role must be one of: ${ONBOARDABLE_ROLES.join(", ")}`,
-        });
+
+      const roleDoc = await Role.findById(roleId);
+      if (!roleDoc || !roleDoc.isActive) {
+        return res.status(400).json({ success: false, message: "Selected role was not found or is inactive." });
       }
 
       const exists = await StaffUser.findOne({ email: email.toLowerCase() });
-      if (exists) {
-        return res.status(409).json({ success: false, message: "A staff user with this email already exists." });
-      }
-
-      let finalPermissions = buildDefaultPermissions();
-      if (permissions) {
-        const { valid, error } = validatePermissionsPayload(permissions);
-        if (!valid) return res.status(400).json({ success: false, message: error });
-        finalPermissions = mergePermissions(finalPermissions, permissions);
-      }
+      if (exists) return res.status(409).json({ success: false, message: "A staff user with this email already exists." });
 
       const staff = new StaffUser({
         name,
         email: email.toLowerCase(),
         phone: phone || "",
         password,
-        role,
-        permissions: finalPermissions,
+        role: roleDoc.type,   // role "type" (role_admin/sub_admin/associates) denormalized for auth
+        roleRef: roleDoc._id, // source of truth for permissions
         createdBy: req.user.id,
       });
       await staff.save();
 
       await logActivity({
-        performedBy: req.user.id,
-        performedByRole: req.user.role,
-        performedByName: req.user.name,
-        action: "CREATE",
-        description: `Onboarded ${role}: ${name} (${email})`,
-        targetStaffUser: staff._id,
-        ipAddress: getIp(req),
+        performedBy: req.user.id, performedByRole: req.user.role, performedByName: req.user.name,
+        action: "CREATE", description: `Onboarded ${roleDoc.type} (role: ${roleDoc.name}): ${name} (${email})`,
+        targetStaffUser: staff._id, ipAddress: getIp(req),
       });
 
-      return res.status(201).json({ success: true, data: staff });
+      const populated = await staff.populate("roleRef");
+      return res.status(201).json({ success: true, data: populated });
     } catch (err) {
       return res.status(500).json({ success: false, message: "Failed to create staff user", error: err.message });
     }
   }
 
-  /** GET /api/admin/staff-users — list all non-SuperAdmin staff (SuperAdmin manages everyone but itself). */
   async getAll(req, res) {
     try {
       const staffUsers = await StaffUser.find({ role: { $ne: "admin" } })
         .populate("createdBy", "name email")
+        .populate("roleRef", "name type permissions")
         .sort({ createdAt: -1 });
       return res.status(200).json({ success: true, data: staffUsers });
     } catch (err) {
@@ -213,10 +179,11 @@ class StaffUserController {
     }
   }
 
-  /** GET /api/admin/staff-users/:id */
   async getOne(req, res) {
     try {
-      const staff = await StaffUser.findById(req.params.id).populate("createdBy", "name email");
+      const staff = await StaffUser.findById(req.params.id)
+        .populate("createdBy", "name email")
+        .populate("roleRef", "name type permissions");
       if (!staff) return res.status(404).json({ success: false, message: "Staff user not found" });
       return res.status(200).json({ success: true, data: staff });
     } catch (err) {
@@ -224,15 +191,13 @@ class StaffUserController {
     }
   }
 
-  /** PUT /api/admin/staff-users/:id — update name/email/phone only (not role, not permissions). */
+  /** PUT /api/admin/staff-users/:id — now also allows reassigning roleId (same type only). */
   async update(req, res) {
     try {
-      const { name, email, phone } = req.body;
+      const { name, email, phone, roleId } = req.body;
       const staff = await StaffUser.findById(req.params.id);
       if (!staff) return res.status(404).json({ success: false, message: "Staff user not found" });
-      if (staff.role === "admin") {
-        return res.status(403).json({ success: false, message: "SuperAdmin account cannot be modified here." });
-      }
+      if (staff.role === "admin") return res.status(403).json({ success: false, message: "SuperAdmin account cannot be modified here." });
 
       if (email && email.toLowerCase() !== staff.email) {
         const dup = await StaffUser.findOne({ email: email.toLowerCase(), _id: { $ne: staff._id } });
@@ -241,64 +206,32 @@ class StaffUserController {
       }
       if (name) staff.name = name;
       if (phone !== undefined) staff.phone = phone;
+
+      if (roleId && String(roleId) !== String(staff.roleRef)) {
+        const roleDoc = await Role.findById(roleId);
+        if (!roleDoc || !roleDoc.isActive) return res.status(400).json({ success: false, message: "Selected role was not found or is inactive." });
+        if (roleDoc.type !== staff.role) {
+          return res.status(400).json({ success: false, message: `Cannot reassign to a role of type "${roleDoc.type}" — staff role type is fixed at "${staff.role}".` });
+        }
+        staff.roleRef = roleDoc._id;
+      }
+
       await staff.save();
 
       await logActivity({
-        performedBy: req.user.id,
-        performedByRole: req.user.role,
-        performedByName: req.user.name,
-        action: "UPDATE",
-        description: `Updated staff user: ${staff.name}`,
-        targetStaffUser: staff._id,
-        ipAddress: getIp(req),
+        performedBy: req.user.id, performedByRole: req.user.role, performedByName: req.user.name,
+        action: "UPDATE", description: `Updated staff user: ${staff.name}`, targetStaffUser: staff._id, ipAddress: getIp(req),
       });
 
-      return res.status(200).json({ success: true, data: staff });
+      const populated = await staff.populate("roleRef", "name type permissions");
+      return res.status(200).json({ success: true, data: populated });
     } catch (err) {
       return res.status(500).json({ success: false, message: "Failed to update staff user", error: err.message });
     }
   }
 
-  /**
-   * PATCH /api/admin/staff-users/:id/permissions
-   * Body: { permissions: <partial tree> }
-   * Deep-merges into the existing permissions document — omitted keys are
-   * left untouched, so the SuperAdmin can flip a single checkbox without
-   * resending the whole tree.
-   */
-  async updatePermissions(req, res) {
-    try {
-      const { permissions } = req.body;
-      const { valid, error } = validatePermissionsPayload(permissions);
-      if (!valid) return res.status(400).json({ success: false, message: error });
 
-      const staff = await StaffUser.findById(req.params.id);
-      if (!staff) return res.status(404).json({ success: false, message: "Staff user not found" });
-      if (staff.role === "admin") {
-        return res.status(403).json({ success: false, message: "SuperAdmin permissions cannot be modified — SuperAdmin bypasses all checks." });
-      }
 
-      const before = JSON.stringify(staff.permissions);
-      staff.permissions = mergePermissions(staff.permissions?.toObject?.() ?? staff.permissions, permissions);
-      staff.markModified("permissions");
-      await staff.save();
-
-      await logActivity({
-        performedBy: req.user.id,
-        performedByRole: req.user.role,
-        performedByName: req.user.name,
-        action: "PERMISSION_CHANGE",
-        description: `Updated permissions for: ${staff.name}`,
-        targetStaffUser: staff._id,
-        ipAddress: getIp(req),
-        metadata: { before: JSON.parse(before), after: staff.permissions },
-      });
-
-      return res.status(200).json({ success: true, data: staff });
-    } catch (err) {
-      return res.status(500).json({ success: false, message: "Failed to update permissions", error: err.message });
-    }
-  }
 
   /** PATCH /api/admin/staff-users/:id/status — activate/deactivate. */
   async toggleStatus(req, res) {
@@ -418,6 +351,12 @@ class StaffUserController {
     const { PERMISSION_TREE } = await import("../../constants/permissionModules.js");
     return res.status(200).json({ success: true, data: PERMISSION_TREE });
   }
+
+  // REMOVE updatePermissions() entirely — permission edits now go through
+  // RoleController#updatePermissions (PATCH /api/admin/roles/:id/permissions).
+
+  // toggleStatus / resetPassword / remove / getActivity / getPermissionModules: unchanged.
 }
 
 export default StaffUserController;
+
