@@ -901,6 +901,90 @@ adminVerifyAccount = async (req, res) => {
     }
   };
 
+  /**
+   * loginAsStaffUser
+   * Allows privileged users to impersonate a StaffUser (SuperAdmin, Admin, SubAdmin, Associates).
+   * 
+   * Expects:
+   *   - req.body.staffUserId (ID of staff user to impersonate)
+   *   - req.body.permissions (optional; enforced/gated elsewhere; allowed only for non-admins)
+   *   - req.body.role (role slug string: "admin", "role_admin", "sub_admin", "associates")
+   */
+  loginAsStaffUser = async (req, res) => {
+    try {
+      const { staffUserId, permissions: returnedPermissions, role: sentRole } = req.body;
+
+      if (!staffUserId || !sentRole) {
+        console.log("loginAsStaffUser - Missing required params:", req.body);
+        return res.status(400).json({
+          success: false,
+          message: "staffUserId and role are required."
+        });
+      }
+
+      // Ensure role is a valid staff role
+      if (!STAFF_ROLES.includes(sentRole)) {
+        return res.status(400).json({ success: false, message: "Invalid role provided." });
+      }
+
+      // Fetch staff user and validate role match
+      const staffUser = await StaffUser.findOne({
+        _id: staffUserId,
+        role: sentRole,
+        isActive: true,
+      }).select("-password");
+
+      if (!staffUser) {
+        return res.status(404).json({
+          success: false,
+          message: "Staff user not found or not active."
+        });
+      }
+
+      const tokenPayload = {
+        id: staffUser._id,
+        email: staffUser.email,
+        role: staffUser.role,
+      };
+
+      if (staffUser.role !== "admin" && returnedPermissions) {
+        tokenPayload.permissions = returnedPermissions;
+      }
+
+      const token = jwt.sign(
+        tokenPayload,
+        process.env.JWT_SECRET,
+        { expiresIn: "1d" }
+      );
+
+      // Set a display role name for convenience
+      let roleName = null;
+      if (staffUser.role === "admin") roleName = "Super Admin";
+      else if (staffUser.role === "role_admin") roleName = "Admin";
+      else if (staffUser.role === "sub_admin") roleName = "Sub Admin";
+      else if (staffUser.role === "associates") roleName = "Business Associate";
+
+      return res.status(200).json({
+        message: "Account verified successfully",
+        token,
+        permissions: returnedPermissions,
+        role: staffUser.role,
+        roleName, // e.g. "Sub Admin" | "Super Admin" | "Admin" | "Business Associate"
+        staffUser: {
+          id: staffUser._id,
+          name: staffUser.name,
+          email: staffUser.email,
+          phone: staffUser.phone,
+          role: staffUser.role,
+          isActive: staffUser.isActive,
+        },
+      });
+    } catch (err) {
+      console.log("loginAsStaffUser - Exception:", err);
+      return res.status(500).json({ success: false, message: "loginAsStaffUser failed", error: err.message });
+    }
+  };
+
 }
 
 export default AuthController;

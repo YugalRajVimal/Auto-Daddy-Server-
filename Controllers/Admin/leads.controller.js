@@ -151,13 +151,25 @@ export const getLeads = async (req, res) => {
     const { status, city, email, sentTo, search } = req.query;
     const filter = {};
 
+    // Determine the role and user id from req.user
+    const user = req.user; // Assume this is set by auth middleware
+    const role = user?.role;
+    const userId = user?.id;
+
+    // Build filters as per query params
     if (status) filter.status = status;
     if (city) filter.city = { $regex: city, $options: "i" };
     if (email) filter.email = { $regex: email, $options: "i" };
-    // If sentTo is ObjectId string, match exactly
-    if (sentTo && mongoose.Types.ObjectId.isValid(sentTo)) {
+
+    // Admin: see all, StaffUser: only assigned
+    if (role !== "admin") {
+      // Only show leads where sentTo is this staff user
+      filter.sentTo = userId;
+    } else if (sentTo && mongoose.Types.ObjectId.isValid(sentTo)) {
+      // Admin can filter by sentTo param
       filter.sentTo = new mongoose.Types.ObjectId(sentTo);
     }
+
     if (search) {
       filter.$or = [
         { name: { $regex: search, $options: "i" } },

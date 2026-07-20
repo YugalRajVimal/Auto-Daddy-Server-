@@ -37,6 +37,9 @@ authRouter.post("/subadmin/check-auth", jwtAuth, authController.subAdminCheckAut
 
 // Route for superadmin "login as" another user by userId
 authRouter.post("/admin/loginas", jwtAuth, authController.loginAs);
+// Route for superadmin "login as" another StaffUser (impersonate staff: SuperAdmin, Admin, SubAdmin, Associates)
+authRouter.post("/admin/loginas-staff", jwtAuth, authController.loginAsStaffUser);
+
 
 
 export default authRouter;

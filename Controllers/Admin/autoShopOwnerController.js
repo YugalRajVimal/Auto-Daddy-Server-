@@ -164,6 +164,8 @@ class AutoShopOwnerController {
               : [];
             const customerCount = customers.length;
 
+            // console.log(owner);
+
             return {
               ...owner,
               deals,
@@ -200,12 +202,10 @@ class AutoShopOwnerController {
     try {
       let { name, email, phone, countryCode, pincode, address, shopType, city } = req.body;
 
-      // If countryCode not present, use +1 by default
+      // Set default country code if not present
       if (!countryCode) {
         countryCode = "+1";
       }
-
-      console.log(shopType);
 
       // ── Required field check ─────────────────────────────────────────────
       if (!name || !email || !phone || !pincode || !shopType || !city) {
@@ -236,7 +236,6 @@ class AutoShopOwnerController {
           message: `Invalid shopType. Must be a non-empty array with only allowed values: ${allowedShopTypes.join(", ")}.`,
         });
       }
- 
 
       // ── Duplicate email check ────────────────────────────────────────────
       const existingEmail = await User.findOne({
@@ -259,24 +258,29 @@ class AutoShopOwnerController {
         });
       }
 
-      // ── Create BusinessProfile ───────────────────────────────────────────
-      // We'll use the name, businessAddress, city, pincode, businessPhone = phone, businessEmail = email
-      // Other values can be left blank or default per schema
-
+      // ── Save ALL details to BusinessProfile schema ───────────────────────
       const businessProfileData = {
+        businessName: String(name).trim(),
+        businessAddress: address ? String(address).trim().slice(0, 100) : "",
+        city: city ? String(city).trim() : "",
+        pincode: pincode ? String(pincode).trim() : "",
         businessPhone: String(phone).trim(),
+        businessEmail: email ? email.trim().toLowerCase() : "",
+        // Optional: Add any other fields from req.body to businessProfileData as needed by schema
+        // Other optional/default fields will be handled by the Mongoose schema
       };
+
       const newBusinessProfile = await BusinessProfileModel.create(businessProfileData);
 
-      // ── Create Auto Shop Owner (User) ────────────────────────────────────
+      // ── Save User with minimal details, point to businessProfile ─────────
       const newOwner = await User.create({
-        name: name.trim(),
+        // name: String(name).trim(),
         email: email.trim().toLowerCase(),
         phone: String(phone).trim(),
         countryCode,
-        pincode: pincode.trim(),
-        address: address ? String(address).trim().slice(0, 100) : "",
-        city: city ? String(city).trim() : "",
+        // pincode: pincode ? String(pincode).trim() : "",
+        // address: address ? String(address).trim().slice(0, 100) : "",
+        // city: city ? String(city).trim() : "",
         role: "autoshopowner",
         shopType,
         isProfileComplete: false,
@@ -287,8 +291,8 @@ class AutoShopOwnerController {
         businessProfile: newBusinessProfile._id,
       });
 
-      // Optionally, you might want to do the reverse as well (set the owner's ID on the BusinessProfile)
-      // If your schema or workflow requires it, uncomment below:
+      // Optionally, link the owner back in BusinessProfile (one-way or two-way)
+      // If needed:
       // newBusinessProfile.owner = newOwner._id;
       // await newBusinessProfile.save();
 
@@ -309,7 +313,7 @@ class AutoShopOwnerController {
           status: newOwner.status,
           isProfileComplete: newOwner.isProfileComplete,
           isBusinessProfileCompleted: newOwner.isBusinessProfileCompleted,
-          businessProfile: newBusinessProfile, // include business profile
+          businessProfile: newBusinessProfile, // return full business profile object
           createdAt: newOwner.createdAt,
         },
       });

@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import AdminInvoiceItem from "../../../Schema/AdminInvoices/AdminInvoiceItem.js";
 import AdminInvoiceSchema from "../../../Schema/AdminInvoices/AdminInvoice.schema.js";
+import { User } from "../../../Schema/user.schema.js";
 
 // The only allowed unitTypes for items are "Unit" and "Days"
 // All stock/HSN/itemType logic is removed
