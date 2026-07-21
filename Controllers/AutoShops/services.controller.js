@@ -49,6 +49,7 @@ import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fil
   export const getMyServices = async (req, res) => {
     try {
       const userId = req.user.id;
+      const { make, model } = req.query; // Get filters from query params
 
       const user = await User.findById(userId).select("businessProfile");
       if (!user || !user.businessProfile) {
@@ -69,29 +70,64 @@ import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fil
           .json({ success: false, message: "Business profile not found" });
       }
 
-      const services = (business.myServices || []).map(ms => {
-        if (ms && ms.service) {
-          return {
-            _id: ms.service._id,
-            name: ms.service.name,
-            shopType: ms.service.shopType,
-            status: ms.status || "Active", // status comes from myService entry
-            date: ms.date, // date comes from myService entry
-            odoOutRequired: ms.service.odoOutRequired,
-            subServices: Array.isArray(ms.subServices) ? ms.subServices.map(sub => ({
-              name: sub.name,
-              desc: sub.desc,
-              price: sub.price,
-              quantity: sub.quantity, // added quantity
-              tax: sub.tax, // added tax
-              model: sub.model, // add model property in subServices
-              make: sub.make   // add make property in subServices
-            })) : []
-          };
-        }
+      // Filter services based on subService make and model if supplied
+      const services = (business.myServices || [])
+        .map(ms => {
+          if (ms && ms.service) {
+            // Filter subServices by make/model if these filters are provided
+            let filteredSubServices = Array.isArray(ms.subServices) ? ms.subServices : [];
 
-        return null;
-      }).filter(Boolean);
+            // Only filter if at least one filter is provided
+            if (make || model) {
+              filteredSubServices = filteredSubServices.filter(sub => {
+                // Both make and model provided: require both to match (case-insensitive)
+                if (make && model) {
+                  return (
+                    (!sub.make || sub.make.toLowerCase() === make.toLowerCase()) &&
+                    (!sub.model || sub.model.toLowerCase() === model.toLowerCase())
+                  );
+                }
+                // Only make provided
+                if (make) {
+                  return (!sub.make || sub.make.toLowerCase() === make.toLowerCase());
+                }
+                // Only model provided
+                if (model) {
+                  return (!sub.model || sub.model.toLowerCase() === model.toLowerCase());
+                }
+                return true; // fallback (should not hit)
+              });
+            }
+
+            return {
+              _id: ms.service._id,
+              name: ms.service.name,
+              shopType: ms.service.shopType,
+              status: ms.status || "Active", // status comes from myService entry
+              date: ms.date, // date comes from myService entry
+              odoOutRequired: ms.service.odoOutRequired,
+              subServices: filteredSubServices.map(sub => ({
+                name: sub.name,
+                desc: sub.desc,
+                price: sub.price,
+                quantity: sub.quantity, // added quantity
+                tax: sub.tax, // added tax
+                model: sub.model, // add model property in subServices
+                make: sub.make   // add make property in subServices
+              }))
+            };
+          }
+
+          return null;
+        })
+        .filter(Boolean)
+        // Also, if a filter is used and results in no subServices for a service, exclude that service altogether
+        .filter(serviceObj => {
+          if (make || model) {
+            return Array.isArray(serviceObj.subServices) && serviceObj.subServices.length > 0;
+          }
+          return true;
+        });
 
       return res.status(200).json({
         success: true,
