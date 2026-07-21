@@ -172,7 +172,7 @@ const businessProfileSchema = new Schema({
   businessLogo: { type: String },
   bannerImage: { type: String },
   carCompanies: [{ type: Types.ObjectId, ref: 'CarCompany' }],
-  isBusinessActive: { type: Boolean, default: true },
+  isBusinessActive: { type: Boolean, default: false },
 
   myServices: [myServiceSchema],
   serviceWeWorkWith: [{ type: Types.ObjectId, ref: 'Services' }],
