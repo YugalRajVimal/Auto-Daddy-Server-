@@ -3,7 +3,9 @@ import express from "express";
 // import { setPrefix, getPrefix, getAllPrefixes } from "../../Controllers/AutoShops/jobCardPrefix.controller.js";
 import { getAllPrefixes, getPrefix, setPrefix } from "../../Controllers/AutoShops/Jobcardprefix.controller.js";
 import jwtAuth from "../../middlewares/Auth/auth.middleware.js";
-import { peekNextJobCardIdentifiers } from "../../Controllers/AutoShops/Jobcardidentifier.helper.js";
+import { peekNextJobCardIdentifiers, setJobCardCounter } from "../../Controllers/AutoShops/Jobcardidentifier.helper.js";
+import { User } from "../../Schema/user.schema.js";
+import mongoose from "mongoose";
 
 const jobCardPrefixRouter = express.Router();
 
@@ -18,40 +20,65 @@ jobCardPrefixRouter.put("/", setPrefix);
 jobCardPrefixRouter.get("/", getPrefix);
 
 // GET /next - returns { jobCardNo, jobCardId, prefixSet, year }
-// For UI preview before job card creation
 jobCardPrefixRouter.get("/next", async (req, res) => {
-  try {
-    // Assumes jwtAuth => req.user.id is present
-    const user = req.user;
-
-    // Defensive check for user (shouldn't ever hit, but good API hygiene)
-    if (!user || !user.id) {
-      return res.status(401).json({ success: false, message: "Not authenticated" });
+    try {
+      const user = req.user;
+      if (!user || !user.id) {
+        return res.status(401).json({ success: false, message: "Not authenticated" });
+      }
+  
+      const freshUser = await User.findById(user.id).select("businessProfile");
+      if (!freshUser || !freshUser.businessProfile) {
+        return res.status(403).json({ success: false, message: "Business profile not found for user" });
+      }
+  
+      const data = await peekNextJobCardIdentifiers(freshUser.businessProfile);
+      return res.status(200).json({ success: true, data });
+    } catch (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to preview next job card prefix/number",
+        error: err?.message || err,
+      });
     }
-
-    // Fetch fresh user object to ensure up-to-date businessProfile field is present
-    const { User } = await import("../../Controllers/AutoShops/Jobcard.controller.js");
-    const freshUser = await User.findById(user.id).select("businessProfile");
-    if (!freshUser || !freshUser.businessProfile) {
-      return res.status(403).json({ success: false, message: "Business profile not found for user" });
+  });
+  
+  // PUT /seq - Set (overwrite) job card sequence for a business (admin/migration only)
+  jobCardPrefixRouter.put("/seq", async (req, res) => {
+    try {
+      const user = req.user;
+      if (!user || !user.id) {
+        return res.status(401).json({ success: false, message: "Not authenticated" });
+      }
+    
+  
+      const { newSeq, businessProfileId } = req.body;
+  
+      if (!businessProfileId || !mongoose.Types.ObjectId.isValid(businessProfileId)) {
+        return res.status(400).json({ success: false, message: "Valid businessProfileId is required" });
+      }
+      if (!Number.isInteger(newSeq) || newSeq < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "newSeq must be a non-negative integer",
+        });
+      }
+  
+      const updated = await setJobCardCounter(businessProfileId, newSeq);
+  
+      return res.status(200).json({
+        success: true,
+        data: { business: updated.business, seq: updated.seq },
+      });
+    } catch (err) {
+      return res.status(500).json({
+        success: false,
+        message: "Failed to set job card sequence",
+        error: err?.message || err,
+      });
     }
-    // Use the fresh user.businessProfile below in the endpoint logic
-
-    const businessProfileId = freshUser.businessProfile;
-    if (!businessProfileId) {
-      return res.status(403).json({ success: false, message: "Business profile not found for user" });
-    }
-
-    const data = await peekNextJobCardIdentifiers(businessProfileId);
-    return res.status(200).json({ success: true, data });
-  } catch (err) {
-    return res.status(500).json({
-      success: false,
-      message: "Failed to preview next job card prefix/number",
-      error: err?.message || err,
-    });
-  }
-});
+  });
+  
 
 
 // Get full prefix history for this business (all years set so far)

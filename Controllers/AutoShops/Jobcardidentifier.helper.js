@@ -1,5 +1,5 @@
 import { getJobCardPrefixForYear } from "../../Schema/Jobcardprefix.schema.js";
-import { getNextJobCardNo, peekNextJobCardNo } from "../../Schema/Jobcardcounter.schema.js";
+import JobCardCounter, { getNextJobCardNo, peekNextJobCardNo } from "../../Schema/Jobcardcounter.schema.js";
 
 
 /**
@@ -33,6 +33,29 @@ export async function getNextJobCardIdentifiers(businessId) {
   const jobCardNo = await getNextJobCardNo(businessId);
   return { jobCardNo, jobCardId: `${prefixDoc.prefix}-${jobCardNo}` };
 }
+
+/**
+ * Set (overwrite) the job card sequence for a business to a specific number.
+ * Used for admin or migration tools only — not exposed to typical user flows.
+ * 
+ * @param {ObjectId} businessId - The business profile ID
+ * @param {number} newSeq - The new value for the sequence (e.g., 100 will make the next jobCardNo = 101)
+ * @returns {Promise<{ business: ObjectId, seq: number }>} The updated JobCardCounter document
+ */
+export async function setJobCardCounter(businessId, newSeq) {
+  // Defensive number check; optional, can throw or sanitize
+  if (!Number.isInteger(newSeq) || newSeq < 0) {
+    throw new Error("newSeq must be a non-negative integer");
+  }
+  const counter = await JobCardCounter.findOneAndUpdate(
+    { business: businessId },
+    { $set: { seq: newSeq } },
+    { new: true, upsert: true }
+  );
+  return counter;
+}
+
+
 
 /**
  * Read-only preview of what the NEXT jobCardId will be, without
