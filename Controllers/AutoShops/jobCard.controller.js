@@ -1072,6 +1072,7 @@ export const createJobCard = async (req, res) => {
     }
 
     let bank = null;
+    console.log(bankId);
     if (bankId) {
       if (!mongoose.Types.ObjectId.isValid(bankId)) {
         return res.status(400).json({ success: false, message: "Invalid bankId" });
