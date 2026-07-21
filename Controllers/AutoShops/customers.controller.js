@@ -1105,14 +1105,10 @@ export const getAllAddedCustomers = async (req, res) => {
 
     const businessId = await getBusinessId(req.user.id);
     if (!businessId) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Business profile not found" });
+      return res.status(404).json({ success: false, message: "Business profile not found" });
     }
 
-    // Need vehicles from BusinessProfile.myCustomers[*].vehicles (subdoc)
-    // So .select("myCustomers vehicles") won't work since 'vehicles' is embedded per customer
-    // We'll get all myCustomers, and each customer entry may have .vehicles []
+    // Get all myCustomers (no vehicles in subdoc - see @bussiness-profile.js for schema)
     const business = await BusinessProfileModel.findById(businessId).select("myCustomers");
     if (!business) {
       return res.status(404).json({ success: false, message: "Business not found" });
@@ -1123,15 +1119,33 @@ export const getAllAddedCustomers = async (req, res) => {
       customers = customers.filter((c) => c.status === status);
     }
 
-    // Transform each customer subdoc to include vehicles (assume .vehicles array)
-    // Some schemas have vehicles at myCustomers[*].vehicles
-    // If not, fallback to empty array.
-    const customersWithVehicles = customers.map((c) => {
-      // Some subdocs may not have .vehicles as own property, so force as array
+    // For each customer, fetch vehicles from the real User.myVehicles list
+    // This requires a single query for all user ids (for efficiency)
+    const customerIds = customers.map(c => c._id);
+    const users = await User.find({ _id: { $in: customerIds } })
+      .select("_id myVehicles name phone email city")
+      .populate({
+        path: "myVehicles",
+        select: "make model year number registrationVin insuranceRenewalDate", // add/change as required
+      });
+
+    // Map for quick lookup
+    const userMap = {};
+    users.forEach(u => {
+      userMap[u._id.toString()] = u;
+    });
+
+    // Prepare combined data, merging business.myCustomers fields with real User profile and vehicles
+    const customersWithVehicles = customers.map(c => {
       const customerObj = c.toObject ? c.toObject() : c;
+      const userDoc = userMap[c._id.toString()];
       return {
         ...customerObj,
-        vehicles: Array.isArray(customerObj.vehicles) ? customerObj.vehicles : [],
+        name: userDoc?.name ?? customerObj.name,
+        phone: userDoc?.phone ?? customerObj.phone,
+        email: userDoc?.email ?? customerObj.email,
+        city: userDoc?.city ?? customerObj.city,
+        vehicles: Array.isArray(userDoc?.myVehicles) ? userDoc.myVehicles : [],
       };
     });
 

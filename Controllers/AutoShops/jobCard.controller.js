@@ -866,8 +866,9 @@ export const getJobCardPageDetails = async (req, res) => {
           price: sub.price,
           quantity: sub.quantity,
           tax: sub.tax,
-          make:sub.make,
-          model:sub.model,
+          make: sub.make,
+          model: sub.model,
+          labourCost: sub.labourCost,   // <- added field for labourCost
           odoOutRequired: parent?.odoOutRequired || false,
         });
       });
@@ -889,7 +890,7 @@ export const getJobCardPageDetails = async (req, res) => {
       data: {
         myCustomers: registeredCustomers,
         nextJobCard,
-        nextJobCardNo:nextJobCard.jobCardId,
+        nextJobCardNo: nextJobCard.jobCardId,
         myAllSubServices,
         myAllBanks,
       },
