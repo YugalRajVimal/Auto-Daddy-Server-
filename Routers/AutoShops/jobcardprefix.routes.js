@@ -50,10 +50,9 @@ jobCardPrefixRouter.get("/next", async (req, res) => {
       if (!user || !user.id) {
         return res.status(401).json({ success: false, message: "Not authenticated" });
       }
-    
-  
+
       const { newSeq, businessProfileId } = req.body;
-  
+
       if (!businessProfileId || !mongoose.Types.ObjectId.isValid(businessProfileId)) {
         return res.status(400).json({ success: false, message: "Valid businessProfileId is required" });
       }
@@ -63,9 +62,18 @@ jobCardPrefixRouter.get("/next", async (req, res) => {
           message: "newSeq must be a non-negative integer",
         });
       }
-  
+
+      // Only allow if the businessProfileId is the user's own business profile
+      const freshUser = await User.findById(user.id).select("businessProfile");
+      if (!freshUser || !freshUser.businessProfile || freshUser.businessProfile.toString() !== businessProfileId) {
+        return res.status(403).json({
+          success: false,
+          message: "You are only allowed to set the job card sequence for your own business profile.",
+        });
+      }
+
       const updated = await setJobCardCounter(businessProfileId, newSeq);
-  
+
       return res.status(200).json({
         success: true,
         data: { business: updated.business, seq: updated.seq },
