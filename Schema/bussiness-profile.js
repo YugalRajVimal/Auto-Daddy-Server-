@@ -20,7 +20,9 @@ const selectedSubServiceSchema = new Schema({
   desc: { type: String },
   price: { type: Number },
   quantity: { type: Number, default: 1 },
+  quantityType: { type: String, enum: ["Unit", "Days"], default: "Unit" }, // Added quantityType
   tax: { type: Number, default: 0 },
+  labourCost: { type: Number, default: 0 }, // Added labourCost
   // ADDED FIELDS for model and make
   model: { type: String }, // model of the subservice, e.g. car model
   make: { type: String }   // make of the subservice, e.g. car manufacturer/brand

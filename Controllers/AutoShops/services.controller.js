@@ -382,6 +382,8 @@ export const addSubServices = async (req, res) => {
           tax: sub.tax || 0,
           model: sub.model || null, // add model
           make: sub.make || null,   // add make
+          quantityType: sub.quantityType || "Unit", // add quantityType, default Unit
+          labourCost: sub.labourCost || 0, // add labourCost, default 0
         });
       } else {
         console.log("[addSubServices] SubService without name skipped:", sub);
@@ -422,7 +424,7 @@ export const addSubServices = async (req, res) => {
  * Expects: req.body = {
  *   serviceId: String,
  *   subServiceIndex: Number,
- *   update: { name, desc, price, quantity, tax, model, make }
+ *   update: { name, desc, price, quantity, tax, model, make, quantityType, labourCost }
  * }
  */
 export const editSubService = async (req, res) => {
@@ -484,7 +486,17 @@ export const editSubService = async (req, res) => {
     }
 
     const subService = myService.subServices[subServiceIndex];
-    ["name", "desc", "price", "quantity", "tax", "model", "make"].forEach((field) => {
+    [
+      "name",
+      "desc",
+      "price",
+      "quantity",
+      "tax",
+      "model",
+      "make",
+      "quantityType",
+      "labourCost",
+    ].forEach((field) => {
       if (update[field] !== undefined) subService[field] = update[field];
     });
 
