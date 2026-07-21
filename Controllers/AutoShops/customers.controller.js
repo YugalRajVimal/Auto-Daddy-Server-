@@ -1110,6 +1110,9 @@ export const getAllAddedCustomers = async (req, res) => {
         .json({ success: false, message: "Business profile not found" });
     }
 
+    // Need vehicles from BusinessProfile.myCustomers[*].vehicles (subdoc)
+    // So .select("myCustomers vehicles") won't work since 'vehicles' is embedded per customer
+    // We'll get all myCustomers, and each customer entry may have .vehicles []
     const business = await BusinessProfileModel.findById(businessId).select("myCustomers");
     if (!business) {
       return res.status(404).json({ success: false, message: "Business not found" });
@@ -1120,7 +1123,19 @@ export const getAllAddedCustomers = async (req, res) => {
       customers = customers.filter((c) => c.status === status);
     }
 
-    return res.status(200).json({ success: true, data: customers });
+    // Transform each customer subdoc to include vehicles (assume .vehicles array)
+    // Some schemas have vehicles at myCustomers[*].vehicles
+    // If not, fallback to empty array.
+    const customersWithVehicles = customers.map((c) => {
+      // Some subdocs may not have .vehicles as own property, so force as array
+      const customerObj = c.toObject ? c.toObject() : c;
+      return {
+        ...customerObj,
+        vehicles: Array.isArray(customerObj.vehicles) ? customerObj.vehicles : [],
+      };
+    });
+
+    return res.status(200).json({ success: true, data: customersWithVehicles });
   } catch (error) {
     return res.status(500).json({
       success: false,

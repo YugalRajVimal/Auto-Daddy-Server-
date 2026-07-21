@@ -84,6 +84,7 @@ export const getInvoices = async (req, res) => {
       ]),
     ]);
 
+
     res.json({
       success: true,
       invoices,
@@ -148,7 +149,22 @@ export const createInvoice = async (req, res) => {
       return res.status(400).json({ success: false, message: "At least one line item is required." });
     }
 
-    const items = await buildInvoiceItems(lineItems);
+    // Build invoice items using the helper
+    let items = await buildInvoiceItems(lineItems);
+
+    // Now, for each item, fetch the corresponding AdminInvoiceItem and add the image path from AdminInvoiceItem schema
+    for (let i = 0; i < items.length; i++) {
+      const refItemId = items[i].ItemRefId;
+      if (refItemId) {
+        // Lazy-load to avoid circular dependency
+        const { default: AdminInvoiceItem } = await import("../../../Schema/AdminInvoices/AdminInvoiceItem.js");
+        const refItemDoc = await AdminInvoiceItem.findById(refItemId).select("image");
+        items[i].Image = refItemDoc?.image || "";
+      } else {
+        items[i].Image = "";
+      }
+    }
+
     const { subtotal, gst, roundOff, invoiceTotal } = computeTotals(items, roundOffEnabled, roundOffAmount);
 
     const invoice = await AdminInvoiceSchema.create({

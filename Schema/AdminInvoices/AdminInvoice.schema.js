@@ -8,6 +8,7 @@ const AdminInvoiceItemRefSchema = new mongoose.Schema({
   Units: { type: Number, required: true }, // quantity multiplier (was "days" on the frontend, renamed to Units)
   GSTPercent: { type: Number, required: true },
   Amount: { type: Number, required: true }, // UnitPrice * Units (pre-GST)
+  Image: { type: String, default: "" }, // added image field (url or path)
 }, { _id: false });
 
 const AdminInvoiceSchema = new mongoose.Schema({
