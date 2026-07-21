@@ -48,7 +48,7 @@ app.use(
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-const port = process.env.PORT || 6020;
+const port = process.env.PORT || 8778;
 
 app.use("/Uploads", express.static("Uploads"));
 
