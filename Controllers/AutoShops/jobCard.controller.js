@@ -883,6 +883,10 @@ export const getJobCardPageDetails = async (req, res) => {
       peekNextJobCardIdentifiers(businessId), // import from jobCardIdentifier.helper.js
       AutoShopBank.find({ businessProfile: businessId }),
     ]);
+
+    console.log( {
+      myAllSubServices}
+)
     
 
     return res.status(200).json({

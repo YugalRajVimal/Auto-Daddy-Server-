@@ -335,6 +335,136 @@ class AutoShopOwnerController {
    * Body (all optional, send only what needs changing):
    *   { name, email, phone, countryCode, pincode, address, shopType }
    */
+  // updateAutoShopOwner = async (req, res) => {
+
+  //   try {
+  //     const { ownerId } = req.params;
+
+  //     if (!ownerId) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         message: "ownerId param is required.",
+  //       });
+  //     }
+
+  //     // ── Fetch owner ──────────────────────────────────────────────────────
+  //     const owner = await User.findOne({ _id: ownerId, role: "autoshopowner" });
+  //     if (!owner) {
+  //       return res.status(404).json({
+  //         success: false,
+  //         message: "Auto shop owner not found.",
+  //       });
+  //     }
+
+  //     const updateFields = {};
+
+  //     // ── Scalar fields ────────────────────────────────────────────────────
+  //     // Make shopType an array of multiple shopTypes
+  //     const plainFields = ["name", "phone", "countryCode", "pincode", "address", "city"];
+  //     for (const field of plainFields) {
+  //       if (req.body[field] !== undefined && req.body[field] !== null) {
+  //         let val = String(req.body[field]).trim();
+  //         if (field === "address") {
+  //           val = val.slice(0, 100);
+  //         }
+  //         updateFields[field] = val;
+  //       }
+  //     }
+
+  //     // Process shopType as array
+  //     if (req.body.shopType !== undefined && req.body.shopType !== null) {
+  //       let shopTypeArray = req.body.shopType;
+  //       if (!Array.isArray(shopTypeArray)) {
+  //         // Try to coerce to array if it's not already
+  //         if (typeof shopTypeArray === "string") {
+  //           // Comma separated, or single value
+  //           shopTypeArray = shopTypeArray.split(",").map(s => s.trim()).filter(Boolean);
+  //         } else {
+  //           shopTypeArray = [String(shopTypeArray).trim()];
+  //         }
+  //       }
+  //       // Filter blanks, trim, dedupe
+  //       shopTypeArray = [...new Set(shopTypeArray.map(s => String(s).trim()).filter(Boolean))];
+  //       updateFields.shopType = shopTypeArray;
+  //     }
+
+  //     // ── Validate countryCode if changed ──────────────────────────────────
+  //     if (updateFields.countryCode) {
+  //       const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
+  //       if (!allowedCountryCodes.includes(updateFields.countryCode)) {
+  //         return res.status(400).json({
+  //           success: false,
+  //           message: `Invalid country code. Allowed: ${allowedCountryCodes.join(", ")}.`,
+  //         });
+  //       }
+  //     }
+
+  //     // ── Validate shopType if changed ─────────────────────────────────────
+  //     if (updateFields.shopType) {
+  //       const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
+  //       const invalidTypes = updateFields.shopType.filter(
+  //         (type) => !allowedShopTypes.includes(type)
+  //       );
+  //       if (invalidTypes.length > 0) {
+  //         return res.status(400).json({
+  //           success: false,
+  //           message: `Invalid shopType(s): ${invalidTypes.join(", ")}. Allowed: ${allowedShopTypes.join(", ")}.`,
+  //         });
+  //       }
+  //     }
+
+  //     // ── Email — check uniqueness if being changed ─────────────────────────
+  //     if (
+  //       req.body.email !== undefined &&
+  //       req.body.email.trim().toLowerCase() !== owner.email
+  //     ) {
+  //       const newEmail = req.body.email.trim().toLowerCase();
+  //       const emailTaken = await User.findOne({
+  //         email: newEmail,
+  //         _id: { $ne: ownerId },
+  //       });
+  //       if (emailTaken) {
+  //         return res.status(409).json({
+  //           success: false,
+  //           message: "Another user with this email already exists.",
+  //         });
+  //       }
+  //       updateFields.email = newEmail;
+  //     }
+
+  //     if (Object.keys(updateFields).length === 0) {
+  //       return res.status(400).json({
+  //         success: false,
+  //         message: "No valid fields provided to update.",
+  //       });
+  //     }
+
+  //     const updatedOwner = await User.findByIdAndUpdate(
+  //       ownerId,
+  //       { $set: updateFields },
+  //       { new: true }
+  //     ).select(
+  //       "name email phone countryCode pincode address city shopType role status " +
+  //       "isProfileComplete isBusinessProfileCompleted isDisabled createdAt updatedAt"
+  //     );
+
+  //     return res.status(200).json({
+  //       success: true,
+  //       message: "Auto shop owner updated successfully.",
+  //       data: updatedOwner,
+  //     });
+  //   } catch (err) {
+  //     console.error("[updateAutoShopOwner] Error:", err);
+  //     return res.status(500).json({
+  //       success: false,
+  //       message: "Failed to update auto shop owner.",
+  //       error: err.message,
+  //     });
+  //   }
+  // };
+
+  // ─── DELETE AUTO SHOP OWNER (SOFT DELETE) ───────────────────────────────────
+  
   updateAutoShopOwner = async (req, res) => {
     try {
       const { ownerId } = req.params;
@@ -355,53 +485,61 @@ class AutoShopOwnerController {
         });
       }
 
-      const updateFields = {};
+      const userUpdateFields = {};
+      const businessUpdateFields = {};
 
-      // ── Scalar fields ────────────────────────────────────────────────────
-      // Make shopType an array of multiple shopTypes
-      const plainFields = ["name", "phone", "countryCode", "pincode", "address", "city"];
-      for (const field of plainFields) {
-        if (req.body[field] !== undefined && req.body[field] !== null) {
-          let val = String(req.body[field]).trim();
-          if (field === "address") {
-            val = val.slice(0, 100);
-          }
-          updateFields[field] = val;
-        }
+      // ── Fields that live on User ────────────────────────────────────────
+      // phone and countryCode should NOT be updated anymore as per instruction
+      // const userPlainFields = ["phone", "countryCode"];
+      // for (const field of userPlainFields) {
+      //   if (req.body[field] !== undefined && req.body[field] !== null) {
+      //     userUpdateFields[field] = String(req.body[field]).trim();
+      //   }
+      // }
+
+      // ── Fields that live on BusinessProfile ─────────────────────────────
+      // name -> businessName, phone -> businessPhone, email -> businessEmail
+      console.log(req.body);
+      if (req.body.name !== undefined && req.body.name !== null) {
+        businessUpdateFields.businessName = String(req.body.name).trim();
+      }
+      if (req.body.address !== undefined && req.body.address !== null) {
+        businessUpdateFields.businessAddress = String(req.body.address).trim().slice(0, 100);
+      }
+      if (req.body.city !== undefined && req.body.city !== null) {
+        businessUpdateFields.city = String(req.body.city).trim();
+      }
+      if (req.body.pincode !== undefined && req.body.pincode !== null) {
+        businessUpdateFields.pincode = String(req.body.pincode).trim();
+      }
+      if (req.body.phone !== undefined && req.body.phone !== null) {
+        businessUpdateFields.businessPhone = String(req.body.phone).trim();
       }
 
-      // Process shopType as array
+      console.log(businessUpdateFields);
+
+
+      // Process shopType as array (stays on User, same as before)
       if (req.body.shopType !== undefined && req.body.shopType !== null) {
         let shopTypeArray = req.body.shopType;
         if (!Array.isArray(shopTypeArray)) {
-          // Try to coerce to array if it's not already
           if (typeof shopTypeArray === "string") {
-            // Comma separated, or single value
             shopTypeArray = shopTypeArray.split(",").map(s => s.trim()).filter(Boolean);
           } else {
             shopTypeArray = [String(shopTypeArray).trim()];
           }
         }
-        // Filter blanks, trim, dedupe
         shopTypeArray = [...new Set(shopTypeArray.map(s => String(s).trim()).filter(Boolean))];
-        updateFields.shopType = shopTypeArray;
+        userUpdateFields.shopType = shopTypeArray;
       }
 
-      // ── Validate countryCode if changed ──────────────────────────────────
-      if (updateFields.countryCode) {
-        const allowedCountryCodes = ["+1", "+61", "+44", "+91"];
-        if (!allowedCountryCodes.includes(updateFields.countryCode)) {
-          return res.status(400).json({
-            success: false,
-            message: `Invalid country code. Allowed: ${allowedCountryCodes.join(", ")}.`,
-          });
-        }
-      }
+      // ── NO countryCode validation ───────────────────────────────────────
+      // (Do not validate countryCode since we no longer update it)
 
       // ── Validate shopType if changed ─────────────────────────────────────
-      if (updateFields.shopType) {
+      if (userUpdateFields.shopType) {
         const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
-        const invalidTypes = updateFields.shopType.filter(
+        const invalidTypes = userUpdateFields.shopType.filter(
           (type) => !allowedShopTypes.includes(type)
         );
         if (invalidTypes.length > 0) {
@@ -428,29 +566,51 @@ class AutoShopOwnerController {
             message: "Another user with this email already exists.",
           });
         }
-        updateFields.email = newEmail;
+        userUpdateFields.email = newEmail;
+        businessUpdateFields.businessEmail = newEmail;
       }
 
-      if (Object.keys(updateFields).length === 0) {
+      if (
+        Object.keys(userUpdateFields).length === 0 &&
+        Object.keys(businessUpdateFields).length === 0
+      ) {
         return res.status(400).json({
           success: false,
           message: "No valid fields provided to update.",
         });
       }
 
-      const updatedOwner = await User.findByIdAndUpdate(
-        ownerId,
-        { $set: updateFields },
-        { new: true }
-      ).select(
-        "name email phone countryCode pincode address city shopType role status " +
-        "isProfileComplete isBusinessProfileCompleted isDisabled createdAt updatedAt"
-      );
+      // ── Apply updates ────────────────────────────────────────────────────
+      let updatedOwner = owner;
+      if (Object.keys(userUpdateFields).length > 0) {
+        updatedOwner = await User.findByIdAndUpdate(
+          ownerId,
+          { $set: userUpdateFields },
+          { new: true }
+        );
+      }
+
+      let updatedBusinessProfile = null;
+      if (Object.keys(businessUpdateFields).length > 0 && owner.businessProfile) {
+        updatedBusinessProfile = await BusinessProfileModel.findByIdAndUpdate(
+          owner.businessProfile,
+          { $set: businessUpdateFields },
+          { new: true }
+        );
+      }
+
+      // ── Re-fetch owner with fields + populated business profile ──────────
+      const finalOwner = await User.findById(ownerId)
+        .select(
+          "name email phone countryCode role status shopType " +
+          "isProfileComplete isBusinessProfileCompleted isDisabled createdAt updatedAt businessProfile"
+        )
+        .populate("businessProfile");
 
       return res.status(200).json({
         success: true,
         message: "Auto shop owner updated successfully.",
-        data: updatedOwner,
+        data: finalOwner,
       });
     } catch (err) {
       console.error("[updateAutoShopOwner] Error:", err);
@@ -461,9 +621,10 @@ class AutoShopOwnerController {
       });
     }
   };
-
-  // ─── DELETE AUTO SHOP OWNER (SOFT DELETE) ───────────────────────────────────
+  
   /**
+   * 
+   
    * Soft-delete an auto shop owner.
    * Sets status = "deleted" and isDisabled = true.
    * Also deactivates their linked business profile.

@@ -11,6 +11,67 @@ import { VehicleModel } from "../../Schema/vehicles.schema.js";
 import canadianMunicipalities from "../cityData.js";
 
 
+
+const VALID_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+function normalizeToMidnight(date) {
+  if (!date) return null;
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return null;
+  d.setUTCHours(0, 0, 0, 0);
+  return d;
+}
+
+function getCurrentWeekRange() {
+  const today = normalizeToMidnight(new Date());
+  const diffToMonday = (today.getUTCDay() + 6) % 7; // shift so Monday=0
+  const start = new Date(today);
+  start.setUTCDate(start.getUTCDate() - diffToMonday);
+  const end = new Date(start);
+  end.setUTCDate(start.getUTCDate() + 6);
+  return { start, end };
+}
+
+// shop.perDayOpenHours / shop.specialDayOpenHours are plain lean() arrays here
+function computeCurrentWeekSchedule(perDayOpenHours = [], specialDayOpenHours = []) {
+  const { start, end } = getCurrentWeekRange();
+
+  const weeklyByDay = new Map((perDayOpenHours || []).map(d => [d.day, d]));
+
+  const overrideByDate = new Map(
+    (specialDayOpenHours || [])
+      .map(d => {
+        const key = normalizeToMidnight(d.date);
+        return key ? [key.getTime(), d] : null;
+      })
+      .filter(Boolean)
+  );
+
+  const effectiveSchedule = [];
+  const cursor = new Date(start);
+  while (cursor.getTime() <= end.getTime()) {
+    const dateKey = cursor.getTime();
+    const override = overrideByDate.get(dateKey);
+    const weekdayName = VALID_DAYS[(cursor.getUTCDay() + 6) % 7];
+    const weeklyDefault = weeklyByDay.get(weekdayName);
+
+    effectiveSchedule.push({
+      date: new Date(cursor).toISOString().slice(0, 10),
+      day: weekdayName,
+      source: override ? "override" : "weekly",
+      open: override ? override.open : weeklyDefault?.open,
+      close: override ? override.close : weeklyDefault?.close,
+      isClosed: override ? !!override.isClosed : !!weeklyDefault?.isClosed,
+      reason: override ? override.reason : undefined,
+    });
+
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  return effectiveSchedule;
+}
+
+
 class UserController {
 
     /**
@@ -937,367 +998,341 @@ class UserController {
         }
     };
 
-    getAllAutoShops = async (req, res) => {
-      try {
-          // Fetch requesting user (to get their city and favorites)
-          const userId = req.user?.id;
-          console.log("[getAllAutoShops] Step: Extracted userId:", userId);
-          let userCity = null;
-          let favoriteAutoShops = [];
-          if (userId) {
-              const user = await User.findById(userId).lean();
-              console.log("[getAllAutoShops] Step: Fetched User:", user?._id || null);
-              userCity = user?.city?.trim().toLowerCase() || null;
-              console.log("[getAllAutoShops] Step: Extracted userCity:", userCity);
-              if (Array.isArray(user?.favoriteAutoShops)) {
-                  favoriteAutoShops = user.favoriteAutoShops.map(a => a.toString());
-                  console.log("[getAllAutoShops] Step: User favoriteAutoShops:", favoriteAutoShops);
-              } else {
-                  console.log("[getAllAutoShops] Step: User has no favoriteAutoShops array");
-              }
-          } else {
-              console.log("[getAllAutoShops] Step: No userId found (unauthenticated user)");
-          }
-  
-          // Extract filter parameters from query
-          const { search, service, carCompanies, shopType } = req.query;
-          console.log("[getAllAutoShops] Step: Query params:", { search, service, carCompanies, shopType });
-  
-          let filterSearch = typeof search === "string" && search.trim().length > 0 ? search.trim().toLowerCase() : null;
-          console.log("[getAllAutoShops] Step: filterSearch:", filterSearch);
-  
-          // Build service filter array if provided
-          let filterServiceIds = [];
-          if (typeof service === "string" && service.trim().length > 0) {
-              filterServiceIds = service.split(',').map(s => s.trim()).filter(Boolean);
-              console.log("[getAllAutoShops] Step: filterServiceIds:", filterServiceIds);
-          } else {
-              console.log("[getAllAutoShops] Step: No service filter applied.");
-          }
-  
-          // Build carCompanies filter array if provided
-          let filterCarCompanyIds = [];
-          if (typeof carCompanies === "string" && carCompanies.trim().length > 0) {
-              filterCarCompanyIds = carCompanies.split(',').map(v => v.trim()).filter(Boolean);
-              console.log("[getAllAutoShops] Step: filterCarCompanyIds:", filterCarCompanyIds);
-          } else {
-              console.log("[getAllAutoShops] Step: No carCompanies filter applied.");
-          }
-  
-          // Allowed shop types from user.schema.js
-          const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
-          let filterShopType = null;
-          if (typeof shopType === "string") {
-              if (allowedShopTypes.includes(shopType.trim())) {
-                  filterShopType = shopType.trim();
-                  console.log("[getAllAutoShops] Step: filterShopType valid -", filterShopType);
-              } else {
-                  console.log("[getAllAutoShops] Step: shopType in query but not allowed:", shopType.trim());
-              }
-          } else {
-              console.log("[getAllAutoShops] Step: No shopType filter applied.");
-          }
-  
-          // Get all services from db
-          const allServices = await servicesSchema.find({}, { _id: 1, name: 1, desc: 1 }).lean();
-          console.log("[getAllAutoShops] Step: allServices fetched. Count:", allServices.length);
-  
-          // Only fetch business profiles that are active.
-          // NOTE: BusinessProfile schema has no `status` field — it uses
-          // `isBusinessActive: Boolean`. Filtering on `status` always matched
-          // zero documents, independent of any shopType/_id filtering, which is
-          // why autoShops count was 0 even after the _id $in filter was correct.
-          let businessProfileFilter = { isBusinessActive: true };
-          console.log("[getAllAutoShops] Step: businessProfileFilter:", businessProfileFilter);
-  
-          // 1. Find all Users with businessProfile (not null) and role autoshopowner (where shopType is held)
-          let userShopQuery = { businessProfile: { $ne: null }, role: "autoshopowner" };
-          // Apply shopType filter here in User query for efficiency, so only fetch those users with matching shopType up front
-          if (filterShopType) {
-              if (filterShopType === "autoShop") {
-                  // Legacy users created before `shopType` existed on the schema have
-                  // no `shopType` field stored at all, so a plain equality query
-                  // misses them even though the schema default is "autoShop".
-                  userShopQuery.$or = [
-                      { shopType: "autoShop" },
-                      { shopType: { $exists: false } }
-                  ];
-              } else {
-                  userShopQuery.shopType = filterShopType;
-              }
-              console.log("[getAllAutoShops] Step: userShopQuery with shopType:", userShopQuery);
-          } else {
-              console.log("[getAllAutoShops] Step: userShopQuery:", userShopQuery);
-          }
-  
-          // Fetch all these users (shopType lives in User, not BusinessProfile!)
-          const userShopTypes = await User.find(
-              userShopQuery,
-              { businessProfile: 1, shopType: 1 }
-          ).lean();
-          console.log("[getAllAutoShops] Step: userShopTypes fetched. Count:", userShopTypes.length);
-  
-          // Map: { businessProfileId: shopType } for all valid profiles (optionally filtered by shopType)
-          const businessProfileIdToShopType = {};
-          userShopTypes.forEach(u => {
-              if (u.businessProfile) {
-                  // Fall back to the schema default when the field isn't actually stored
-                  businessProfileIdToShopType[String(u.businessProfile)] = u.shopType || "autoShop";
-              }
-          });
-          console.log("[getAllAutoShops] Step: businessProfileIdToShopType keys:", Object.keys(businessProfileIdToShopType));
-  
-          // Only allow BusinessProfiles belonging to these userShopTypes (after shopType gets filtered already)
-          let validBusinessProfileIds = Object.keys(businessProfileIdToShopType);
-          console.log("[getAllAutoShops] Step: validBusinessProfileIds:", validBusinessProfileIds);
-  
-          let profileFilter = { ...businessProfileFilter };
-          // IMPORTANT: once a shopType filter was explicitly requested, always
-          // constrain by _id — even to an empty array — so "0 matching users"
-          // correctly returns zero shops instead of silently falling back to
-          // every active profile.
-          if (filterShopType || validBusinessProfileIds.length > 0) {
-              profileFilter._id = { $in: validBusinessProfileIds };
-              console.log("[getAllAutoShops] Step: profileFilter updated with _id $in array:", profileFilter);
-          } else {
-              console.log("[getAllAutoShops] Step: profileFilter for all active due to no validBusinessProfileIds match");
-          }
-  
-          // Fetch only relevant BusinessProfile documents (matching profileFilter, which already encodes shopType user-side)
-          let autoShops = await BusinessProfileModel.find(profileFilter, {
-              businessName: 1,
-              openHours: 1,
-              openDays: 1,
-              closedDays: 1,
-              businessAddress: 1,
-              city: 1,
-              businessPhone: 1,
-              businessEmail: 1,
-              businessLogo: 1,
-              businessMapLocation: 1,
-              myServices: 1,
-              ratings: 1,
-              carCompanies: 1,
-              _id: 1,
-              isBusinessActive: 1 // Only for confirmation/debug, can be removed in returned object. Not exposed to client.
-          })
-          .populate({
-              path: 'myServices.service',
-              model: 'Services',
-              select: 'name desc'
-          })
-          .populate({
-              path: 'carCompanies',
-              model: 'CarCompany',
-              select: 'name'
-          })
-          .lean();
-          console.log("[getAllAutoShops] Step: autoShops fetched. Count:", autoShops.length);
-  
-          // Compose myServices so ALL services are present for each shop, and mark isFavourite
-          autoShops = autoShops.map(shop => {
-              const existingServicesMap = {};
-              if (Array.isArray(shop.myServices)) {
-                  for (const ms of shop.myServices) {
-                      if (ms.service && (ms.service._id || ms.service)) {
-                          const serviceId = typeof ms.service === 'object' && ms.service._id ? String(ms.service._id) : String(ms.service);
-                          existingServicesMap[serviceId] = ms;
-                      }
-                  }
-              }
-              // Build allMyServices
-              const allMyServices = allServices.map(svc => {
-                  const serviceId = String(svc._id);
-                  if (existingServicesMap[serviceId]) {
-                      const ms = JSON.parse(JSON.stringify(existingServicesMap[serviceId]));
-                      if (Array.isArray(ms.subServices)) {
-                          ms.subServices = ms.subServices.map(subSvc => {
-                              if ('price' in subSvc) {
-                                  const { price, ...rest } = subSvc;
-                                  return rest;
-                              }
-                              return subSvc;
-                          });
-                      } else {
-                          ms.subServices = [];
-                      }
-                      return {
-                          service: {
-                              _id: svc._id,
-                              name: svc.name,
-                              desc: svc.desc
-                          },
-                          subServices: ms.subServices
-                      };
-                  } else {
-                      return {
-                          service: {
-                              _id: svc._id,
-                              name: svc.name,
-                              desc: svc.desc
-                          },
-                          subServices: []
-                      };
-                  }
-              });
-  
-              // Compute avgRating
-              let avgRating = null;
-              if (Array.isArray(shop.ratings) && shop.ratings.length > 0) {
-                  const ratingsArr = shop.ratings.map(r => typeof r.rating === 'number' ? r.rating : null).filter(r => r !== null);
-                  if (ratingsArr.length > 0) {
-                      avgRating = ratingsArr.reduce((a, b) => a + b, 0) / ratingsArr.length;
-                      avgRating = Number(avgRating.toFixed(2));
-                  }
-              }
-  
-              // Determine isFavourite
-              const isFavourite = favoriteAutoShops.includes(shop._id.toString());
-  
-              // Fetch shopType from User's mapping
-              const shopTypeValue = businessProfileIdToShopType[String(shop._id)] || null;
-  
-              return {
-                  _id: shop._id,
-                  businessName: shop.businessName,
-                  openHours: shop.openHours,
-                  openDays: shop.openDays,
-                  closedDays: shop.closedDays,
-                  businessAddress: shop.businessAddress,
-                  city: shop.city,
-                  contactDetails: {
-                      phone: shop.businessPhone,
-                      email: shop.businessEmail
-                  },
-                  businessProfileImage: shop.businessLogo,
-                  businessMapLocation: shop.businessMapLocation,
-                  myServices: allMyServices,
-                  avgRating: avgRating,
-                  carCompanies: shop.carCompanies || [],
-                  shopType: shopTypeValue,
-                  isFavourite: isFavourite
-              };
-          });
-          console.log("[getAllAutoShops] Step: After remapping, autoShops count:", autoShops.length);
-  
-          // 1. Filter by Service(s)
-          if (filterServiceIds.length > 0) {
-              const beforeCount = autoShops.length;
-              autoShops = autoShops.filter(shop => {
-                  for (const ms of shop.myServices) {
-                      if (
-                          filterServiceIds.includes(String(ms.service._id)) &&
-                          (Array.isArray(ms.subServices) ? ms.subServices.length > 0 : false)
-                      ) {
-                          return true;
-                      }
-                  }
-                  return false;
-              });
-              console.log("[getAllAutoShops] Step: After filterServiceIds filter, count:", beforeCount, "->", autoShops.length);
-          } else {
-              console.log("[getAllAutoShops] Step: No Service filterIds, skipped service filtering.");
-          }
-  
-          // 2. Filter by Car Company(ies)
-          if (filterCarCompanyIds.length > 0) {
-              const beforeCount = autoShops.length;
-              autoShops = autoShops.filter(shop => {
-                  let shopCarCompanies = Array.isArray(shop.carCompanies) ? shop.carCompanies : [];
-                  shopCarCompanies = shopCarCompanies.map(cc => {
-                      if (cc && typeof cc === "object" && cc._id) return String(cc._id);
-                      if (typeof cc === "string") return cc;
-                      return String(cc);
-                  });
-                  return filterCarCompanyIds.some(fid => shopCarCompanies.includes(fid));
-              });
-              console.log("[getAllAutoShops] Step: After filterCarCompanyIds filter, count:", beforeCount, "->", autoShops.length);
-          } else {
-              console.log("[getAllAutoShops] Step: No CarCompany filterIds, skipped car company filtering.");
-          }
-  
-          // 3. Search by service name or sub-service name
-          if (filterSearch) {
-              const beforeCount = autoShops.length;
-              autoShops = autoShops.filter(shop => {
-                  let matched = false;
-                  for (const ms of (shop.myServices || [])) {
-                      if (
-                          ms.service &&
-                          typeof ms.service.name === 'string' &&
-                          ms.service.name.trim().toLowerCase().includes(filterSearch) &&
-                          ms.subServices &&
-                          Array.isArray(ms.subServices) &&
-                          ms.subServices.length > 0
-                      ) {
-                          matched = true;
-                          break;
-                      }
-                      if (ms.subServices && Array.isArray(ms.subServices) && ms.subServices.length > 0) {
-                          for (const subSvc of ms.subServices) {
-                              if (
-                                  subSvc &&
-                                  typeof subSvc.name === 'string' &&
-                                  subSvc.name.trim().toLowerCase().includes(filterSearch)
-                              ) {
-                                  matched = true;
-                                  break;
-                              }
-                          }
-                          if (matched) break;
-                      }
-                  }
-                  return matched;
-              });
-              console.log("[getAllAutoShops] Step: After filterSearch filter, count:", beforeCount, "->", autoShops.length);
-          } else {
-              console.log("[getAllAutoShops] Step: No filterSearch present, skipped service name and sub-service search.");
-          }
-  
-          // Sort: top favorites first, then remaining, keeping city sorting logic within each group if userCity available
-          let favShops = [];
-          let nonFavShops = [];
-          for (const shop of autoShops) {
-              if (shop.isFavourite) {
-                  favShops.push(shop);
-              } else {
-                  nonFavShops.push(shop);
-              }
-          }
-          console.log("[getAllAutoShops] Step: favShops count:", favShops.length, "nonFavShops count:", nonFavShops.length);
-  
-          // Now sort within each: if userCity exists, city matches top in each group
-          const sortCityTop = arr => {
-              if (!userCity) {
-                  console.log("[getAllAutoShops] Step: sortCityTop skipped, no userCity.");
-                  return arr;
-              }
-              const match = [];
-              const nonmatch = [];
-              for (const shop of arr) {
-                  const shopCity = shop.city?.trim().toLowerCase() || null;
-                  if (shopCity && shopCity === userCity) {
-                      match.push(shop);
-                  } else {
-                      nonmatch.push(shop);
-                  }
-              }
-              console.log("[getAllAutoShops] Step: sortCityTop cityMatch count:", match.length, "others:", nonmatch.length);
-              return match.concat(nonmatch);
-          };
-  
-          favShops = sortCityTop(favShops);
-          nonFavShops = sortCityTop(nonFavShops);
-  
-          const sortedShops = favShops.concat(nonFavShops);
-          console.log("[getAllAutoShops] Step: Final sortedShops count:", sortedShops.length);
-  
-          return res.status(200).json({ success: true, data: sortedShops });
-      } catch (error) {
-          console.error("[getAllAutoShops] Error:", error);
-          return res.status(500).json({ success: false, message: 'Failed to fetch auto shops', error: error.message });
+
+
+
+getAllAutoShops = async (req, res) => {
+  try {
+    // Fetch requesting user (to get their city and favorites)
+    const userId = req.user?.id;
+    console.log("[getAllAutoShops] Step: Extracted userId:", userId);
+    let userCity = null;
+    let favoriteAutoShops = [];
+    if (userId) {
+      const user = await User.findById(userId).lean();
+      console.log("[getAllAutoShops] Step: Fetched User:", user?._id || null);
+      userCity = user?.city?.trim().toLowerCase() || null;
+      console.log("[getAllAutoShops] Step: Extracted userCity:", userCity);
+      if (Array.isArray(user?.favoriteAutoShops)) {
+        favoriteAutoShops = user.favoriteAutoShops.map(a => a.toString());
+        console.log("[getAllAutoShops] Step: User favoriteAutoShops:", favoriteAutoShops);
+      } else {
+        console.log("[getAllAutoShops] Step: User has no favoriteAutoShops array");
       }
-  };
+    } else {
+      console.log("[getAllAutoShops] Step: No userId found (unauthenticated user)");
+    }
+
+    // Extract filter parameters from query
+    const { search, service, carCompanies, shopType } = req.query;
+    console.log("[getAllAutoShops] Step: Query params:", { search, service, carCompanies, shopType });
+
+    let filterSearch = typeof search === "string" && search.trim().length > 0 ? search.trim().toLowerCase() : null;
+    console.log("[getAllAutoShops] Step: filterSearch:", filterSearch);
+
+    let filterServiceIds = [];
+    if (typeof service === "string" && service.trim().length > 0) {
+      filterServiceIds = service.split(',').map(s => s.trim()).filter(Boolean);
+      console.log("[getAllAutoShops] Step: filterServiceIds:", filterServiceIds);
+    } else {
+      console.log("[getAllAutoShops] Step: No service filter applied.");
+    }
+
+    let filterCarCompanyIds = [];
+    if (typeof carCompanies === "string" && carCompanies.trim().length > 0) {
+      filterCarCompanyIds = carCompanies.split(',').map(v => v.trim()).filter(Boolean);
+      console.log("[getAllAutoShops] Step: filterCarCompanyIds:", filterCarCompanyIds);
+    } else {
+      console.log("[getAllAutoShops] Step: No carCompanies filter applied.");
+    }
+
+    const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
+    let filterShopType = null;
+    if (typeof shopType === "string") {
+      if (allowedShopTypes.includes(shopType.trim())) {
+        filterShopType = shopType.trim();
+        console.log("[getAllAutoShops] Step: filterShopType valid -", filterShopType);
+      } else {
+        console.log("[getAllAutoShops] Step: shopType in query but not allowed:", shopType.trim());
+      }
+    } else {
+      console.log("[getAllAutoShops] Step: No shopType filter applied.");
+    }
+
+    const allServices = await servicesSchema.find({}, { _id: 1, name: 1, desc: 1 }).lean();
+    console.log("[getAllAutoShops] Step: allServices fetched. Count:", allServices.length);
+
+    let businessProfileFilter = { isBusinessActive: true };
+    console.log("[getAllAutoShops] Step: businessProfileFilter:", businessProfileFilter);
+
+    let userShopQuery = { businessProfile: { $ne: null }, role: "autoshopowner" };
+    if (filterShopType) {
+      if (filterShopType === "autoShop") {
+        userShopQuery.$or = [
+          { shopType: "autoShop" },
+          { shopType: { $exists: false } }
+        ];
+      } else {
+        userShopQuery.shopType = filterShopType;
+      }
+      console.log("[getAllAutoShops] Step: userShopQuery with shopType:", userShopQuery);
+    } else {
+      console.log("[getAllAutoShops] Step: userShopQuery:", userShopQuery);
+    }
+
+    const userShopTypes = await User.find(
+      userShopQuery,
+      { businessProfile: 1, shopType: 1 }
+    ).lean();
+    console.log("[getAllAutoShops] Step: userShopTypes fetched. Count:", userShopTypes.length);
+
+    const businessProfileIdToShopType = {};
+    userShopTypes.forEach(u => {
+      if (u.businessProfile) {
+        businessProfileIdToShopType[String(u.businessProfile)] = u.shopType || "autoShop";
+      }
+    });
+    console.log("[getAllAutoShops] Step: businessProfileIdToShopType keys:", Object.keys(businessProfileIdToShopType));
+
+    let validBusinessProfileIds = Object.keys(businessProfileIdToShopType);
+    console.log("[getAllAutoShops] Step: validBusinessProfileIds:", validBusinessProfileIds);
+
+    let profileFilter = { ...businessProfileFilter };
+    if (filterShopType || validBusinessProfileIds.length > 0) {
+      profileFilter._id = { $in: validBusinessProfileIds };
+      console.log("[getAllAutoShops] Step: profileFilter updated with _id $in array:", profileFilter);
+    } else {
+      console.log("[getAllAutoShops] Step: profileFilter for all active due to no validBusinessProfileIds match");
+    }
+
+    // CHANGED: swapped the nonexistent openHours/openDays/closedDays fields
+    // for the real schema fields perDayOpenHours/specialDayOpenHours.
+    let autoShops = await BusinessProfileModel.find(profileFilter, {
+      businessName: 1,
+      perDayOpenHours: 1,
+      specialDayOpenHours: 1,
+      businessAddress: 1,
+      city: 1,
+      businessPhone: 1,
+      businessEmail: 1,
+      businessLogo: 1,
+      businessMapLocation: 1,
+      myServices: 1,
+      ratings: 1,
+      carCompanies: 1,
+      _id: 1,
+      isBusinessActive: 1
+    })
+    .populate({
+      path: 'myServices.service',
+      model: 'Services',
+      select: 'name desc'
+    })
+    .populate({
+      path: 'carCompanies',
+      model: 'CarCompany',
+      select: 'name'
+    })
+    .lean();
+    console.log("[getAllAutoShops] Step: autoShops fetched. Count:", autoShops.length);
+
+    autoShops = autoShops.map(shop => {
+      const existingServicesMap = {};
+      if (Array.isArray(shop.myServices)) {
+        for (const ms of shop.myServices) {
+          if (ms.service && (ms.service._id || ms.service)) {
+            const serviceId = typeof ms.service === 'object' && ms.service._id ? String(ms.service._id) : String(ms.service);
+            existingServicesMap[serviceId] = ms;
+          }
+        }
+      }
+      const allMyServices = allServices.map(svc => {
+        const serviceId = String(svc._id);
+        if (existingServicesMap[serviceId]) {
+          const ms = JSON.parse(JSON.stringify(existingServicesMap[serviceId]));
+          if (Array.isArray(ms.subServices)) {
+            ms.subServices = ms.subServices.map(subSvc => {
+              if ('price' in subSvc) {
+                const { price, ...rest } = subSvc;
+                return rest;
+              }
+              return subSvc;
+            });
+          } else {
+            ms.subServices = [];
+          }
+          return {
+            service: { _id: svc._id, name: svc.name, desc: svc.desc },
+            subServices: ms.subServices
+          };
+        } else {
+          return {
+            service: { _id: svc._id, name: svc.name, desc: svc.desc },
+            subServices: []
+          };
+        }
+      });
+
+      let avgRating = null;
+      if (Array.isArray(shop.ratings) && shop.ratings.length > 0) {
+        const ratingsArr = shop.ratings.map(r => typeof r.rating === 'number' ? r.rating : null).filter(r => r !== null);
+        if (ratingsArr.length > 0) {
+          avgRating = ratingsArr.reduce((a, b) => a + b, 0) / ratingsArr.length;
+          avgRating = Number(avgRating.toFixed(2));
+        }
+      }
+
+      const isFavourite = favoriteAutoShops.includes(shop._id.toString());
+      const shopTypeValue = businessProfileIdToShopType[String(shop._id)] || null;
+
+      // NEW: current week's merged (weekly default + override) schedule
+      const currentWeekTimings = computeCurrentWeekSchedule(
+        shop.perDayOpenHours,
+        shop.specialDayOpenHours
+      );
+
+      console.log({
+        businessName: shop.businessName,
+        currentWeekTimings:currentWeekTimings, // NEW — replaces the old broken openHours/openDays/closedDays
+        isBusinessActive: shop.isBusinessActive
+      })
+
+      return {
+        _id: shop._id,
+        businessName: shop.businessName,
+        currentWeekTimings, // NEW — replaces the old broken openHours/openDays/closedDays
+        businessAddress: shop.businessAddress,
+        city: shop.city,
+        contactDetails: {
+          phone: shop.businessPhone,
+          email: shop.businessEmail
+        },
+        businessProfileImage: shop.businessLogo,
+        businessMapLocation: shop.businessMapLocation,
+        myServices: allMyServices,
+        avgRating: avgRating,
+        carCompanies: shop.carCompanies || [],
+        shopType: shopTypeValue,
+        isFavourite: isFavourite,
+        isBusinessActive: shop.isBusinessActive
+      };
+    });
+    console.log("[getAllAutoShops] Step: After remapping, autoShops count:", autoShops.length);
+
+    if (filterServiceIds.length > 0) {
+      const beforeCount = autoShops.length;
+      autoShops = autoShops.filter(shop => {
+        for (const ms of shop.myServices) {
+          if (
+            filterServiceIds.includes(String(ms.service._id)) &&
+            (Array.isArray(ms.subServices) ? ms.subServices.length > 0 : false)
+          ) {
+            return true;
+          }
+        }
+        return false;
+      });
+      console.log("[getAllAutoShops] Step: After filterServiceIds filter, count:", beforeCount, "->", autoShops.length);
+    } else {
+      console.log("[getAllAutoShops] Step: No Service filterIds, skipped service filtering.");
+    }
+
+    if (filterCarCompanyIds.length > 0) {
+      const beforeCount = autoShops.length;
+      autoShops = autoShops.filter(shop => {
+        let shopCarCompanies = Array.isArray(shop.carCompanies) ? shop.carCompanies : [];
+        shopCarCompanies = shopCarCompanies.map(cc => {
+          if (cc && typeof cc === "object" && cc._id) return String(cc._id);
+          if (typeof cc === "string") return cc;
+          return String(cc);
+        });
+        return filterCarCompanyIds.some(fid => shopCarCompanies.includes(fid));
+      });
+      console.log("[getAllAutoShops] Step: After filterCarCompanyIds filter, count:", beforeCount, "->", autoShops.length);
+    } else {
+      console.log("[getAllAutoShops] Step: No CarCompany filterIds, skipped car company filtering.");
+    }
+
+    if (filterSearch) {
+      const beforeCount = autoShops.length;
+      autoShops = autoShops.filter(shop => {
+        let matched = false;
+        for (const ms of (shop.myServices || [])) {
+          if (
+            ms.service &&
+            typeof ms.service.name === 'string' &&
+            ms.service.name.trim().toLowerCase().includes(filterSearch) &&
+            ms.subServices &&
+            Array.isArray(ms.subServices) &&
+            ms.subServices.length > 0
+          ) {
+            matched = true;
+            break;
+          }
+          if (ms.subServices && Array.isArray(ms.subServices) && ms.subServices.length > 0) {
+            for (const subSvc of ms.subServices) {
+              if (
+                subSvc &&
+                typeof subSvc.name === 'string' &&
+                subSvc.name.trim().toLowerCase().includes(filterSearch)
+              ) {
+                matched = true;
+                break;
+              }
+            }
+            if (matched) break;
+          }
+        }
+        return matched;
+      });
+      console.log("[getAllAutoShops] Step: After filterSearch filter, count:", beforeCount, "->", autoShops.length);
+    } else {
+      console.log("[getAllAutoShops] Step: No filterSearch present, skipped service name and sub-service search.");
+    }
+
+    let favShops = [];
+    let nonFavShops = [];
+    for (const shop of autoShops) {
+      if (shop.isFavourite) {
+        favShops.push(shop);
+      } else {
+        nonFavShops.push(shop);
+      }
+    }
+    console.log("[getAllAutoShops] Step: favShops count:", favShops.length, "nonFavShops count:", nonFavShops.length);
+
+    const sortCityTop = arr => {
+      if (!userCity) {
+        console.log("[getAllAutoShops] Step: sortCityTop skipped, no userCity.");
+        return arr;
+      }
+      const match = [];
+      const nonmatch = [];
+      for (const shop of arr) {
+        const shopCity = shop.city?.trim().toLowerCase() || null;
+        if (shopCity && shopCity === userCity) {
+          match.push(shop);
+        } else {
+          nonmatch.push(shop);
+        }
+      }
+      console.log("[getAllAutoShops] Step: sortCityTop cityMatch count:", match.length, "others:", nonmatch.length);
+      return match.concat(nonmatch);
+    };
+
+    favShops = sortCityTop(favShops);
+    nonFavShops = sortCityTop(nonFavShops);
+
+    const sortedShops = favShops.concat(nonFavShops);
+    console.log("[getAllAutoShops] Step: Final sortedShops count:", sortedShops.length);
+
+    return res.status(200).json({ success: true, data: sortedShops });
+  } catch (error) {
+    console.error("[getAllAutoShops] Error:", error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch auto shops', error: error.message });
+  }
+};
+
 
 
     /**

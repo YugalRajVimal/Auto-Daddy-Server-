@@ -61,7 +61,7 @@ import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fil
       const business = await BusinessProfileModel.findById(user.businessProfile)
         .populate({
           path: "myServices.service",
-          select: "name shopType status odoOutRequired"
+          select: "name shopType status odoOutRequired labourCost"
         });
 
       if (!business) {
@@ -99,6 +99,8 @@ import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fil
               });
             }
 
+            
+
             return {
               _id: ms.service._id,
               name: ms.service.name,
@@ -113,7 +115,9 @@ import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fil
                 quantity: sub.quantity, // added quantity
                 tax: sub.tax, // added tax
                 model: sub.model, // add model property in subServices
-                make: sub.make   // add make property in subServices
+                make: sub.make, // add make property in subServices
+                labourCost: sub.labourCost,
+                quantityType: sub.quantityType
               }))
             };
           }

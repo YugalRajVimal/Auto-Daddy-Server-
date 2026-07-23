@@ -1279,7 +1279,6 @@ export const fetchMyDeals = async (req, res) => {
       _id: { $in: dealIds },
       createdBy: businessProfile._id,
     })
-      // FIX: "desc" isn't a field on Services — select the fields that actually exist.
       .populate({ path: "serviceId", select: "name shopType status subServices", strictPopulate: false })
       .populate({ path: "createdBy", select: "name _id", strictPopulate: false })
       .lean();
@@ -1288,6 +1287,9 @@ export const fetchMyDeals = async (req, res) => {
     let partsDeals = [];
 
     for (const deal of deals) {
+      // Format createdAt as an ISO string, or null if not present
+      const createdAt = deal.createdAt ? deal.createdAt : null;
+
       if (deal.dealType === "Service") {
         let serviceObj = null;
         if (deal.serviceId && deal.serviceId.name) {
@@ -1309,6 +1311,7 @@ export const fetchMyDeals = async (req, res) => {
           createdBy: deal.createdBy && deal.createdBy._id ? deal.createdBy._id : deal.createdBy,
           dealImage: deal.dealImage ?? null,
           _id: deal._id,
+          createdAt: createdAt, // Send createdAt for Service deals
         });
       }
 
@@ -1341,6 +1344,7 @@ export const fetchMyDeals = async (req, res) => {
           createdBy: deal.createdBy && deal.createdBy._id ? deal.createdBy._id : deal.createdBy,
           dealImage: deal.dealImage ?? null,
           _id: deal._id,
+          createdAt: createdAt, // Send createdAt for Parts/Salvages deals
         });
       }
     }
