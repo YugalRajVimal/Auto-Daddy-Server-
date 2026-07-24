@@ -765,6 +765,7 @@ import { getNextJobCardIdentifiers, peekNextJobCardIdentifiers } from "./Jobcard
 import { generateInvoiceId } from "./invoiceIdentifier.helper.js";
 import JobCardCounter from "../../Schema/Jobcardcounter.schema.js";
 import InvoiceCounter from "../../Schema/Invoicecounter.schema.js";
+import DealModel from "../../Schema/deals.schema.js";
 
 
 
@@ -855,6 +856,29 @@ export const getJobCardPageDetails = async (req, res) => {
         })
     );
 
+    // --- NEW: Fetch Service Deals and Parts/Salvage Deals
+    // Import DealModel from deals.schema.js
+    // Only fetch Deals created by this business profile (createdBy = businessId)
+    // "Service" deals into serviceDeals, "Parts"/"Salvages" into partsDeals
+    let serviceDeals = [];
+    const allDeals = await DealModel.find({ createdBy: businessId }).lean();
+
+    allDeals.forEach(deal => {
+      // Services
+      if (deal.dealType === "Service") {
+        serviceDeals.push({
+          _id: deal._id,
+          serviceId: deal.serviceId,
+          subServiceName: deal.subServiceName,
+          discountPercentage: deal.discountPercentage,
+          offerEndsOnDate: deal.offerEndsOnDate,
+          dealImage: deal.dealImage ?? null,
+          createdAt: deal.createdAt,
+        });
+      }
+     
+    });
+
     // Flatten myServices -> individual subService rows for the line-item picker
     const myAllSubServices = [];
     business.myServices.forEach((ms) => {
@@ -876,20 +900,10 @@ export const getJobCardPageDetails = async (req, res) => {
       });
     });
 
-    // const [nextJobCardNo, myAllBanks] = await Promise.all([
-    //   peekNextJobCardNo(businessId),
-    //   AutoShopBank.find({ businessProfile: businessId }),
-    // ]);
-
     const [nextJobCard, myAllBanks] = await Promise.all([
-      peekNextJobCardIdentifiers(businessId), // import from jobCardIdentifier.helper.js
+      peekNextJobCardIdentifiers(businessId),
       AutoShopBank.find({ businessProfile: businessId }),
     ]);
-
-    console.log( {
-      myAllSubServices}
-)
-    
 
     return res.status(200).json({
       success: true,
@@ -899,6 +913,7 @@ export const getJobCardPageDetails = async (req, res) => {
         nextJobCardNo: nextJobCard.jobCardId,
         myAllSubServices,
         myAllBanks,
+        serviceDeals,
       },
     });
   } catch (error) {
