@@ -1,91 +1,3 @@
-// import mongoose from 'mongoose';
-
-// const selectedVehicleSchema = new mongoose.Schema(
-//   {
-//     id: {
-//       type: mongoose.Schema.Types.ObjectId,
-//       required: true,
-//     },
-//     name: {
-//       type: String,
-//       required: true,
-//       trim: true,
-//     },
-//     model: {
-//       type: String,
-//       required: true,
-//       trim: true,
-//     },
-//     year: {
-//       type: String,
-//       required: true,
-//       trim: true,
-//     },
-//   },
-//   { _id: false }
-// );
-
-// const dealSchema = new mongoose.Schema(
-//   {
-//     dealType: {
-//       type: String,
-//       required: true,
-//       enum: ["Service", "Parts","Salvages"],
-//     },
-//     serviceId: {
-//       type: mongoose.Schema.Types.ObjectId,
-//       ref: "Services",
-//       required: function () {
-//         return this.dealType === "Service";
-//       },
-//     },
-//     partName: {
-//       type: String,
-//       required: function () {
-//         return this.dealType === "Parts";
-//       },
-//       trim: true,
-//     },
-//     description: {
-//       type: String,
-//       required: true,
-//       trim: true,
-//       default: "",
-//     },
-//     selectedVehicle: {
-//       type: selectedVehicleSchema,
-//     },
-//     originalPrice: {         // <-- Added original price field
-//       type: Number,
-//       required: true,
-//       min: 0,
-//     },
-//     discountedPrice: {
-//       type: Number,
-//       required: true,
-//       min: 0,
-//     },
-//     offerEndsOnDate: {
-//       type: Date,
-//       required: true,
-//     },
-//     createdBy: {
-//       type: mongoose.Schema.Types.ObjectId,
-//       ref: "BusinessProfile",
-//       required: true,
-//     },
-//     dealImage: {
-//       type: String,
-//       required: false,
-//       trim: true,
-//       default: null,
-//     },
-//   },
-//   { timestamps: true }
-// );
-
-// const DealModel = mongoose.model("Deal", dealSchema);
-// export default DealModel;
 
 
 import mongoose from "mongoose";
@@ -129,6 +41,9 @@ const dealSchema = new mongoose.Schema(
         return this.dealType === "Service";
       },
     },
+    subServiceName:{
+      type: String
+    },
     // NEW: was referenced by the controller (createDeal/editDeal) but
     // missing from the schema, so it was being silently stripped on save.
     vehicle: {
@@ -148,7 +63,6 @@ const dealSchema = new mongoose.Schema(
     },
     description: {
       type: String,
-      required: true,
       trim: true,
       default: "",
     },
@@ -157,13 +71,19 @@ const dealSchema = new mongoose.Schema(
     },
     originalPrice: {
       type: Number,
-      required: true,
       min: 0,
     },
     discountedPrice: {
       type: Number,
-      required: true,
       min: 0,
+    },
+    discountPercentage: {
+      type: Number,
+      min: 0,
+      max: 100,
+      required: function() {
+        return this.dealType === "Service";
+      },
     },
     offerEndsOnDate: {
       type: Date,
