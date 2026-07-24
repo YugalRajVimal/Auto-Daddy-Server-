@@ -1,3 +1,4 @@
+import InvoiceCounter from "../../Schema/Invoicecounter.schema.js";
 import InvoicePrefix, { getInvoicePrefixForYear, setInvoicePrefix } from "../../Schema/invoiceprefix.schema.js";
 import { User } from "../../Schema/user.schema.js";
 
@@ -111,10 +112,26 @@ export const getInvoicePrefixController = async (req, res) => {
 
     const doc = await getInvoicePrefixForYear(businessId, targetYear);
 
+    // Fetch the invoice counter current number for the prefix/year as well.
+    let invoiceCounter = null;
+    if (doc) {    
+      // Assuming you have a model named InvoiceCounter with business, year, and current fields
+      // IMPORTANT: You may need to adjust this code to fit your model/schema names!
+      const counterDoc = await InvoiceCounter.findOne({
+        business: businessId
+      });
+
+      console.log(counterDoc)
+
+      invoiceCounter = counterDoc ? counterDoc.seq : null;
+    }
+
+
     return res.status(200).json({
       success: true,
-      data: doc ? { year: doc.year, prefix: doc.prefix }
-                : { year: targetYear, prefix: null }
+      data: doc
+        ? { year: doc.year, prefix: doc.prefix, invoiceCounter }
+        : { year: targetYear, prefix: null, invoiceCounter: null }
     });
   } catch (error) {
     return res.status(500).json({

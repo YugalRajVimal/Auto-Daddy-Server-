@@ -763,6 +763,8 @@ import { VehicleModel } from "../../Schema/vehicles.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import { getNextJobCardIdentifiers, peekNextJobCardIdentifiers } from "./Jobcardidentifier.helper.js";
 import { generateInvoiceId } from "./invoiceIdentifier.helper.js";
+import JobCardCounter from "../../Schema/Jobcardcounter.schema.js";
+import InvoiceCounter from "../../Schema/Invoicecounter.schema.js";
 
 
 
@@ -1088,22 +1090,29 @@ export const createJobCard = async (req, res) => {
       }
     }
 
-    // const jobCardNo = await getNextJobCardNo(businessId);
+    // Get next job card number and increment the counter (atomic update)
+    let jobCardNo;
+    try {
+      // Find the counter. If doesn't exist, create it with seq: 1.
 
-    // const jobCard = new JobCard({
-    //   business: businessId,
-    //   jobCardNo,
-    let jobCardNo, jobCardId;
-try {
-  ({ jobCardNo, jobCardId } = await getNextJobCardIdentifiers(businessId));
-} catch (err) {
-  return res.status(err.status || 500).json({ success: false, message: err.message });
-}
+      const updatedCounter = await JobCardCounter.findOneAndUpdate(
+        { business: businessId },
+        { $inc: { seq: 1 } },
+        { new: true, upsert: true, setDefaultsOnInsert: true }
+      );
+      jobCardNo = updatedCounter.seq - 1; // This job card is the previous seq value
+    } catch (err) {
+      return res.status(500).json({ success: false, message: "Failed to increment job card counter" });
+    }
 
-const jobCard = new JobCard({
-  business: businessId,
-  jobCardNo,
-  jobCardId, // NEW — e.g. "ABC-137"
+    // If you have a custom jobCardId string scheme, you can generate it here:
+    // For illustration, let's assume jobCardId = `${businessId}-${jobCardNo}`
+    const jobCardId = `${businessId}-${jobCardNo}`;
+
+    const jobCard = new JobCard({
+      business: businessId,
+      jobCardNo,
+      jobCardId,
       ...customerSnapshot,
       vehicleId,
       licensePlateNo: licensePlateNo || vehicle.licensePlateNo,
@@ -1175,6 +1184,16 @@ export const editJobCard = async (req, res) => {
       return res.status(404).json({ success: false, message: "Job card not found" });
     }
 
+    // Detect status change to "convertedToInvoice" for incrementing Invoice Counter
+    let isConvertingToInvoice = false;
+    const statusInRequest = req.body.status;
+    if (
+      statusInRequest === "convertedToInvoice" && 
+      jobCard.status !== "convertedToInvoice"
+    ) {
+      isConvertingToInvoice = true;
+    }
+
     if (["convertedToInvoice", "CashPaid"].includes(jobCard.status)) {
       return res.status(409).json({
         success: false,
@@ -1199,6 +1218,7 @@ export const editJobCard = async (req, res) => {
       // bankRefId,
       labourCharge,
       terms,
+      status, // allow status update
     } = req.body;
 
     if (vehicleId) {
@@ -1280,7 +1300,17 @@ export const editJobCard = async (req, res) => {
     if (labourCharge !== undefined) jobCard.labourCharge = labourCharge;
     if (terms !== undefined) jobCard.terms = terms;
 
+    if (status !== undefined) jobCard.status = status;
+
     await jobCard.save();
+
+    // If status was changed to "convertedToInvoice", increment the Invoice Counter
+    if (isConvertingToInvoice) {
+      await InvoiceCounter.updateOne(
+        { business: businessId },
+        { $inc: { invoiceNo: 1 } } // assumes an "invoiceNo" field  
+      );
+    }
 
     return res.status(200).json({ success: true, message: "Job card updated", data: jobCard });
   } catch (error) {
@@ -1428,6 +1458,8 @@ export const deleteJobCard = async (req, res) => {
 // };
 
 
+
+
 export const markStatus = async (req, res) => {
   try {
     const { jobCardNo } = req.params;
@@ -1457,17 +1489,25 @@ export const markStatus = async (req, res) => {
       });
     }
  
-    // Generate the invoice ID ONLY the first time this job card gets
-    // converted — invoiceId is set once and never regenerated, even if
-    // status somehow gets flipped between convertedToInvoice/CashPaid later.
-    if (!jobCard.invoiceId) {
-      try {
-        jobCard.invoiceId = await generateInvoiceId(businessId);
-      } catch (err) {
-        if (err.code === "INVOICE_PREFIX_NOT_SET") {
-          return res.status(409).json({ success: false, message: err.message });
+    // If converting to invoice: increment InvoiceCounter
+    if (status === "convertedToInvoice") {
+      // Only increment and generate invoiceId if we haven't done so already
+      if (!jobCard.invoiceId) {
+        try {
+          // Generate invoiceId before incrementing InvoiceCounter
+          jobCard.invoiceId = await generateInvoiceId(businessId);
+          // Atomic increment (if needed elsewhere; consider removing if generateInvoiceId already increments)
+          // await InvoiceCounter.findOneAndUpdate(
+          //   { business: businessId },
+          //   { $inc: { seq: 1 } },
+          //   { new: true, upsert: true, setDefaultsOnInsert: true }
+          // );
+        } catch (err) {
+          if (err.code === "INVOICE_PREFIX_NOT_SET") {
+            return res.status(409).json({ success: false, message: err.message });
+          }
+          throw err;
         }
-        throw err;
       }
     }
  

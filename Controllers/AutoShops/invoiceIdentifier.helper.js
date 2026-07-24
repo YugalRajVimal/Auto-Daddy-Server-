@@ -1,24 +1,16 @@
 
-// ASSUMPTION: mirrors your existing JobCardCounter pattern (atomic $inc,
-// scoped by business) — adjust the import path / field names if your
-// actual InvoiceCounter schema differs. If this file doesn't exist yet,
-// see the model stub at the bottom of this file's comment block.
-
 import InvoiceCounter from "../../Schema/Invoicecounter.schema.js";
 import { getInvoicePrefixForYear } from "../../Schema/invoiceprefix.schema.js";
 
-
 /**
  * generateInvoiceId
- * Atomically reserves the next sequence number for this business (NOT
- * scoped by year — see the note in Invoiceprefix.schema.js about why),
- * and combines it with the business's prefix for the CURRENT calendar
- * year to produce e.g. "INV-137".
+ * Returns the current sequence number for this business (or creates it as 1 if not present),
+ * then increments the stored sequence number, so the next generated ID will be one higher.
+ * The returned invoiceId is always based on the sequence ID about to be saved.
  *
- * Throws if no prefix has been set for the business for the current year
- * — callers (markStatus) should catch this and surface a clear 400/409,
- * since converting to invoice without a prefix configured is a setup
- * error, not a server error.
+ * Example: saved seq is 22.
+ *   - This function returns ...-22.
+ *   - It then increments and saves seq: 23.
  */
 export async function generateInvoiceId(businessId) {
   const prefixDoc = await getInvoicePrefixForYear(businessId);
@@ -30,15 +22,34 @@ export async function generateInvoiceId(businessId) {
     throw err;
   }
 
-  // Atomic increment — safe under concurrent requests for the same business.
-  const counterDoc = await InvoiceCounter.findOneAndUpdate(
+  // Attempt to find the counter doc, or create with seq=1 if not found
+  let counterDoc = await InvoiceCounter.findOne({ business: businessId });
+
+  let currentSeq;
+  if (!counterDoc) {
+    // If doesn't exist, create as seq=1 (first invoice is ...-1)
+    counterDoc = await InvoiceCounter.create({
+      business: businessId,
+      seq: 1,
+    });
+    currentSeq = 1;
+  } else {
+    // Already exists: get saved value, will increment after
+    currentSeq = counterDoc.seq;
+  }
+
+  const invoiceId = `${prefixDoc.prefix}-${currentSeq}`;
+
+  // Now increment stored sequence for next call
+  await InvoiceCounter.updateOne(
     { business: businessId },
-    { $inc: { seq: 1 } },
-    { new: true, upsert: true, setDefaultsOnInsert: true }
+    { $inc: { seq: 1 } }
   );
 
-  return `${prefixDoc.prefix}-${counterDoc.seq}`;
+  return invoiceId;
 }
+
+
 
 /*
 If InvoiceCounter.schema.js doesn't exist yet, here's the stub matching
