@@ -1088,7 +1088,20 @@ export const createJobCard = async (req, res) => {
     let builtServices;
     try {
       customerSnapshot = await resolveCustomerSnapshot(business, req.body);
+
+      // Begin: Attach discountPercentage, amountBeforeDiscount, dealId if present for each service
       builtServices = await buildServicesArray(services);
+      builtServices = builtServices.map((service, idx) => {
+        const original = services[idx] || {};
+        return {
+          ...service,
+          ...(original.discountPercentage !== undefined && { discountPercentage: original.discountPercentage }),
+          ...(original.amountBeforeDiscount !== undefined && { amountBeforeDiscount: original.amountBeforeDiscount }),
+          ...(original.dealId !== undefined && { dealId: original.dealId }),
+        };
+      });
+      // End: Attach
+
     } catch (err) {
       return res.status(err.status || 500).json({ success: false, message: err.message });
     }
@@ -1282,7 +1295,18 @@ export const editJobCard = async (req, res) => {
       }
 
       try {
-        jobCard.services = await buildServicesArray(services);
+        let newServices = await buildServicesArray(services);
+        // Attach discountPercentage, amountBeforeDiscount, dealId if present for each service
+        newServices = newServices.map((service, idx) => {
+          const original = services[idx] || {};
+          return {
+            ...service,
+            ...(original.discountPercentage !== undefined && { discountPercentage: original.discountPercentage }),
+            ...(original.amountBeforeDiscount !== undefined && { amountBeforeDiscount: original.amountBeforeDiscount }),
+            ...(original.dealId !== undefined && { dealId: original.dealId }),
+          };
+        });
+        jobCard.services = newServices;
       } catch (err) {
         return res.status(err.status || 500).json({ success: false, message: err.message });
       }

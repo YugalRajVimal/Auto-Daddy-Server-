@@ -200,6 +200,9 @@ const jobCardServiceSchema = new Schema({
   qty: { type: Number, required: true, min: 1, default: 1 },
   amount: { type: Number, required: true, min: 0 }, // server-computed: unitCost * qty
   odoOutReading: { type: Number }, // required only when the referenced Service has odoOutRequired: true
+  discountPercentage:{ type: Number }, 
+  amountBeforeDiscount:{ type: Number }, 
+  dealId: { type: Types.ObjectId, ref: 'Deal' },
 }, { _id: false });
 
 const JobCardSchema = new Schema({
