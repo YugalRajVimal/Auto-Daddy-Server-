@@ -656,11 +656,11 @@ export const fetchMyDeals = async (req, res) => {
     let partsDeals = [];
 
     for (const deal of deals) {
-      // Format createdAt as an ISO string, or null if not present
       const createdAt = deal.createdAt ? deal.createdAt : null;
 
       if (deal.dealType === "Service") {
         let serviceObj = null;
+        let subServiceName = null;
         if (deal.serviceId && deal.serviceId.name) {
           serviceObj = {
             _id: deal.serviceId._id,
@@ -668,6 +668,21 @@ export const fetchMyDeals = async (req, res) => {
             shopType: deal.serviceId.shopType,
             status: deal.serviceId.status,
           };
+          // There is no subServiceId directly; try to get from deal.subServiceName (which is actually the name)
+          if (deal.subServiceName && Array.isArray(deal.serviceId.subServices)) {
+            const foundSub = deal.serviceId.subServices.find(
+              (ss) =>
+                (ss.name && ss.name === deal.subServiceName)
+            );
+            if (foundSub && foundSub.name) {
+              subServiceName = foundSub.name;
+            } else {
+              // fallback to deal.subServiceName if not found in subServices list, but exists in deal
+              subServiceName = deal.subServiceName;
+            }
+          } else if (deal.subServiceName) {
+            subServiceName = deal.subServiceName;
+          }
         }
         serviceDeals.push({
           dealType: deal.dealType,
@@ -676,12 +691,13 @@ export const fetchMyDeals = async (req, res) => {
           description: deal.description,
           originalPrice: deal.originalPrice,
           discountedPrice: deal.discountedPrice,
-          discountPercentage: deal.discountPercentage, // <-- Added
+          discountPercentage: deal.discountPercentage,
           offerEndsOnDate: deal.offerEndsOnDate,
           createdBy: deal.createdBy && deal.createdBy._id ? deal.createdBy._id : deal.createdBy,
           dealImage: deal.dealImage ?? null,
           _id: deal._id,
-          createdAt: createdAt, // Send createdAt for Service deals
+          createdAt: createdAt,
+          subServiceName: subServiceName ?? null, // Add the subServiceName from deal
         });
       }
 
@@ -710,12 +726,12 @@ export const fetchMyDeals = async (req, res) => {
           description: deal.description,
           originalPrice: deal.originalPrice,
           discountedPrice: deal.discountedPrice,
-          discountPercentage: deal.discountPercentage, // <-- Added
+          discountPercentage: deal.discountPercentage,
           offerEndsOnDate: deal.offerEndsOnDate,
           createdBy: deal.createdBy && deal.createdBy._id ? deal.createdBy._id : deal.createdBy,
           dealImage: deal.dealImage ?? null,
           _id: deal._id,
-          createdAt: createdAt, // Send createdAt for Parts/Salvages deals
+          createdAt: createdAt,
         });
       }
     }
