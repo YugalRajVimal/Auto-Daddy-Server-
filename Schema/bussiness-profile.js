@@ -144,7 +144,7 @@ const domainDetailsSchema = new Schema({
   domainName: { type: String, required: true },
   expiryDate: { type: Date, required: true },
   provider: { type: String, required: true },
-  status: { type: String, enum: ["Active", "Expired", "Suspended"], default: "Active" }
+  status: { type: String, enum: ["New", "Existing"], default: "New" }
 }, { _id: false });
 
 // --- Business Profile Schema ---

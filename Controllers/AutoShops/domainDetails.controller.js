@@ -32,13 +32,17 @@ export const addDomainDetails = async (req, res) => {
   try {
     // Get the user's businessProfile via User schema
     const user = await User.findById(req.user.id).select("businessProfile");
+    console.log("[addDomainDetails] User fetched:", user);
     if (!user || !user.businessProfile) {
+      console.log("[addDomainDetails] Business profile not found for user:", req.user.id);
       return res.status(404).json({ success: false, message: "Business profile not found." });
     }
 
     const { domainName, expiryDate, provider, status } = req.body;
+    console.log("[addDomainDetails] Request body:", req.body);
 
     if (!domainName || !expiryDate || !provider) {
+      console.log("[addDomainDetails] Missing fields - domainName:", domainName, "expiryDate:", expiryDate, "provider:", provider);
       return res.status(400).json({ success: false, message: "domainName, expiryDate, and provider are required." });
     }
 
@@ -48,17 +52,22 @@ export const addDomainDetails = async (req, res) => {
       provider,
       status: status || "Active"
     };
+    console.log("[addDomainDetails] Domain details object to add:", domainDetailsObj);
 
     const business = await BusinessProfileModel.findById(user.businessProfile);
+    console.log("[addDomainDetails] Business fetched:", business);
     if (!business) {
+      console.log("[addDomainDetails] Business not found for profile id:", user.businessProfile);
       return res.status(404).json({ success: false, message: "Business not found." });
     }
 
     business.domainDetails.push(domainDetailsObj);
     await business.save();
 
+    console.log("[addDomainDetails] Domain details added successfully.");
     return res.status(200).json({ success: true, data: business.domainDetails, message: "Domain details added." });
   } catch (error) {
+    console.log("[addDomainDetails] Error occurred:", error);
     return res.status(500).json({ success: false, message: "Failed to add domain details.", error: error.message });
   }
 };
