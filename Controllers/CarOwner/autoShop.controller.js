@@ -521,7 +521,7 @@ class AutoShopController {
         try {
             // Fetch requesting user (to get their city and favorites)
             const userId = req.user?.id;
-    
+
             let userCity = null;
             let favoriteAutoShops = [];
             if (userId) {
@@ -538,14 +538,14 @@ class AutoShopController {
             } else {
                 console.log("[getAllAutoShops] Step: No userId found (unauthenticated user)");
             }
-    
+
             // Extract filter parameters from query
             const { search, service, carCompanies, shopType } = req.query;
             console.log("[getAllAutoShops] Step: Query params:", { search, service, carCompanies, shopType });
-    
+
             let filterSearch = typeof search === "string" && search.trim().length > 0 ? search.trim().toLowerCase() : null;
             console.log("[getAllAutoShops] Step: filterSearch:", filterSearch);
-    
+
             // Build service filter array if provided
             let filterServiceIds = [];
             if (typeof service === "string" && service.trim().length > 0) {
@@ -554,7 +554,7 @@ class AutoShopController {
             } else {
                 console.log("[getAllAutoShops] Step: No service filter applied.");
             }
-    
+
             // Build carCompanies filter array if provided
             let filterCarCompanyIds = [];
             if (typeof carCompanies === "string" && carCompanies.trim().length > 0) {
@@ -563,7 +563,7 @@ class AutoShopController {
             } else {
                 console.log("[getAllAutoShops] Step: No carCompanies filter applied.");
             }
-    
+
             // Allowed shop types from user.schema.js
             const allowedShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
             let filterShopType = null;
@@ -577,19 +577,15 @@ class AutoShopController {
             } else {
                 console.log("[getAllAutoShops] Step: No shopType filter applied.");
             }
-    
+
             // Get all services from db
             const allServices = await servicesSchema.find({}, { _id: 1, name: 1, desc: 1 }).lean();
             console.log("[getAllAutoShops] Step: allServices fetched. Count:", allServices.length);
-    
+
             // Only fetch business profiles that are active.
-            // NOTE: BusinessProfile schema has no `status` field — it uses
-            // `isBusinessActive: Boolean`. Filtering on `status` always matched
-            // zero documents, independent of any shopType/_id filtering, which is
-            // why autoShops count was 0 even after the _id $in filter was correct.
             let businessProfileFilter = { isBusinessActive: true };
             console.log("[getAllAutoShops] Step: businessProfileFilter:", businessProfileFilter);
-    
+
             // 1. Find all Users with businessProfile (not null) and role autoshopowner (where shopType is held)
             let userShopQuery = { businessProfile: { $ne: null }, role: "autoshopowner" };
             // Apply shopType filter here in User query for efficiency, so only fetch those users with matching shopType up front
@@ -609,14 +605,14 @@ class AutoShopController {
             } else {
                 console.log("[getAllAutoShops] Step: userShopQuery:", userShopQuery);
             }
-    
+
             // Fetch all these users (shopType lives in User, not BusinessProfile!)
             const userShopTypes = await User.find(
                 userShopQuery,
                 { businessProfile: 1, shopType: 1 }
             ).lean();
             console.log("[getAllAutoShops] Step: userShopTypes fetched. Count:", userShopTypes.length);
-    
+
             // Map: { businessProfileId: shopType } for all valid profiles (optionally filtered by shopType)
             const businessProfileIdToShopType = {};
             userShopTypes.forEach(u => {
@@ -626,11 +622,11 @@ class AutoShopController {
                 }
             });
             console.log("[getAllAutoShops] Step: businessProfileIdToShopType keys:", Object.keys(businessProfileIdToShopType));
-    
+
             // Only allow BusinessProfiles belonging to these userShopTypes (after shopType gets filtered already)
             let validBusinessProfileIds = Object.keys(businessProfileIdToShopType);
             console.log("[getAllAutoShops] Step: validBusinessProfileIds:", validBusinessProfileIds);
-    
+
             let profileFilter = { ...businessProfileFilter };
             // IMPORTANT: once a shopType filter was explicitly requested, always
             // constrain by _id — even to an empty array — so "0 matching users"
@@ -642,10 +638,8 @@ class AutoShopController {
             } else {
                 console.log("[getAllAutoShops] Step: profileFilter for all active due to no validBusinessProfileIds match");
             }
-    
+
             // Fetch only relevant BusinessProfile documents (matching profileFilter, which already encodes shopType user-side)
-            // CHANGED: openHours/openDays/closedDays don't exist on BusinessProfileModel —
-            // swapped for the real schema fields perDayOpenHours/specialDayOpenHours.
             let autoShops = await BusinessProfileModel.find(profileFilter, {
                 businessName: 1,
                 perDayOpenHours: 1,
@@ -660,7 +654,7 @@ class AutoShopController {
                 ratings: 1,
                 carCompanies: 1,
                 _id: 1,
-                isBusinessActive: 1 // Only for confirmation/debug, can be removed in returned object. Not exposed to client.
+                isBusinessActive: 1 // Expose isBusinessActive to client below, see data format
             })
                 .populate({
                     path: 'myServices.service',
@@ -674,7 +668,7 @@ class AutoShopController {
                 })
                 .lean();
             console.log("[getAllAutoShops] Step: autoShops fetched. Count:", autoShops.length);
-    
+
             // Compose myServices so ALL services are present for each shop, and mark isFavourite
             autoShops = autoShops.map(shop => {
                 const existingServicesMap = {};
@@ -721,7 +715,7 @@ class AutoShopController {
                         };
                     }
                 });
-    
+
                 // Compute avgRating
                 let avgRating = null;
                 if (Array.isArray(shop.ratings) && shop.ratings.length > 0) {
@@ -731,19 +725,19 @@ class AutoShopController {
                         avgRating = Number(avgRating.toFixed(2));
                     }
                 }
-    
+
                 // Determine isFavourite
                 const isFavourite = favoriteAutoShops.includes(shop._id.toString());
-    
+
                 // Fetch shopType from User's mapping
                 const shopTypeValue = businessProfileIdToShopType[String(shop._id)] || null;
-    
+
                 // NEW: current week's merged (weekly default + override) schedule
                 const currentWeekTimings = computeCurrentWeekSchedule(
                     shop.perDayOpenHours,
                     shop.specialDayOpenHours
                 );
-    
+
                 return {
                     _id: shop._id,
                     businessName: shop.businessName,
@@ -760,11 +754,12 @@ class AutoShopController {
                     avgRating: avgRating,
                     carCompanies: shop.carCompanies || [],
                     shopType: shopTypeValue,
-                    isFavourite: isFavourite
+                    isFavourite: isFavourite,
+                    isBusinessActive: shop.isBusinessActive // *** Expose isBusinessActive to client ***
                 };
             });
             console.log("[getAllAutoShops] Step: After remapping, autoShops count:", autoShops.length);
-    
+
             // 1. Filter by Service(s)
             if (filterServiceIds.length > 0) {
                 const beforeCount = autoShops.length;
@@ -783,7 +778,7 @@ class AutoShopController {
             } else {
                 console.log("[getAllAutoShops] Step: No Service filterIds, skipped service filtering.");
             }
-    
+
             // 2. Filter by Car Company(ies)
             if (filterCarCompanyIds.length > 0) {
                 const beforeCount = autoShops.length;
@@ -800,7 +795,7 @@ class AutoShopController {
             } else {
                 console.log("[getAllAutoShops] Step: No CarCompany filterIds, skipped car company filtering.");
             }
-    
+
             // 3. Search by service name or sub-service name
             if (filterSearch) {
                 const beforeCount = autoShops.length;
@@ -838,7 +833,7 @@ class AutoShopController {
             } else {
                 console.log("[getAllAutoShops] Step: No filterSearch present, skipped service name and sub-service search.");
             }
-    
+
             // Sort: top favorites first, then remaining, keeping city sorting logic within each group if userCity available
             let favShops = [];
             let nonFavShops = [];
@@ -850,7 +845,7 @@ class AutoShopController {
                 }
             }
             console.log("[getAllAutoShops] Step: favShops count:", favShops.length, "nonFavShops count:", nonFavShops.length);
-    
+
             // Now sort within each: if userCity exists, city matches top in each group
             const sortCityTop = arr => {
                 if (!userCity) {
@@ -870,13 +865,13 @@ class AutoShopController {
                 console.log("[getAllAutoShops] Step: sortCityTop cityMatch count:", match.length, "others:", nonmatch.length);
                 return match.concat(nonmatch);
             };
-    
+
             favShops = sortCityTop(favShops);
             nonFavShops = sortCityTop(nonFavShops);
-    
+
             const sortedShops = favShops.concat(nonFavShops);
             console.log("[getAllAutoShops] Step: Final sortedShops count:", sortedShops.length);
-    
+
             console.log(sortedShops);
             return res.status(200).json({ success: true, data: sortedShops });
         } catch (error) {
@@ -980,7 +975,7 @@ class AutoShopController {
             let deals = await DealModel.find(dealQuery)
                 .populate({
                     path: "createdBy",
-                    select: "city businessName businessAddress businessLogo",
+                    select: "city businessName businessAddress businessLogo businessPhone",
                     model: "BusinessProfile"
                 })
                 .populate({
@@ -1081,7 +1076,8 @@ class AutoShopController {
                         city: deal.createdBy.city,
                         businessName: deal.createdBy.businessName,
                         businessAddress: deal.createdBy.businessAddress,
-                        businessLogo: deal.createdBy.businessLogo
+                        businessLogo: deal.createdBy.businessLogo,
+                        businessPhone: deal.createdBy.businessPhone // <-- ADDED for sending businessPhone
                     } : null,
                     dealImage: deal.dealImage ?? null,
                     createdAt: deal.createdAt,

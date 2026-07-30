@@ -1,4 +1,5 @@
 import JobCard from "../../Schema/jobCard.schema.js";
+import { getJobCardPrefixForYear } from "../../Schema/Jobcardprefix.schema.js";
 import { User } from "../../Schema/user.schema.js";
 
 /**
@@ -8,6 +9,8 @@ import { User } from "../../Schema/user.schema.js";
 class JobCardController {
 
     // Fetch all job cards for this car owner (customer)
+    // import { getJobCardPrefixForYear } from "../../Schema/Jobcardprefix.schema.js";
+
     getAllJobCards = async (req, res) => {
         try {
             // 1. Authenticate user
@@ -49,9 +52,10 @@ class JobCardController {
                 path: 'vehicleId',
                 select: 'make model licensePlateNo carImages carOwnershipCertificate insuranceCertificate'
             };
+            // Updated to include businessHSTNumber and gst in the select
             const businessPopulate = {
                 path: 'business',
-                select: 'businessName businessType address businessPhone businessEmail city'
+                select: 'businessName businessType address businessPhone businessEmail city businessHSTNumber gst'
             };
             const servicesPopulate = {
                 path: 'services.service',
@@ -59,9 +63,6 @@ class JobCardController {
             };
 
             // 7. Map status keys (new schema: 'pending', 'rejected', 'autoRejected', 'convertedToInvoice', 'CashPaid')
-            // Presentation (to user) can upper/lowercase, but fetches must use correct case
-            // We'll output 'pending', 'approved', 'rejected', 'autoRejected' for the frontend grouping,
-            // where 'approved' means status 'convertedToInvoice' or 'CashPaid'
             const rawStatusGroups = {
                 pending: ['pending'],
                 approved: ['convertedToInvoice', 'CashPaid'],
@@ -83,6 +84,26 @@ class JobCardController {
 
                 // Post-process cards to make sure 'services' subdocs have service info collapsed as needed
                 for (const card of cards) {
+                    // Send job card prefix and number:
+                    // Try to extract business and createdAt's year
+                    let jobCardPrefix = null;
+                    if (card.business && card.createdAt) {
+                        try {
+                            // card.business can be object or ObjectId - handle both
+                            const businessId = card.business._id ? card.business._id : card.business;
+                            const year = new Date(card.createdAt).getFullYear();
+                            const prefixDoc = await getJobCardPrefixForYear(businessId, year);
+                            jobCardPrefix = prefixDoc && prefixDoc.prefix ? prefixDoc.prefix : null;
+                        } catch (err) {
+                            jobCardPrefix = null;
+                        }
+                    }
+                    card.jobCardPrefix = jobCardPrefix;
+                    // Always send jobCardNumber (this field assumed to exist as per your schema, adjust if named differently)
+                    card.jobCardNumber = card.jobCardNumber || card.jobCardNo || card.number || null;
+
+
+
                     if (Array.isArray(card.services)) {
                         card.services = card.services.map(serviceObj => ({
                             ...serviceObj,
@@ -104,7 +125,7 @@ class JobCardController {
             const groupJobCardsEntries = await Promise.all(groupJobCardPromises);
             const grouped = Object.fromEntries(groupJobCardsEntries);
 
-            // 9. Return grouped cards
+            // 9. Return grouped cards (including businessHSTNumber and gst in business object)
             return res.status(200).json({
                 success: true,
                 data: {
