@@ -790,20 +790,16 @@ export const getPlans = async (req, res) => {
 export const getSubscriptionStatus = async (req, res) => {
   try {
     const businessId = await getBusinessId(req.user.id);
-    console.log("Fetched businessId:", businessId);
 
     if (!businessId) {
-      console.log("Business profile not found for user:", req.user.id);
       return res.status(404).json({ success: false, message: "Business profile not found" });
     }
 
     const business = await BusinessProfileModel.findById(businessId).select(
       "subscriptions domainDetails websiteTemplateId"
     );
-    console.log("Fetched business profile:", business);
 
     if (!business) {
-      console.log("Business not found for businessId:", businessId);
       return res.status(404).json({ success: false, message: "Business not found" });
     }
 
@@ -825,11 +821,8 @@ export const getSubscriptionStatus = async (req, res) => {
       },
     };
 
-    console.log("Subscription status response:", responseData);
-
     return res.status(200).json(responseData);
   } catch (error) {
-    console.log("Error fetching subscription status:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch subscription status",
