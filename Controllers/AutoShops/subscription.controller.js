@@ -1,14 +1,17 @@
+
 // import { User } from "../../Schema/user.schema.js";
 // import BusinessProfileModel from "../../Schema/bussiness-profile.js";
-// import { getNextSequence } from "../../Schema/counter.schema.js";
-// import stripe from "../../Config/stripe.js";
+// // import { getNextSequence } from "../../Schema/counter.schema.js";
+// import { getNextSequence } from "../../Schema/Subscription/subsCounter.schema.js";
+
+// import stripe from "../../config/stripe.js";
 // import {
 //   SUBSCRIPTION_PLANS,
 //   CURRENCY,
 //   getPlanById,
 //   getAllPlans,
 //   computeSubscriptionAmounts,
-// } from "../../Constants/subscriptionPlans.constant.js";
+// } from "../../Schema/Subscription/Constants/Subscriptionplans.constant.js";
 
 // /* Helper: resolve the caller's businessProfile id from DB (req.user only
 //    ever has { id, role, ... } from jwtAuth — never businessProfile). Same
@@ -90,14 +93,20 @@
 // export const getSubscriptionStatus = async (req, res) => {
 //   try {
 //     const businessId = await getBusinessId(req.user.id);
+//     console.log("Fetched businessId:", businessId);
+
 //     if (!businessId) {
+//       console.log("Business profile not found for user:", req.user.id);
 //       return res.status(404).json({ success: false, message: "Business profile not found" });
 //     }
 
 //     const business = await BusinessProfileModel.findById(businessId).select(
 //       "subscriptionExpiresAt subscriptions domainDetails websiteTemplateId"
 //     );
+//     console.log("Fetched business profile:", business);
+
 //     if (!business) {
+//       console.log("Business not found for businessId:", businessId);
 //       return res.status(404).json({ success: false, message: "Business not found" });
 //     }
 
@@ -106,7 +115,7 @@
 //       ? business.subscriptions[business.subscriptions.length - 1]
 //       : null;
 
-//     return res.status(200).json({
+//     const responseData = {
 //       success: true,
 //       data: {
 //         isActive: daysRemaining > 0,
@@ -116,8 +125,13 @@
 //         totalPurchases: business.subscriptions.length,
 //         prerequisites: checkPrerequisites(business),
 //       },
-//     });
+//     };
+
+//     console.log("Subscription status response:", responseData);
+
+//     return res.status(200).json(responseData);
 //   } catch (error) {
+//     console.log("Error fetching subscription status:", error);
 //     return res.status(500).json({
 //       success: false,
 //       message: "Failed to fetch subscription status",
@@ -722,23 +736,18 @@ function computeDaysRemaining(subscriptionExpiresAt) {
 }
 
 /**
- * Shared "grant days" logic — extends subscriptionExpiresAt from whichever
- * is later: the current expiry (if still active) or today. Used by every
- * code path that can turn a subscription record Paid: the manual
- * purchase endpoint, the Stripe webhook, the self-healing status check,
- * and the manual mark-paid endpoint. Centralized here so all four stay
- * consistent instead of drifting apart over time.
+ * NOTE: subscriptionExpiresAt is no longer stored/written anywhere in this
+ * controller. It's now derived on every read via the
+ * `computedSubscriptionExpiresAt` virtual on BusinessProfileModel (see
+ * bussiness-profile.js), which stacks all "Paid" subscription records in
+ * purchasedOn order. This removes the previous extendExpiry() mutation
+ * entirely — there is nothing left to write, so there's nothing that can
+ * drift out of sync with the subscriptions array.
+ *
+ * IMPORTANT: any .select() on BusinessProfileModel in this file must
+ * include "subscriptions", or the virtual will compute against an empty
+ * array and silently return null.
  */
-function extendExpiry(business, days) {
-  const now = new Date();
-  const currentExpiry = business.subscriptionExpiresAt ? new Date(business.subscriptionExpiresAt) : null;
-  const baseDate = currentExpiry && currentExpiry.getTime() > now.getTime() ? currentExpiry : now;
-
-  const newExpiresAt = new Date(baseDate);
-  newExpiresAt.setDate(newExpiresAt.getDate() + days);
-  business.subscriptionExpiresAt = newExpiresAt;
-  return newExpiresAt;
-}
 
 function checkPrerequisites(business) {
   const hasDomainDetails = (business.domainDetails || []).length > 0;
@@ -781,34 +790,46 @@ export const getPlans = async (req, res) => {
 export const getSubscriptionStatus = async (req, res) => {
   try {
     const businessId = await getBusinessId(req.user.id);
+    console.log("Fetched businessId:", businessId);
+
     if (!businessId) {
+      console.log("Business profile not found for user:", req.user.id);
       return res.status(404).json({ success: false, message: "Business profile not found" });
     }
 
     const business = await BusinessProfileModel.findById(businessId).select(
-      "subscriptionExpiresAt subscriptions domainDetails websiteTemplateId"
+      "subscriptions domainDetails websiteTemplateId"
     );
+    console.log("Fetched business profile:", business);
+
     if (!business) {
+      console.log("Business not found for businessId:", businessId);
       return res.status(404).json({ success: false, message: "Business not found" });
     }
 
-    const daysRemaining = computeDaysRemaining(business.subscriptionExpiresAt);
+    const subscriptionExpiresAt = business.computedSubscriptionExpiresAt;
+    const daysRemaining = computeDaysRemaining(subscriptionExpiresAt);
     const lastPurchase = business.subscriptions.length
       ? business.subscriptions[business.subscriptions.length - 1]
       : null;
 
-    return res.status(200).json({
+    const responseData = {
       success: true,
       data: {
         isActive: daysRemaining > 0,
         daysRemaining,
-        subscriptionExpiresAt: business.subscriptionExpiresAt,
+        subscriptionExpiresAt,
         lastPurchase,
         totalPurchases: business.subscriptions.length,
         prerequisites: checkPrerequisites(business),
       },
-    });
+    };
+
+    console.log("Subscription status response:", responseData);
+
+    return res.status(200).json(responseData);
   } catch (error) {
+    console.log("Error fetching subscription status:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to fetch subscription status",
@@ -943,10 +964,9 @@ export const purchaseSubscription = async (req, res) => {
       remarks: remarks || `${plan.name} (${plan.days} days)`,
     });
 
-    if (finalStatus === "Paid") {
-      extendExpiry(business, plan.days);
-    }
-
+    // No extendExpiry() call — subscriptionExpiresAt is derived on read
+    // from the subscriptions array via the computedSubscriptionExpiresAt
+    // virtual, so pushing a "Paid" record here is all that's needed.
     await business.save();
 
     return res.status(201).json({
@@ -960,8 +980,8 @@ export const purchaseSubscription = async (req, res) => {
         plan: { id: plan.id, name: plan.name, days: plan.days },
         amount: { subTotal, hst, hstAmount, total, currency: CURRENCY },
         paymentStatus: finalStatus,
-        subscriptionExpiresAt: business.subscriptionExpiresAt,
-        daysRemaining: computeDaysRemaining(business.subscriptionExpiresAt),
+        subscriptionExpiresAt: business.computedSubscriptionExpiresAt,
+        daysRemaining: computeDaysRemaining(business.computedSubscriptionExpiresAt),
       },
     });
   } catch (error) {
@@ -1135,7 +1155,7 @@ export const createCheckoutSession = async (req, res) => {
       *** has already been JSON-parsed by the time it reaches here,
       *** constructEvent() will fail on every request.
       Handles:
-        - checkout.session.completed -> mark Paid, extend expiry
+        - checkout.session.completed -> mark Paid (expiry derives itself)
         - checkout.session.expired   -> mark Failed
       Always acknowledges fast (Stripe retries on non-2xx / timeout).
    ========================================================= */
@@ -1175,7 +1195,7 @@ export const handleStripeWebhook = async (req, res) => {
 
         // Idempotency: Stripe can and does deliver the same webhook event
         // more than once. If we've already processed this as Paid, don't
-        // extend the expiry a second time.
+        // process it again.
         if (sub.paymentStatus === "Paid") {
           break;
         }
@@ -1186,7 +1206,8 @@ export const handleStripeWebhook = async (req, res) => {
         sub.stripeCustomerId = session.customer;
         sub.stripePayload = session;
 
-        extendExpiry(business, sub.days);
+        // No extendExpiry() call — flipping this record to "Paid" is
+        // enough; computedSubscriptionExpiresAt picks it up on next read.
         await business.save();
 
         console.log(`[stripe webhook] Subscription ${invoiceNo} marked Paid, ${sub.days} days added.`);
@@ -1260,8 +1281,8 @@ export const verifyPaymentStatus = async (req, res) => {
         data: {
           invoiceNo,
           paymentStatus: sub.paymentStatus,
-          subscriptionExpiresAt: business.subscriptionExpiresAt,
-          daysRemaining: computeDaysRemaining(business.subscriptionExpiresAt),
+          subscriptionExpiresAt: business.computedSubscriptionExpiresAt,
+          daysRemaining: computeDaysRemaining(business.computedSubscriptionExpiresAt),
           reconciled: false,
         },
       });
@@ -1287,7 +1308,7 @@ export const verifyPaymentStatus = async (req, res) => {
       sub.stripePaymentIntentId = session.payment_intent;
       sub.stripeCustomerId = session.customer;
       sub.stripePayload = session;
-      extendExpiry(business, sub.days);
+      // No extendExpiry() — expiry derives itself from the "Paid" status.
       await business.save();
       reconciled = true;
     } else if (session.status === "expired" && sub.paymentStatus === "Pending") {
@@ -1303,8 +1324,8 @@ export const verifyPaymentStatus = async (req, res) => {
         invoiceNo,
         paymentStatus: sub.paymentStatus,
         stripeStatus: session.status,
-        subscriptionExpiresAt: business.subscriptionExpiresAt,
-        daysRemaining: computeDaysRemaining(business.subscriptionExpiresAt),
+        subscriptionExpiresAt: business.computedSubscriptionExpiresAt,
+        daysRemaining: computeDaysRemaining(business.computedSubscriptionExpiresAt),
         reconciled, // true if this call itself just fixed a missed webhook
       },
     });
@@ -1357,7 +1378,7 @@ export const markSubscriptionPaid = async (req, res) => {
     }
 
     sub.paymentStatus = "Paid";
-    extendExpiry(business, sub.days);
+    // No extendExpiry() — expiry derives itself from the "Paid" status.
     await business.save();
 
     return res.status(200).json({
@@ -1365,8 +1386,8 @@ export const markSubscriptionPaid = async (req, res) => {
       message: `Subscription ${invoiceNo} marked as Paid. ${sub.days} days added.`,
       data: {
         invoiceNo,
-        subscriptionExpiresAt: business.subscriptionExpiresAt,
-        daysRemaining: computeDaysRemaining(business.subscriptionExpiresAt),
+        subscriptionExpiresAt: business.computedSubscriptionExpiresAt,
+        daysRemaining: computeDaysRemaining(business.computedSubscriptionExpiresAt),
       },
     });
   } catch (error) {
