@@ -13,6 +13,7 @@ import Services from "../../Schema/services.schema.js";
 import { User } from "../../Schema/user.schema.js";
 import WebsiteTemplateSchema from "../../Schema/WebsiteTemplateSchema.js";
 import { VehicleModel } from "../../Schema/vehicles.schema.js";
+import { sendSms } from "../../config/sendSMS.js";
 
 
 class AutoShopOwnerController {
@@ -198,6 +199,8 @@ class AutoShopOwnerController {
    *
    * Body: { name, email, phone, countryCode, pincode, address?, shopType }
    */
+
+
   createAutoShopOwner = async (req, res) => {
     try {
       let { name, email, phone, countryCode, pincode, address, shopType, city } = req.body;
@@ -296,6 +299,19 @@ class AutoShopOwnerController {
       // newBusinessProfile.owner = newOwner._id;
       // await newBusinessProfile.save();
 
+      // ── Send onboarding success SMS ──────────────────────────────────────
+      const onboardingMsg = `Welcome to Auto Daddy, ${name}! Your shop onboarding is successful.`;
+      const smsResult = await sendSms(
+        `${countryCode.replace('+', '')}${String(phone).trim()}`,
+        onboardingMsg
+      );
+      if (!smsResult.success) {
+        console.error(
+          `[createAutoShopOwner] Error sending onboarding SMS:`,
+          smsResult.error
+        );
+      }
+
       return res.status(201).json({
         success: true,
         message: "Auto shop owner created successfully.",
@@ -315,6 +331,7 @@ class AutoShopOwnerController {
           isBusinessProfileCompleted: newOwner.isBusinessProfileCompleted,
           businessProfile: newBusinessProfile, // return full business profile object
           createdAt: newOwner.createdAt,
+          smsSent: smsResult.success, // expose if SMS sent
         },
       });
     } catch (err) {

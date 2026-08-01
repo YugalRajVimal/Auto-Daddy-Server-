@@ -912,11 +912,11 @@ export const addVehicleToMyOnboardedCustomer = async (req, res) => {
       odometerReading: odometerReading || 0,
     });
 
-    console.log('[addVehicleToMyOnboardedCustomer] Created vehicle:', { 
-      id: vehicle._id, 
-      carCompany: vehicle.carCompany, 
-      licensePlateNo: vehicle.licensePlateNo, 
-      vinNo: vehicle.vinNo 
+    console.log('[addVehicleToMyOnboardedCustomer] Created vehicle:', {
+      id: vehicle._id,
+      carCompany: vehicle.carCompany,
+      licensePlateNo: vehicle.licensePlateNo,
+      vinNo: vehicle.vinNo
     });
 
     // Push vehicle._id to the user's myVehicles array
@@ -926,6 +926,51 @@ export const addVehicleToMyOnboardedCustomer = async (req, res) => {
       userId: customerId,
       vehicleId: vehicle._id,
     });
+
+    // --- Push Notification Section ---
+    // Send push notification to the car owner (i.e., customerId)
+    try {
+      const carOwnerUser = await User.findById(customerId).select('fcmToken name');
+      if (carOwnerUser && carOwnerUser.fcmToken) {
+        const notification = {
+          title: `Vehicle Added to Your Profile`,
+          body: `A new vehicle (plate: ${licensePlateNo}) was added to your account by your shop.`,
+        };
+
+        const dataPayload = {
+          type: "vehicle_added_to_profile",
+          vehicleId: vehicle._id.toString(),
+          plate: licensePlateNo,
+          businessId: businessId.toString(),
+          timestamp: new Date().toISOString(),
+        };
+
+        // Import sendPushNotification from carOwnerApproval.controller.js context
+        // If not already imported at top-level, import it:
+        // import { sendPushNotification } from "../../config/pushNotification.js";
+
+        sendPushNotification({
+          token: carOwnerUser.fcmToken,
+          notification,
+          data: dataPayload,
+        }).then(() => {
+          console.log(
+            `[addVehicleToMyOnboardedCustomer] Push notification sent to car owner userId=${customerId}`,
+            { notificationTitle: notification.title, notificationBody: notification.body, dataPayload }
+          );
+        }).catch((err) => {
+          console.error(
+            `[addVehicleToMyOnboardedCustomer] Push notification error for car owner userId=${customerId}:`,
+            err
+          );
+        });
+      } else {
+        console.log(`[addVehicleToMyOnboardedCustomer] No fcmToken found for car owner userId=${customerId}`);
+      }
+    } catch (notifyErr) {
+      console.error('[addVehicleToMyOnboardedCustomer] Error sending push notification to car owner:', notifyErr);
+    }
+    // --- End Push Notification Section ---
 
     return res.status(201).json({
       success: true,

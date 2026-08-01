@@ -1079,7 +1079,7 @@ class AutoShopController {
                         businessLogo: deal.createdBy.businessLogo,
                         businessPhone: deal.createdBy.businessPhone // <-- ADDED for sending businessPhone
                     } : null,
-                    dealImage: deal.dealImage ?? null,
+                    dealImages: Array.isArray(deal.dealImages) ? deal.dealImages : [],
                     createdAt: deal.createdAt,
                     updatedAt: deal.updatedAt
                 };

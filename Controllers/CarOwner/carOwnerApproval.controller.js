@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import { User } from "../../Schema/user.schema.js";
 import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 import JobCard from "../../Schema/jobCard.schema.js";
+import { sendPushNotification } from "../../config/pushNotification.js";
 
 function requireCarowner(req, res) {
   if (req.user.role !== "carowner") {
@@ -243,28 +244,37 @@ export const getCustomerAddRequestDetails = async (req, res) => {
  * 2. if pendingEdit is set, those fields are written to the real User doc,
  *    then pendingEdit is cleared.
  */
+
+
 export const approveCustomerAddRequest = async (req, res) => {
   try {
     const { businessId } = req.params;
     const { customerId } = req.query; // comes from the SMS link
 
+    console.log("[approveCustomerAddRequest] Params:", { businessId, customerId });
+
     if (!mongoose.Types.ObjectId.isValid(businessId)) {
+      console.log("[approveCustomerAddRequest] Invalid businessId:", businessId);
       return res.status(400).json({ success: false, message: "Invalid businessId" });
     }
     if (!customerId || !mongoose.Types.ObjectId.isValid(customerId)) {
+      console.log("[approveCustomerAddRequest] Invalid or missing customerId:", customerId);
       return res.status(400).json({ success: false, message: "Invalid or missing customerId" });
     }
 
     const business = await BusinessProfileModel.findById(businessId);
     if (!business) {
+      console.log("[approveCustomerAddRequest] Business not found:", businessId);
       return res.status(404).json({ success: false, message: "Business not found" });
     }
 
     const entry = business.myCustomers.id(customerId);
     if (!entry) {
+      console.log("[approveCustomerAddRequest] No add request found for this customer:", customerId);
       return res.status(404).json({ success: false, message: "No add request found for this customer" });
     }
     if (entry.status !== "pending") {
+      console.log("[approveCustomerAddRequest] Request is not pending. Status:", entry.status);
       return res.status(409).json({
         success: false,
         message: `This request is already ${entry.status}`,
@@ -276,6 +286,8 @@ export const approveCustomerAddRequest = async (req, res) => {
       if (entry.pendingEdit.name !== undefined) update.name = entry.pendingEdit.name;
       if (entry.pendingEdit.email !== undefined) update.email = entry.pendingEdit.email;
       if (entry.pendingEdit.city !== undefined) update.city = entry.pendingEdit.city;
+
+      console.log("[approveCustomerAddRequest] Pending edit detected. Update object:", update);
 
       await User.findByIdAndUpdate(customerId, { $set: update });
 
@@ -290,12 +302,76 @@ export const approveCustomerAddRequest = async (req, res) => {
 
     await business.save();
 
+    // --- Push Notification Section ---
+    // fcmToken is now on the User schema of the business profile user
+    // First, find the User with _id == business.user (businessProfile.user == owner)
+    console.log(businessId);
+    if (businessId) {
+      // Find all users with this business profile (should normally only be one owner)
+      const ownerUsers = await User.find({ businessProfile: businessId }).select("fcmToken _id");
+      if (Array.isArray(ownerUsers) && ownerUsers.length > 0) {
+        for (const ownerUser of ownerUsers) {
+          if (ownerUser && ownerUser.fcmToken) {
+            const notification = {
+              title: `Customer approved your add request`,
+              body: `${entry.name || "A customer"} accepted your add request for your business: ${business.businessName}`,
+            };
+
+            // Optionally, you can attach data if needed.
+            const dataPayload = {
+              type: "customer_add_request_approved",
+              businessId: business._id.toString(),
+              customerId: customerId.toString(),
+              customerName: entry.name || "",
+              timestamp: new Date().toISOString(),
+            };
+
+            // Detailed console.log for debugging push notifications
+            console.log(
+              `[approveCustomerAddRequest] Sending push notification to owner userId=${ownerUser._id} for businessId=${business._id}`,
+              {
+                fcmTokenPresent: !!ownerUser.fcmToken,
+                fcmToken: ownerUser.fcmToken ? ownerUser.fcmToken.slice(0,8) + "...(trunc)" : undefined,
+                notificationTitle: notification.title,
+                notificationBody: notification.body,
+                dataPayload,
+              }
+            );
+
+            // Send the push notification, but don't block on it.
+            sendPushNotification({
+              token: ownerUser.fcmToken,
+              notification,
+              data: dataPayload
+            }).catch((err) => {
+              console.error(
+                `[approveCustomerAddRequest] Push notification error for owner userId=${ownerUser._id}, businessId=${business._id}:`,
+                err
+              );
+            });
+          } else {
+            // Detailed log if no fcmToken is present for this user
+            console.log(
+              `[approveCustomerAddRequest] No fcmToken found for userId=${ownerUser ? ownerUser._id : "undefined"} linked to businessId=${business._id}`
+            );
+          }
+        }
+      } else {
+        // Log in case no owners found for business (should not occur normally)
+        console.log(`[approveCustomerAddRequest] No owner user found with businessProfile=${businessId}`);
+      }
+    }
+    // --- End Push Notification Section ---
+
+    console.log("[approveCustomerAddRequest] Add request approved for customer:", customerId);
+
     return res.status(200).json({
       success: true,
       message: "Customer add request approved",
       data: entry,
     });
   } catch (error) {
+    console.error("[approveCustomerAddRequest] Error:", error);
     return res.status(500).json({
       success: false,
       message: "Failed to approve customer add request",
@@ -415,6 +491,68 @@ export const approveJobCard = async (req, res) => {
     // status intentionally stays "pending" — it only moves to
     // convertedToInvoice/CashPaid via the shop's own markStatus action
     await jobCard.save();
+
+    // --- Push Notification Section ---
+    // Notify shop owner(s) that the customer approved this job card
+    // The JobCard document has a `business` reference (businessProfile _id)
+    if (jobCard.business) {
+      // Find all users with this business profile (should normally only be one owner)
+      const ownerUsers = await User.find({ businessProfile: jobCard.business }).select("fcmToken _id");
+      if (Array.isArray(ownerUsers) && ownerUsers.length > 0) {
+        for (const ownerUser of ownerUsers) {
+          if (ownerUser && ownerUser.fcmToken) {
+            const notification = {
+              title: "Job card approved by customer",
+              body: `${currentUser.name || "A customer"} has approved the job card for your business.`,
+            };
+
+            // Optionally, attach more contextual data for app handling.
+            const dataPayload = {
+              type: "job_card_approved_by_customer",
+              businessId: jobCard.business.toString(),
+              jobCardId: jobCard._id.toString(),
+              customerId: currentUser._id.toString(),
+              customerName: currentUser.name || "",
+              jobCardNo: jobCard.jobCardNo ? jobCard.jobCardNo.toString() : "",
+              timestamp: new Date().toISOString(),
+            };
+
+            // Detailed log for debugging push notifications
+            console.log(
+              `[approveJobCard] Sending push notification to owner userId=${ownerUser._id} for businessId=${jobCard.business}`,
+              {
+                fcmTokenPresent: !!ownerUser.fcmToken,
+                fcmToken: ownerUser.fcmToken ? ownerUser.fcmToken.slice(0,8) + "...(trunc)" : undefined,
+                notificationTitle: notification.title,
+                notificationBody: notification.body,
+                dataPayload,
+              }
+            );
+
+            // Send the push notification, do not await (fire and forget)
+            sendPushNotification({
+              token: ownerUser.fcmToken,
+              notification,
+              data: dataPayload
+            }).catch((err) => {
+              console.error(
+                `[approveJobCard] Push notification error for owner userId=${ownerUser._id}, businessId=${jobCard.business}:`,
+                err
+              );
+            });
+          } else {
+            // Detailed log if no fcmToken is present for this user
+            console.log(
+              `[approveJobCard] No fcmToken found for userId=${ownerUser ? ownerUser._id : "undefined"} linked to businessId=${jobCard.business}`
+            );
+          }
+        }
+      } else {
+        // Log in case no owners found for business (should not occur normally)
+        console.log(`[approveJobCard] No owner user found with businessProfile=${jobCard.business}`);
+      }
+    }
+    // --- End Push Notification Section ---
 
     return res.status(200).json({ success: true, message: "Job card approved", data: jobCard });
   } catch (error) {
