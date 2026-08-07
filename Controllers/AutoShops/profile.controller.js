@@ -285,7 +285,8 @@ export const updateBusinessProfile = async (req, res) => {
       shopTypes, // array, JSON string, or comma-separated string
     } = req.body;
 
-    let user = await User.findById(userId).select("businessProfile shopType");
+    // Select isAutoShopBusinessProfileComplete so it can be set below
+    let user = await User.findById(userId).select("businessProfile shopType isAutoShopBusinessProfileComplete");
     if (!user) {
       if (req.file) deleteUploadedFile(req.file);
       return res
@@ -461,6 +462,10 @@ export const updateBusinessProfile = async (req, res) => {
     }
 
     if (req.file) business.businessLogo = req.file.path;
+
+    // ---- Set isAutoShopBusinessProfileComplete to true ----
+    user.isAutoShopBusinessProfileComplete = true;
+    // -------------------------------------------------------
 
     await business.save();
     if (typeof user.save === "function") await user.save();

@@ -73,6 +73,7 @@ import router from "./routes.js";
 import publicRouter from "./Routers/public.routes.js";
 import { connectUsingMongoose } from "./config/mongoose.config.js";
 import { User } from "./Schema/user.schema.js";
+import { startDailyNotificationCron } from "./jobs/dailyNotificationCron.js";
 
 const app = express();
 
@@ -156,4 +157,5 @@ app.use("/api", strictCors, router);
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}/`);
   connectUsingMongoose();
+  startDailyNotificationCron();
 });

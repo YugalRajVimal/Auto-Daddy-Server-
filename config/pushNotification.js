@@ -10,8 +10,12 @@ import firebaseAdmin from './firebase.js';
  * @returns {Promise<Object>} FCM result if successful. Throws if failed.
  */
 export async function sendPushNotification({ token, notification, data }) {
-  if (!token || typeof token !== 'string') throw new Error('FCM token is required.');
+  if (!token || typeof token !== 'string') {
+    console.log('[sendPushNotification] Missing or invalid FCM token:', token);
+    throw new Error('FCM token is required.');
+  }
   if (!notification || typeof notification !== 'object' || !notification.title || !notification.body) {
+    console.log('[sendPushNotification] Invalid notification object:', notification);
     throw new Error('Notification { title, body } is required.');
   }
 
@@ -25,9 +29,12 @@ export async function sendPushNotification({ token, notification, data }) {
   };
 
   try {
+    console.log('[sendPushNotification] Sending FCM message:', message);
     const result = await firebaseAdmin.messaging().send(message);
+    console.log('[sendPushNotification] FCM message sent successfully:', result);
     return { success: true, result };
   } catch (err) {
+    console.log('[sendPushNotification] FCM send error:', err);
     return { success: false, error: err.message || err };
   }
 }

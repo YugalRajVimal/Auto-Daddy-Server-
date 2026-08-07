@@ -169,6 +169,34 @@ class JobCardController {
             }
             jobCard.status = "Approved";
             await jobCard.save();
+
+            // Send FCM notification to the shop/business
+            try {
+                // Fetch the business profile
+                const businessProfile = jobCard.businessId
+                    ? await BusinessProfileModel.findById(jobCard.businessId).populate("user")
+                    : null;
+
+                if (businessProfile && businessProfile.user && businessProfile.user.fcmToken) {
+                    // You can format a more detailed notification if needed
+                    const { sendPushNotification } = await import("../../config/pushNotification.js");
+                    await sendPushNotification(
+                        [businessProfile.user.fcmToken],
+                        {
+                            title: "Job Card Approved",
+                            body: `Customer approved Job Card #${jobCard.jobCardNumber || jobCard._id}`,
+                            data: {
+                                jobCardId: jobCard._id.toString(),
+                                status: "Approved"
+                            }
+                        }
+                    );
+                }
+            } catch (notifyErr) {
+                console.error("[approveJobCard] Notification send error:", notifyErr);
+                // Optionally, do not fail the main request because of a notification failure
+            }
+
             return res.status(200).json({ success: true, message: "JobCard approved successfully.", data: jobCard });
         } catch (error) {
             console.error("[approveJobCard] Error:", error);
@@ -203,6 +231,32 @@ class JobCardController {
             }
             jobCard.status = "Rejected";
             await jobCard.save();
+
+            // Send FCM notification to the shop/business
+            try {
+                // Fetch the business profile
+                const businessProfile = jobCard.businessId
+                    ? await BusinessProfileModel.findById(jobCard.businessId).populate("user")
+                    : null;
+
+                if (businessProfile && businessProfile.user && businessProfile.user.fcmToken) {
+                    const { sendPushNotification } = await import("../../config/pushNotification.js");
+                    await sendPushNotification(
+                        [businessProfile.user.fcmToken],
+                        {
+                            title: "Job Card Rejected",
+                            body: `Customer rejected Job Card #${jobCard.jobCardNumber || jobCard._id}`,
+                            data: {
+                                jobCardId: jobCard._id.toString(),
+                                status: "Rejected"
+                            }
+                        }
+                    );
+                }
+            } catch (notifyErr) {
+                console.error("[rejectJobCard] Notification send error:", notifyErr);
+            }
+
             return res.status(200).json({ success: true, message: "JobCard rejected successfully.", data: jobCard });
         } catch (error) {
             console.error("[rejectJobCard] Error:", error);

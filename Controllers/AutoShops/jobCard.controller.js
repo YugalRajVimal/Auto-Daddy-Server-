@@ -31,14 +31,24 @@ async function getBusinessId(userId) {
 
 /* Placeholder — plug in your actual firebase-admin messaging call here.
    Kept as a stub since no FCM setup was provided. */
+import { sendPushNotification } from "../../config/pushNotification.js";
+
+/**
+ * Sends a push notification to a device using Firebase Cloud Messaging.
+ *
+ * @param {string} fcmToken - The FCM device token.
+ * @param {Object} notification - Notification object { title, message }.
+ */
 async function sendFcmNotification(fcmToken, { title, message }) {
   if (!fcmToken) return;
-  // Example real implementation:
-  // await admin.messaging().send({
-  //   token: fcmToken,
-  //   notification: { title, body: message },
-  // });
-  console.log("[FCM STUB] would send push:", { fcmToken, title, message });
+  try {
+    await sendPushNotification({
+      token: fcmToken,
+      notification: { title, body: message }
+    });
+  } catch (err) {
+    console.error("[FCM ERROR]", err);
+  }
 }
 
 /* Auto-rejects any pending job card for this business that was sent for
@@ -876,35 +886,37 @@ export const deleteJobCard = async (req, res) => {
 
 
 
+
+
 export const markStatus = async (req, res) => {
   try {
     const { jobCardNo } = req.params;
     const { status } = req.body;
- 
+
     if (!["convertedToInvoice", "CashPaid"].includes(status)) {
       return res.status(400).json({
         success: false,
         message: "status must be 'convertedToInvoice' or 'CashPaid'",
       });
     }
- 
+
     const businessId = await getBusinessId(req.user.id);
     if (!businessId) {
       return res.status(404).json({ success: false, message: "Business profile not found" });
     }
- 
+
     const jobCard = await JobCard.findOne({ business: businessId, jobCardNo: Number(jobCardNo) });
     if (!jobCard) {
       return res.status(404).json({ success: false, message: "Job card not found" });
     }
- 
+
     if (["convertedToInvoice", "CashPaid"].includes(jobCard.status)) {
       return res.status(409).json({
         success: false,
         message: `Job card is already ${jobCard.status}`,
       });
     }
- 
+
     // If converting to invoice: increment InvoiceCounter
     if (status === "convertedToInvoice") {
       // Only increment and generate invoiceId if we haven't done so already
@@ -912,12 +924,6 @@ export const markStatus = async (req, res) => {
         try {
           // Generate invoiceId before incrementing InvoiceCounter
           jobCard.invoiceId = await generateInvoiceId(businessId);
-          // Atomic increment (if needed elsewhere; consider removing if generateInvoiceId already increments)
-          // await InvoiceCounter.findOneAndUpdate(
-          //   { business: businessId },
-          //   { $inc: { seq: 1 } },
-          //   { new: true, upsert: true, setDefaultsOnInsert: true }
-          // );
         } catch (err) {
           if (err.code === "INVOICE_PREFIX_NOT_SET") {
             return res.status(409).json({ success: false, message: err.message });
@@ -926,10 +932,46 @@ export const markStatus = async (req, res) => {
         }
       }
     }
- 
+
     jobCard.status = status;
     await jobCard.save();
- 
+
+    // FCM notification logic: notify the car owner about status change
+    try {
+      // Fetch the car owner (user) and FCM token
+      const carOwner = await User.findById(jobCard.user).select("name fcmToken");
+      if (carOwner && carOwner.fcmToken) {
+        let title = "";
+        let message = "";
+
+        if (status === "convertedToInvoice") {
+          title = "Invoice Ready";
+          message = `Your job card #${jobCard.jobCardNo} has been converted to an invoice.`;
+        } else if (status === "CashPaid") {
+          title = "Payment Received";
+          message = `Payment received for job card #${jobCard.jobCardNo}. Thank you!`;
+        } else {
+          title = "Job Card Update";
+          message = `Status of job card #${jobCard.jobCardNo} has been changed to ${status}.`;
+        }
+
+        await sendFcmNotification({
+          token: carOwner.fcmToken,
+          title,
+          body: message,
+          data: {
+            type: "jobCardStatus",
+            jobCardId: String(jobCard._id),
+            jobCardNo: String(jobCard.jobCardNo),
+            status,
+          },
+        });
+      }
+    } catch (notifyErr) {
+      // Log notification error, but do not fail the main operation
+      console.error("[markStatus][FCM]", notifyErr);
+    }
+
     return res.status(200).json({ success: true, message: `Job card marked ${status}`, data: jobCard });
   } catch (error) {
     return res.status(500).json({
