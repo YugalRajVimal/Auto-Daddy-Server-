@@ -476,19 +476,33 @@ class AuthController {
    */
   adminSignin = async (req, res) => {
     try {
-      let { email, role } = req.body;
+      let { email, phone, role } = req.body;
 
-      if (!email || !role) {
-        return res.status(400).json({ message: "Email and role are required" });
+      if ((!email && !phone) || !role) {
+        return res.status(400).json({ message: "Email or phone and role are required" });
       }
-      email = email.trim().toLowerCase();
+      // If email is provided, normalize it; if not, leave as undefined
+      if (email) email = email.trim().toLowerCase();
+      if (phone) phone = phone.trim();
       role = role.trim();
 
       if (!STAFF_ROLES.includes(role)) {
         return res.status(400).json({ message: `Role must be one of: ${STAFF_ROLES.join(", ")}` });
       }
 
-      const staffUser = await StaffUser.findOne({ email }).lean();
+      // Find by email or phone (with role match)
+      let staffUser;
+      if (email && phone) {
+        staffUser = await StaffUser.findOne({
+          $or: [{ email }, { phone }],
+          role
+        }).lean();
+      } else if (email) {
+        staffUser = await StaffUser.findOne({ email, role }).lean();
+      } else if (phone) {
+        staffUser = await StaffUser.findOne({ phone, role }).lean();
+      }
+
       if (!staffUser) {
         return res.status(404).json({ message: "Staff user not found" });
       }
@@ -505,7 +519,7 @@ class AuthController {
         },
         { new: true }
       );
-      // Optionally: send OTP using email
+      // Optionally: send OTP using email or phone
       return res.status(200).json({ message: "OTP sent successfully" });
     } catch (error) {
       console.error("AdminSignin Error:", error);
