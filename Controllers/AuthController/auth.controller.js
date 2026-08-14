@@ -633,11 +633,19 @@ class AuthController {
 
 adminVerifyAccount = async (req, res) => {
   try {
-    let { email, otp, role } = req.body;
-    if (!email || !otp || !role) {
-      return res.status(400).json({ message: "Email, OTP, and Role are required" });
+    let { email, phone, otp, role } = req.body;
+    if ((!email && !phone) || !otp || !role) {
+      return res.status(400).json({ message: "Email or Phone, OTP, and Role are required" });
     }
-    email = email.trim().toLowerCase();
+
+    // Use only the present identifier (email OR phone)
+    let query = { otp };
+    if (email) {
+      query.email = email.trim().toLowerCase();
+    } else if (phone) {
+      query.phone = phone.trim();
+    }
+
     role = role.trim();
 
     if (!STAFF_ROLES.includes(role)) {
@@ -645,7 +653,7 @@ adminVerifyAccount = async (req, res) => {
     }
 
     const staffUser = await StaffUser.findOneAndUpdate(
-      { email, otp },
+      query,
       { $unset: { otp: 1, otpExpiresAt: 1, otpAttempts: 1, otpGeneratedAt: 1 }, lastLogin: new Date() },
       { new: true }
     ).populate({ path: "roleRef", model: Role, select: "name type permissions isActive" });
@@ -674,6 +682,7 @@ adminVerifyAccount = async (req, res) => {
     const tokenPayload = {
       id: staffUser._id,
       email: staffUser.email,
+      phone: staffUser.phone,
       role: staffUser.role,
     };
     if (staffUser.role !== "admin" && returnedPermissions) {
@@ -685,7 +694,7 @@ adminVerifyAccount = async (req, res) => {
       message: "Account verified successfully",
       token,
       permissions: returnedPermissions,
-      role: staffUser.role,   // "admin" | "role_admin" | "sub_admin" | "associates" — single key, no dupe
+      role: staffUser.role,   // "admin" | "role_admin" | "sub_admin" | "associates"
       roleName,                // display name, e.g. "Sub Admin" / "Super Admin" / null if unassigned
     });
   } catch (error) {
