@@ -23,15 +23,15 @@ const DomainSchema = new mongoose.Schema(
     },
     expiry: {
       type: Date,
-      required: true,
+      required: false,
     },
     provider: {
       type: String,
-      required: true,
+      required: false,
     },
     dns: {
       type: String,
-      required: true,
+      required: false,
     },
   },
   { timestamps: true }

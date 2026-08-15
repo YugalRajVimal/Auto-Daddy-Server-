@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import Domain from "../../Schema/domain.schema.js";
 import { User } from "../../Schema/user.schema.js"; // adjust path to your User model
+import BusinessProfileModel from "../../Schema/bussiness-profile.js";
 
 const USER_TYPES = ["carowner", "autoshopowner"];
 const DOMAIN_TYPES = ["existing", "new"];
@@ -20,29 +21,50 @@ async function verifyUserRef(userId, userType) {
   if (!isValidObjectId(userId)) {
     return { valid: false, message: "Invalid userId." };
   }
-  const user = await User.findById(userId);
-  if (!user) {
-    return { valid: false, message: "Referenced user not found." };
+
+  // Fetch the business profile for shopowner, else find the user for carowner/user
+  if (userType === "autoshopowner") {
+    const businessProfile = await BusinessProfileModel.findById(userId);
+    if (!businessProfile) {
+      return { valid: false, message: "Referenced Business Profile not found." };
+    }
+    // Find a User with this business profile and check their role
+    const user = await User.findOne({ businessProfile: businessProfile._id });
+    if (!user) {
+      return { valid: false, message: "No user found for this business profile." };
+    }
+    if (user.role !== userType) {
+      return { valid: false, message: `User's role (${user.role}) does not match userType (${userType}).` };
+    }
+    return { valid: true };
+  } else if (userType === "carowner") {
+    const user = await User.findById(userId);
+    if (!user) {
+      return { valid: false, message: "Referenced User not found." };
+    }
+    if (user.role !== userType) {
+      return { valid: false, message: `User's role (${user.role}) does not match userType (${userType}).` };
+    }
+    return { valid: true };
   }
-  if (user.role !== userType) {
-    return { valid: false, message: `User's role (${user.role}) does not match userType (${userType}).` };
-  }
-  return { valid: true };
+
+  return { valid: false, message: "Unsupported userType." };
 }
 
 /**
  * Add a new domain record
  * POST /admin/domains
- * Body: { userType, userId, domain, domainType, expiry, provider, dns }
+ * Body: { userType, userId, domain, domainType, expiry?, provider?, dns? }
  */
 export const addDomain = async (req, res) => {
   try {
     const { userType, userId, domain, domainType, expiry, provider, dns } = req.body;
+    console.log(req.body)
 
-    if (!userType || !userId || !domain || !domainType || !expiry || !provider || !dns) {
+    if (!userType || !userId || !domain || !domainType) {
       return res.status(400).json({
         success: false,
-        message: "userType, userId, domain, domainType, expiry, provider and dns are required.",
+        message: "userType, userId, domain, and domainType are required.",
       });
     }
 
@@ -60,7 +82,7 @@ export const addDomain = async (req, res) => {
       });
     }
 
-    if (!isValidDate(expiry)) {
+    if (expiry && !isValidDate(expiry)) {
       return res.status(400).json({ success: false, message: "Invalid expiry date." });
     }
 
@@ -69,15 +91,17 @@ export const addDomain = async (req, res) => {
       return res.status(400).json({ success: false, message: userCheck.message });
     }
 
-    const newDomain = new Domain({
+    const newDomainData = {
       userType,
       userId,
       domain: domain.trim(),
       domainType,
-      expiry: new Date(expiry),
-      provider: provider.trim(),
-      dns: dns.trim(),
-    });
+    };
+    if (expiry) newDomainData.expiry = new Date(expiry);
+    if (provider) newDomainData.provider = provider.trim();
+    if (dns) newDomainData.dns = dns.trim();
+
+    const newDomain = new Domain(newDomainData);
 
     await newDomain.save();
 
