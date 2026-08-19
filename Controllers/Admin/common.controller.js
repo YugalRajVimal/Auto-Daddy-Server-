@@ -290,7 +290,12 @@ export const addToCommonCollection = async (req, res) => {
     }
 
     // Uniqueness check on date+country, only where both fields exist
-    if (doc.date && doc.country) {
+    // EXCEPT for websiteTemplates: allow multiple uploads of same date+country+shopType etc.
+    if (
+      doc.date && doc.country &&
+      collection !== "websiteTemplates"
+    ) {
+      // For all collections except websiteTemplates, check for existing entry with same date+country
       const exists = await CommonModel.findOne({
         [collection]: { $elemMatch: { date: doc.date, country: doc.country } }
       });
@@ -299,6 +304,7 @@ export const addToCommonCollection = async (req, res) => {
         return res.status(409).json({ error: "Entry already exists for this date and country." });
       }
     }
+    // For websiteTemplates, allow multiple items for the same date/country/shopType
 
     let common = await CommonModel.findOne();
     if (!common) {
