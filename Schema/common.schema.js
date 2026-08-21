@@ -112,6 +112,10 @@ const commonSchema = new mongoose.Schema(
       type: [thoughtOfTheDayItemSchema],
       default: []
     },
+    thoughtOfTheDaySubjectSuggestions: {
+      type: [String],
+      default: []
+    },
     productFeatures: {
       type: [productFeatureItemSchema],
       default: []

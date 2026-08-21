@@ -162,6 +162,26 @@ export const fetchCommonCollection = async (req, res) => {
       if (filters.notes) {
         match.notes = { $regex: filters.notes.trim(), $options: 'i' };
       }
+
+      // Fetch thoughtOfTheDay and thoughtOfTheDaySubjectSuggestions
+      const pipeline = [
+        { $unwind: "$thoughtOfTheDay" },
+        { $replaceRoot: { newRoot: "$thoughtOfTheDay" } }
+      ];
+      if (Object.keys(match).length > 0) {
+        pipeline.push({ $match: match });
+      }
+      const results = await CommonModel.aggregate(pipeline);
+
+      // Fetch first document's thoughtOfTheDaySubjectSuggestions (return empty [] if not present)
+      const aggSubjects = await CommonModel.findOne({}, { thoughtOfTheDaySubjectSuggestions: 1, _id: 0 });
+      const thoughtOfTheDaySubjectSuggestions =
+        aggSubjects?.thoughtOfTheDaySubjectSuggestions || [];
+
+      return res.status(200).json({
+        thoughtOfTheDay: results,
+        thoughtOfTheDaySubjectSuggestions
+      });
     } else if (collection === "faqs") {
       // Add filter for pageSlug and keep existing filters
       if (filters.pageSlug) {
@@ -209,17 +229,20 @@ export const fetchCommonCollection = async (req, res) => {
       }
     }
 
-    const pipeline = [
-      { $unwind: `$${collection}` },
-      { $replaceRoot: { newRoot: `$${collection}` } }
-    ];
-    if (Object.keys(match).length > 0) {
-      pipeline.push({ $match: match });
-    }
+    // Default logic for all other collections (not thoughtOfTheDay)
+    if (collection !== "thoughtOfTheDay") {
+      const pipeline = [
+        { $unwind: `$${collection}` },
+        { $replaceRoot: { newRoot: `$${collection}` } }
+      ];
+      if (Object.keys(match).length > 0) {
+        pipeline.push({ $match: match });
+      }
 
-    const results = await CommonModel.aggregate(pipeline);
-    // Empty result set is a normal, successful response.
-    return res.status(200).json(results);
+      const results = await CommonModel.aggregate(pipeline);
+      // Empty result set is a normal, successful response.
+      return res.status(200).json(results);
+    }
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -310,6 +333,16 @@ export const addToCommonCollection = async (req, res) => {
     if (!common) {
       common = new CommonModel();
     }
+
+    // If adding a thought of the day, also add the subject to subject suggestion, if not already present
+    if (collection === "thoughtOfTheDay" && typeof doc.subject === "string" && doc.subject.trim()) {
+      const trimmedSubject = doc.subject.trim();
+      // Only add if not already in the array (case-insensitive compare)
+      if (!common.thoughtOfTheDaySubjectSuggestions.some(s => s.toLowerCase() === trimmedSubject.toLowerCase())) {
+        common.thoughtOfTheDaySubjectSuggestions.push(trimmedSubject);
+      }
+    }
+
     common[collection].push(doc);
     await common.save();
 
