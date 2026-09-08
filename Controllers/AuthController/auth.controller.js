@@ -21,6 +21,9 @@ class AuthController {
     try {
       let { countryCode, phone, email } = req.body;
 
+      // If countryCode is not provided or falsy, default to "+1"
+      countryCode = countryCode && countryCode.trim() ? countryCode.trim() : "+1";
+
       let user = await User.findOne({ countryCode, phone }).select("_id otp otpExpiresAt otpGeneratedAt otpAttempts");
       if (!user) {
         return res.status(404).json({ message: "User with this phone does not exist." });
@@ -539,7 +542,7 @@ class AuthController {
       if (phone) {
 
         // Use provided countryCode if possible, else fallback to '+91' if missing (optional: adjust as needed)
-        const cc = countryCode || staffUser.countryCode || "+91";
+        const cc = countryCode || staffUser.countryCode || "+1";
         const normalizedTo = `${cc.replace("+", "")}${phone}`;
         const onboardingMsg = `Your Auto Daddy staff OTP is: ${otp}`;
         smsResult = await sendSms(normalizedTo, onboardingMsg);
