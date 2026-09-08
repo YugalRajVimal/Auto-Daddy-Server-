@@ -795,7 +795,7 @@ async function deleteUploadedFiles(paths) {
 }
 
 /**
- * Create a new deal (Service, Parts, or Salvages) and link it to the creator's business profile.
+ * Create a new deal (Service or Parts) and link it to the creator's business profile.
  * Handles dealImages upload (up to 2 images, field name "dealImage" repeated,
  * e.g. -F "dealImage=@a.jpg" -F "dealImage=@b.jpg").
  * Saves image paths in db (DealModel.dealImages). Deletes uploaded images if creation fails.
@@ -842,7 +842,8 @@ export const createDeal = async (req, res) => {
       vehicleId,
       vehicleName,
       vehicleModel,
-      vehicleYear
+      vehicleYear,
+      newOld // Pick up newOld here as well
     } = req.body;
     console.log("Step 3: Raw body values:", req.body);
 
@@ -858,13 +859,14 @@ export const createDeal = async (req, res) => {
     vehicleName = typeof vehicleName === "string" ? vehicleName.trim() : undefined;
     vehicleModel = typeof vehicleModel === "string" ? vehicleModel.trim() : undefined;
     vehicleYear = typeof vehicleYear === "string" ? vehicleYear.trim() : vehicleYear;
+    newOld = typeof newOld === "string" ? newOld.trim().toLowerCase() : undefined;
 
-    const allowedDealTypes = ["Service", "Parts", "Salvages"];
+    const allowedDealTypes = ["Service", "Parts"];
     if (!dealType || !allowedDealTypes.includes(dealType)) {
       if (uploadedDealImages.length) await deleteUploadedFiles(uploadedDealImages);
       return res.status(400).json({
         success: false,
-        message: "dealType is required and must be 'Service', 'Parts', or 'Salvages'."
+        message: "dealType is required and must be 'Service' or 'Parts'."
       });
     }
 
@@ -963,8 +965,8 @@ export const createDeal = async (req, res) => {
         dealDoc.description = subServiceName;
       }
     }
-    // Parts and Salvages Deal Logic
-    else if (dealType === "Parts" || dealType === "Salvages") {
+    // Parts Deal Logic
+    else if (dealType === "Parts") {
       if (!partName) {
         if (uploadedDealImages.length) await deleteUploadedFiles(uploadedDealImages);
         return res.status(400).json({ success: false, message: `partName is required for dealType '${dealType}'.` });
@@ -1023,6 +1025,15 @@ export const createDeal = async (req, res) => {
         });
       }
 
+      // Validate newOld field for parts deal
+      const allowedNewOld = ["new", "old"];
+      let validatedNewOld = "new";
+      if (newOld && allowedNewOld.includes(newOld)) {
+        validatedNewOld = newOld;
+      }
+
+      console.log(newOld);
+
       // Check for duplicate (partName + vehicle + business)
       const duplicate = await DealModel.findOne({
         dealType,
@@ -1051,7 +1062,9 @@ export const createDeal = async (req, res) => {
           name: vehicleName,
           model: vehicleModel,
           year: vehicleYear
-        }
+        },
+        // Insert newOld field for PARTS deals only
+        newOld: validatedNewOld
       };
     }
 
@@ -1078,7 +1091,7 @@ export const createDeal = async (req, res) => {
  * Edit an existing deal (only if current business profile created it).
  *
  * For 'Service' dealType: allows updating serviceId, subServiceName, discountPercentage, offerEndOn, and images.
- * For 'Parts' or 'Salvages': like before.
+ * For 'Parts': like before.
  *
  * Image behavior: if new files are sent under "dealImage" (up to 2), they
  * REPLACE the deal's existing images entirely (old files on disk are
@@ -1138,14 +1151,16 @@ export const editDeal = async (req, res) => {
       vehicleName,
       vehicleModel,
       vehicleYear,
+      newOld // pick up newOld for updates
     } = req.body;
 
-    const allowedDealTypes = ["Service", "Parts", "Salvages"];
+    console.log(newOld);
+    const allowedDealTypes = ["Service", "Parts"];
     dealType = typeof dealType === "string" ? dealType.trim() : deal.dealType;
     updates.dealType = dealType;
     if (!allowedDealTypes.includes(dealType)) {
       if (uploadedDealImages.length) await deleteUploadedFiles(uploadedDealImages);
-      return res.status(400).json({ success: false, message: "dealType is required and must be 'Service', 'Parts', or 'Salvages'." });
+      return res.status(400).json({ success: false, message: "dealType is required and must be 'Service' or 'Parts'." });
     }
 
     if (dealType === "Service") {
@@ -1220,6 +1235,7 @@ export const editDeal = async (req, res) => {
       updates.partName = undefined;
       updates.vehicle = undefined;
       updates.selectedVehicle = undefined;
+      updates.newOld = undefined;
 
       // Check for duplicate
       const duplicate = await DealModel.findOne({
@@ -1252,12 +1268,13 @@ export const editDeal = async (req, res) => {
       delete updates.discountedPrice;
       delete updates.offerEndsOnDate;
     }
-    else if (dealType === "Parts" || dealType === "Salvages") {
+    else if (dealType === "Parts") {
       partName = typeof partName === "string" ? partName.trim() : deal.partName;
       vehicleId = typeof vehicleId === "string" ? vehicleId.trim() : deal.vehicle;
       vehicleName = typeof vehicleName === "string" ? vehicleName.trim() : deal.selectedVehicle?.name;
       vehicleModel = typeof vehicleModel === "string" ? vehicleModel.trim() : deal.selectedVehicle?.model;
       vehicleYear = typeof vehicleYear === "string" ? vehicleYear.trim() : deal.selectedVehicle?.year;
+      newOld = typeof newOld === "string" ? newOld.trim().toLowerCase() : deal.newOld;
 
       if (!partName) {
         if (uploadedDealImages.length) await deleteUploadedFiles(uploadedDealImages);
@@ -1338,6 +1355,14 @@ export const editDeal = async (req, res) => {
         updates.offerEndsOnDate = offerDate;
       }
 
+      // Validate newOld field for parts
+      const allowedNewOld = ["new", "old"];
+      let validatedNewOld = "new";
+      if (newOld && allowedNewOld.includes(newOld)) {
+        validatedNewOld = newOld;
+      }
+      updates.newOld = validatedNewOld;
+
       updates.partName = partName;
       updates.vehicle = vehicleId;
       updates.selectedVehicle = { id: vehicleId, name: vehicleName, model: vehicleModel, year: vehicleYear };
@@ -1368,7 +1393,8 @@ export const editDeal = async (req, res) => {
       delete updates.partName;
       delete updates.vehicle;
       delete updates.selectedVehicle;
-    } else if (dealType === "Parts" || dealType === "Salvages") {
+      delete updates.newOld;
+    } else if (dealType === "Parts") {
       delete updates.serviceId;
       delete updates.subServiceName;
       delete updates.discountPercentage;
@@ -1510,10 +1536,11 @@ export const fetchMyDeals = async (req, res) => {
           _id: deal._id,
           createdAt: createdAt,
           subServiceName: subServiceName ?? null, // Add the subServiceName from deal
+          newOld: deal.newOld || "new", // Send newOld too from deals (default "new" if absent)
         });
       }
 
-      if (deal.dealType === "Parts" || deal.dealType === "Salvages") {
+      if (deal.dealType === "Parts") {
         let selectedVehicle = null;
         if (
           deal.selectedVehicle &&
@@ -1544,6 +1571,7 @@ export const fetchMyDeals = async (req, res) => {
           dealImages,
           _id: deal._id,
           createdAt: createdAt,
+          newOld: deal.newOld || "new", // Add newOld to response, default to "new" if undefined
         });
       }
     }
