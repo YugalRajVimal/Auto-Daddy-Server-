@@ -9,6 +9,7 @@ import { StaffUser, STAFF_ROLES } from "../../Schema/RolesAndPermissions/Staffus
 
 import { Role } from "../../Schema/RolesAndPermissions/Role.schema.js";
 import { buildAllTruePermissions } from "../../constants/permissionModules.js";
+import { sendSms } from "../../config/sendSMS.js";
 // Allowed roles from user.schema.js (see enum in file_context_2 line 8)
 const ALLOWED_ROLES = ["patient", "therapist", "admin", "carowner", "autoshopowner"];
 
@@ -17,17 +18,16 @@ class AuthController {
   // ... [user-flows, unchanged] ...
 
   signupAndLogin = async (req, res) => {
-    // [Unchanged logic]
     try {
       let { countryCode, phone, email } = req.body;
-      // ... as before ...
-      // ... no changes needed in user portions ...
-      // ... 
+
       let user = await User.findOne({ countryCode, phone }).select("_id otp otpExpiresAt otpGeneratedAt otpAttempts");
       if (!user) {
         return res.status(404).json({ message: "User with this phone does not exist." });
       }
-      const otp = "000000";
+
+      // Generate real 6-digit OTP
+      const otp = (Math.floor(Math.random() * 900000) + 100000).toString();
       const otpExpiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min expiry
       const otpGeneratedAt = new Date();
 
@@ -42,9 +42,22 @@ class AuthController {
           }
         }
       );
+
+      // ── Send onboarding success SMS ──────────────────────────────────────
+      const onboardingMsg = `Welcome to Auto Daddy! Your OTP for login is: ${otp}`;
+      const normalizedTo = `${countryCode.replace('+', '')}${String(phone).trim()}`;
+      const smsResult = await sendSms(normalizedTo, onboardingMsg);
+      if (!smsResult.success) {
+        console.error(
+          `[signupAndLogin] Error sending onboarding OTP SMS:`,
+          smsResult.error
+        );
+      }
+
       return res.status(200).json({
         message: "OTP sent successfully for login",
         userId: user._id,
+        smsSent: smsResult.success, // expose if SMS was sent
       });
     } catch (error) {
       console.error("Signup/Login Error:", error);
@@ -476,7 +489,7 @@ class AuthController {
    */
   adminSignin = async (req, res) => {
     try {
-      let { email, phone, role } = req.body;
+      let { email, phone, role, countryCode } = req.body;
 
       if ((!email && !phone) || !role) {
         return res.status(400).json({ message: "Email or phone and role are required" });
@@ -485,6 +498,7 @@ class AuthController {
       if (email) email = email.trim().toLowerCase();
       if (phone) phone = phone.trim();
       role = role.trim();
+      if (countryCode) countryCode = countryCode.trim();
 
       if (!STAFF_ROLES.includes(role)) {
         return res.status(400).json({ message: `Role must be one of: ${STAFF_ROLES.join(", ")}` });
@@ -507,8 +521,8 @@ class AuthController {
         return res.status(404).json({ message: "Staff user not found" });
       }
 
-      // Set constant OTP for now
-      const otp = "000000";
+      // Generate real 6-digit OTP
+      const otp = (Math.floor(Math.random() * 900000) + 100000).toString();
       await StaffUser.findByIdAndUpdate(
         staffUser._id,
         {
@@ -519,8 +533,27 @@ class AuthController {
         },
         { new: true }
       );
-      // Optionally: send OTP using email or phone
-      return res.status(200).json({ message: "OTP sent successfully" });
+
+      // Send OTP via SMS if phone is present
+      let smsResult;
+      if (phone) {
+
+        // Use provided countryCode if possible, else fallback to '+91' if missing (optional: adjust as needed)
+        const cc = countryCode || staffUser.countryCode || "+91";
+        const normalizedTo = `${cc.replace("+", "")}${phone}`;
+        const onboardingMsg = `Your Auto Daddy staff OTP is: ${otp}`;
+        smsResult = await sendSms(normalizedTo, onboardingMsg);
+
+        if (!smsResult.success) {
+          console.error(`[adminSignin] Error sending OTP SMS:`, smsResult.error);
+        }
+      }
+      // Optionally: send OTP using email if needed (not implemented here)
+
+      return res.status(200).json({ 
+        message: "OTP sent successfully",
+        otpSent: phone ? !!smsResult?.success : false
+      });
     } catch (error) {
       console.error("AdminSignin Error:", error);
       return res.status(500).json({ message: "Internal Server Error" });
