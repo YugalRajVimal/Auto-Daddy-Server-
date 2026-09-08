@@ -57,6 +57,8 @@ class AuthController {
         );
       }
 
+      console.log(smsResult);
+
       return res.status(200).json({
         message: "OTP sent successfully for login",
         userId: user._id,
@@ -550,6 +552,7 @@ class AuthController {
         if (!smsResult.success) {
           console.error(`[adminSignin] Error sending OTP SMS:`, smsResult.error);
         }
+        console.log(smsResult);
       }
       // Optionally: send OTP using email if needed (not implemented here)
 
