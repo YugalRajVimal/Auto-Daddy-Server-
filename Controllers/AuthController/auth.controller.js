@@ -49,6 +49,7 @@ class AuthController {
       // ── Send onboarding success SMS ──────────────────────────────────────
       const onboardingMsg = `Welcome to Auto Daddy! Your OTP for login is: ${otp}`;
       const normalizedTo = `${countryCode.replace('+', '')}${String(phone).trim()}`;
+      console.log(normalizedTo);
       const smsResult = await sendSms(normalizedTo, onboardingMsg);
       if (!smsResult.success) {
         console.error(
@@ -546,6 +547,7 @@ class AuthController {
         // Use provided countryCode if possible, else fallback to '+91' if missing (optional: adjust as needed)
         const cc = countryCode || staffUser.countryCode || "+1";
         const normalizedTo = `${cc.replace("+", "")}${phone}`;
+        console.log(normalizedTo);
         const onboardingMsg = `Your Auto Daddy staff OTP is: ${otp}`;
         smsResult = await sendSms(normalizedTo, onboardingMsg);
 
