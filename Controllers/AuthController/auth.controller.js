@@ -527,8 +527,17 @@ class AuthController {
         return res.status(404).json({ message: "Staff user not found" });
       }
 
-      // Generate real 6-digit OTP
-      const otp = (Math.floor(Math.random() * 900000) + 100000).toString();
+      // Special test phone handling: If phone is '9999999999', use "000000" and don't send SMS
+      let otp;
+      let sendSmsFlag = true;
+      if (phone === "9999999999") {
+        otp = "000000";
+        sendSmsFlag = false;
+      } else {
+        // Generate real 6-digit OTP
+        otp = (Math.floor(Math.random() * 900000) + 100000).toString();
+      }
+
       await StaffUser.findByIdAndUpdate(
         staffUser._id,
         {
@@ -540,10 +549,9 @@ class AuthController {
         { new: true }
       );
 
-      // Send OTP via SMS if phone is present
+      // Send OTP via SMS if phone is present and not the test case
       let smsResult;
-      if (phone) {
-
+      if (phone && sendSmsFlag) {
         // Use provided countryCode if possible, else fallback to '+91' if missing (optional: adjust as needed)
         const cc = countryCode || staffUser.countryCode || "+1";
         const normalizedTo = `${cc.replace("+", "")}${phone}`;
@@ -556,11 +564,12 @@ class AuthController {
         }
         console.log(smsResult);
       }
+
       // Optionally: send OTP using email if needed (not implemented here)
 
       return res.status(200).json({ 
         message: "OTP sent successfully",
-        otpSent: phone ? !!smsResult?.success : false
+        otpSent: phone ? (phone === "9999999999" ? false : !!smsResult?.success) : false
       });
     } catch (error) {
       console.error("AdminSignin Error:", error);
