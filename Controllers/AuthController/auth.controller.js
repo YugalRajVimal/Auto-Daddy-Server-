@@ -2290,13 +2290,13 @@ async function checkAndRegisterOtpDeviceAttempt(deviceId, fcmToken) {
   }
 
   // Rolling window expired — start counting fresh.
-  if (!record.windowStart || now.getTime() - record.windowStart.getTime() > OTP_DEVICE_WINDOW_MS) {
-    record.windowStart = now;
-    record.attempts = 1;
-    record.blockedUntil = null;
-  } else {
-    record.attempts += 1;
-  }
+  // if (!record.windowStart || now.getTime() - record.windowStart.getTime() > OTP_DEVICE_WINDOW_MS) {
+  //   record.windowStart = now;
+  //   record.attempts = 1;
+  //   record.blockedUntil = null;
+  // } else {
+  //   record.attempts += 1;
+  // }
   if (fcmToken) record.fcmToken = fcmToken;
 
   if (record.attempts > OTP_DEVICE_MAX_ATTEMPTS) {
