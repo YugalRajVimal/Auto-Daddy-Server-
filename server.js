@@ -186,6 +186,8 @@ const allowedOrigins = [
   "https://auto-daddy-admin.onrender.com",
   "https://www.auto-daddy-admin.onrender.com",
   "https://admin.autodaddy.ca",
+  "https://autodaddy.ca",
+  "https://www.autodaddy.ca",
   "https://www.admin.autodaddy.ca",
   "https://auto-daddy-panel.onrender.com",
   "https://www.auto-daddy-panel.onrender.com",
