@@ -538,7 +538,7 @@ import invoiceRouter from "./Admin/invoices.routes.js";
 import staffUserManagementRouter from "./Admin/Staffuser.routes .js";
 import roleRouter from "./Admin/role.routes.js";
 import platformSettingsRouter from "./Admin/platformSettings.routes.js";
-import adminWalletRouter from "./Admin/wallet.routes.js";
+import adminWalletRouter from "./Admin/Wallet.routes.js";
  
  
 const adminRouter = express.Router();
