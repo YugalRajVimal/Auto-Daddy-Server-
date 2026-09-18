@@ -687,53 +687,53 @@ export const updatePersonalProfile = async (req, res) => {
    codebase accordingly)
    ========================================================= */
 
-export const getBusinessProfile = async (req, res) => {
-  try {
-    const userId = req.user.id;
+// export const getBusinessProfile = async (req, res) => {
+//   try {
+//     const userId = req.user.id;
 
-    const user = await User.findById(userId).select("businessProfile shopType");
-    if (!user || !user.businessProfile) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Business profile not found" });
-    }
+//     const user = await User.findById(userId).select("businessProfile shopType");
+//     if (!user || !user.businessProfile) {
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Business profile not found" });
+//     }
 
-    const business = await BusinessProfileModel.findById(
-      user.businessProfile
-    ).select(
-      "businessName businessPhone city businessAddress pincode businessHSTNumber gst businessEmail businessLogo businessMapLocation"
-    );
+//     const business = await BusinessProfileModel.findById(
+//       user.businessProfile
+//     ).select(
+//       "businessName businessPhone city businessAddress pincode businessHSTNumber gst businessEmail businessLogo businessMapLocation"
+//     );
 
-    if (!business) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Business profile not found" });
-    }
+//     if (!business) {
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Business profile not found" });
+//     }
 
-    return res.status(200).json({
-      success: true,
-      data: {
-        businessName: business.businessName,
-        businessPhone: business.businessPhone,
-        city: business.city,
-        businessAddress: business.businessAddress,
-        pincode: business.pincode,
-        businessHSTNumber: business.businessHSTNumber,
-        gst: business.gst,
-        businessEmail: business.businessEmail,
-        businessLogo: business.businessLogo,
-        businessMapLocation: business.businessMapLocation || null,
-        shopTypes: user.shopType || [],
-      },
-    });
-  } catch (error) {
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch business profile",
-      error: error.message,
-    });
-  }
-};
+//     return res.status(200).json({
+//       success: true,
+//       data: {
+//         businessName: business.businessName,
+//         businessPhone: business.businessPhone,
+//         city: business.city,
+//         businessAddress: business.businessAddress,
+//         pincode: business.pincode,
+//         businessHSTNumber: business.businessHSTNumber,
+//         gst: business.gst,
+//         businessEmail: business.businessEmail,
+//         businessLogo: business.businessLogo,
+//         businessMapLocation: business.businessMapLocation || null,
+//         shopTypes: user.shopType || [],
+//       },
+//     });
+//   } catch (error) {
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch business profile",
+//       error: error.message,
+//     });
+//   }
+// };
 
 // export const updateBusinessProfile = async (req, res) => {
 //   try {
@@ -845,6 +845,62 @@ export const getBusinessProfile = async (req, res) => {
 //   }
 // };
 
+
+export const getBusinessProfile = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const user = await User.findById(userId).select("businessProfile shopType");
+    if (!user || !user.businessProfile) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Business profile not found" });
+    }
+
+    const business = await BusinessProfileModel.findById(
+      user.businessProfile
+    ).select(
+      "businessName businessPhone city businessAddress pincode businessHSTNumber gst businessEmail businessLogo businessMapLocation slug"
+    );
+
+    if (!business) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Business profile not found" });
+    }
+
+    // Backfill slug for shops created before this field existed — saving
+    // triggers the pre-save slug generator on the schema.
+    if (!business.slug) {
+      await business.save();
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        _id: business._id,
+        slug: business.slug,
+        businessName: business.businessName,
+        businessPhone: business.businessPhone,
+        city: business.city,
+        businessAddress: business.businessAddress,
+        pincode: business.pincode,
+        businessHSTNumber: business.businessHSTNumber,
+        gst: business.gst,
+        businessEmail: business.businessEmail,
+        businessLogo: business.businessLogo,
+        businessMapLocation: business.businessMapLocation || null,
+        shopTypes: user.shopType || [],
+      },
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch business profile",
+      error: error.message,
+    });
+  }
+};
 
 export const updateBusinessProfile = async (req, res) => {
   try {

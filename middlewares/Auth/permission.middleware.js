@@ -121,3 +121,97 @@
 //   console.log("[RequireAdmin] Admin access granted for:", req.user);
 //   return next();
 // };
+
+
+// middlewares/Auth/permission.middleware.js
+//
+// Canonical staff auth + permission middleware. Works against the single
+// StaffUser collection (role: admin | role_admin | sub_admin | associates)
+// and its Role reference (staff.roleRef), NOT the older separate
+// Admin/SubAdmin collections or staff.permissions-embedded-on-the-user
+// model — both of those were earlier designs, superseded here, and lived
+// on (as dead/commented code) in two now-removed duplicate files:
+// middlewares/Permission.middleware.js and this file's own previous,
+// fully-commented-out version. See git history if you need either of
+// those old designs for reference.
+
+import jwt from "jsonwebtoken";
+import { StaffUser } from "../../Schema/RolesAndPermissions/Staffuser.schema.js";
+import { canPerform } from "../../constants/permissionModules.js";
+
+/**
+ * staffAuth
+ * Verifies the JWT (Authorization: Bearer <token>), loads the StaffUser,
+ * and attaches req.user = { id, role, name, permissions }.
+ * Must run before requireNavPermission / requireSuperAdmin.
+ */
+export async function staffAuth(req, res, next) {
+  try {
+    const header = req.headers.authorization || "";
+    const token = header.startsWith("Bearer ") ? header.slice(7) : header;
+    if (!token) return res.status(401).json({ success: false, message: "No token provided." });
+
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const staff = await StaffUser.findById(decoded.id);
+    if (!staff) return res.status(401).json({ success: false, message: "Invalid token." });
+    if (!staff.isActive) return res.status(403).json({ success: false, message: "Account is inactive." });
+
+    req.user = { id: staff._id, role: staff.role, name: staff.name, permissions: staff.permissions };
+    next();
+  } catch (err) {
+    return res.status(401).json({ success: false, message: "Invalid or expired token." });
+  }
+}
+
+/** requireSuperAdmin — only role: "admin" (SuperAdmin) may pass. */
+export function requireSuperAdmin(req, res, next) {
+  if (req.user?.role !== "admin") {
+    return res.status(403).json({ success: false, message: "SuperAdmin access required." });
+  }
+  next();
+}
+
+/**
+ * requireNavPermission(navKey, subKey, action = "view")
+ *
+ * SuperAdmin (role: "admin") always passes. Every other staff role's
+ * permissions live on the Role document it's currently assigned to
+ * (staff.roleRef), fetched fresh on every request — not cached on the JWT
+ * or on the staff document — so a role's permissions can be edited and
+ * take effect immediately without staff needing to re-log-in.
+ *
+ * Usage:
+ *   requireNavPermission("users")                          // nav view
+ *   requireNavPermission("users", "carOwners", "view")      // sub-nav view
+ *   requireNavPermission("users", "carOwners", "create")    // sub-nav create
+ */
+export function requireNavPermission(navKey, subKey, action = "view") {
+  return async (req, res, next) => {
+    try {
+      if (!req.user?.id) {
+        return res.status(401).json({ success: false, message: "Unauthorized." });
+      }
+      if (req.user.role === "admin") return next();
+
+      const staff = await StaffUser.findById(req.user.id).populate("roleRef", "permissions isActive");
+      if (!staff) {
+        return res.status(401).json({ success: false, message: "Staff user not found." });
+      }
+      if (!staff.roleRef || !staff.roleRef.isActive) {
+        return res.status(403).json({ success: false, message: "No active role assigned. Contact your SuperAdmin." });
+      }
+
+      const perms = staff.roleRef.permissions;
+      const modulePath = subKey ? `${navKey}.${subKey}` : navKey;
+
+      if (!canPerform(perms, modulePath, action)) {
+        return res.status(403).json({ success: false, message: "Permission denied." });
+      }
+
+      next();
+    } catch (err) {
+      console.error("[requireNavPermission] Error:", err);
+      return res.status(500).json({ success: false, message: "Permission check failed." });
+    }
+  };
+}

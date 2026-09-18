@@ -193,13 +193,95 @@ async getProfile(req, res) {
       updatedAt: staff.updatedAt,
       permissions: staff.permissions || {},
       // SuperAdmin (role: admin) gets permissionAll: true
-      permissionAll: staff.role === "admin"
+      permissionAll: staff.role === "admin",
+      // ── Profile details ──────────────────────────────────────────────
+      profilePhoto: staff.profilePhoto || null,
+      city: staff.city || "",
+      address: staff.address || "",
+      pincode: staff.pincode || "",
     };
 
     return res.status(200).json({ success: true, data: profile });
   } catch (err) {
     console.error("[getProfile] Error:", err);
     return res.status(500).json({ message: "Failed to fetch profile", error: err.message });
+  }
+}
+
+/**
+ * PATCH /api/admin/profile
+ * Updates the logged-in Admin/Staff user's own profile.
+ * Editable: name, city, address, pincode, profilePhoto (file upload).
+ * NOT editable here: email, phone (locked — ignored even if sent).
+ */
+async updateProfile(req, res) {
+  try {
+    const id = req.user && req.user.id;
+    if (!id) {
+      // Clean up any uploaded file since we can't use it.
+      const uploaded = req.files?.["profilePhoto"]?.[0]?.path;
+      if (uploaded) await deleteUploadedFile(uploaded);
+      return res.status(401).json({ message: "Unauthorized: user id not found on request." });
+    }
+
+    const staff = await StaffUser.findById(id);
+    if (!staff) {
+      const uploaded = req.files?.["profilePhoto"]?.[0]?.path;
+      if (uploaded) await deleteUploadedFile(uploaded);
+      return res.status(404).json({ message: "Staff user not found." });
+    }
+
+    const { name, city, address, pincode } = req.body || {};
+
+    // Only touch fields that were actually sent, so partial updates work.
+    if (name !== undefined) {
+      const trimmedName = String(name).trim();
+      if (!trimmedName) {
+        return res.status(400).json({ success: false, message: "Name cannot be empty." });
+      }
+      staff.name = trimmedName;
+    }
+    if (city !== undefined) staff.city = String(city).trim();
+    if (address !== undefined) staff.address = String(address).trim();
+    if (pincode !== undefined) staff.pincode = String(pincode).trim();
+
+    // Handle new profile photo upload, replacing (and deleting) the old one.
+    const newProfilePhoto = req.files?.["profilePhoto"]?.[0]?.path;
+    if (newProfilePhoto) {
+      const oldPhoto = staff.profilePhoto;
+      staff.profilePhoto = newProfilePhoto;
+      if (oldPhoto) await deleteUploadedFile(oldPhoto);
+    }
+
+    // Email and phone are intentionally never updated from this endpoint.
+    await staff.save();
+
+    const updated = staff.toObject();
+    delete updated.password;
+
+    const profile = {
+      name: updated.name,
+      email: updated.email,
+      phone: updated.phone || "",
+      role: updated.role,
+      isActive: updated.isActive,
+      lastLogin: updated.lastLogin,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
+      permissions: updated.permissions || {},
+      permissionAll: updated.role === "admin",
+      profilePhoto: updated.profilePhoto || null,
+      city: updated.city || "",
+      address: updated.address || "",
+      pincode: updated.pincode || "",
+    };
+
+    return res.status(200).json({ success: true, message: "Profile updated successfully.", data: profile });
+  } catch (err) {
+    console.error("[updateProfile] Error:", err);
+    const uploaded = req.files?.["profilePhoto"]?.[0]?.path;
+    if (uploaded) await deleteUploadedFile(uploaded);
+    return res.status(500).json({ message: "Failed to update profile", error: err.message });
   }
 }
 
@@ -2783,4 +2865,3 @@ async updateInviteHelpStatus(req, res) {
 }
 
 export default AdminController;
-

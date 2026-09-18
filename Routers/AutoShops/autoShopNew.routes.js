@@ -11,6 +11,7 @@ import autoShopDealsRouter from "./deals.routes.js";
 import jobCardPrefixRouter from "./jobcardprefix.routes.js";
 import subscriptionRouter from "./subscription.routes.js";
 import invoicePrefixRouter from "./invoiceprefix.routes.js";
+import walletRouter from "./wallet.routes.js";
 
 
 const autoShopNewRouter = express.Router();
@@ -44,15 +45,7 @@ autoShopNewRouter.use("/autoshop-deals", autoShopDealsRouter);
 
 autoShopNewRouter.use("/subscription", subscriptionRouter);
 
-
-
 // INSERT_YOUR_CODE
-
-
-
-
-
-
-
+autoShopNewRouter.use("/wallet", walletRouter);
 
 export default autoShopNewRouter;
