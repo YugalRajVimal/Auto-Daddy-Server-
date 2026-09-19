@@ -46,6 +46,7 @@ import {
   getPersonalProfile,
   updateBusinessProfile,
   updateBusinessTemplateSlugs,
+  updateMobileService,
   updatePersonalProfile,
 } from "../../Controllers/AutoShops/profile.controller.js";
 import {
@@ -68,6 +69,9 @@ autoShopProfileRouter.get("/business", getBusinessProfile);
 autoShopProfileRouter.put("/business", upload.single("businessLogo"), updateBusinessProfile);
 
 autoShopProfileRouter.patch("/business/template-slugs", updateBusinessTemplateSlugs);
+
+/* Mobile service (road-side assistance) toggle + coverage distance */
+autoShopProfileRouter.patch("/business/mobile-service", updateMobileService);
 
 /* NEW: Open hours — weekly defaults + date-specific overrides */
 autoShopProfileRouter.put("/business/open-hours/weekly", updateWeeklyOpenHours);
