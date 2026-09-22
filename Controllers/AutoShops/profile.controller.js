@@ -1,1227 +1,3 @@
-
-
-
-// // import mongoose from "mongoose";
-
-
-// // import { User } from "../../Schema/user.schema.js";
-// // import BusinessProfileModel from "../../Schema/bussiness-profile.js";
-// // import servicesSchema from "../../Schema/services.schema.js";
-// // import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
-
-// // /* =========================================================
-// //    PERSONAL PROFILE
-// //    GET  -> name, phone, email, city, profilePhoto
-// //    PUT  -> name, city, profilePhoto (phone & email locked)
-// //    ========================================================= */
-
-// // export const getPersonalProfile = async (req, res) => {
-// //   try {
-// //     const userId = req.user.id;
-
-// //     const user = await User.findById(userId).select(
-// //       "name phone email city profilePhoto"
-// //     );
-
-// //     if (!user) {
-// //       return res.status(404).json({ success: false, message: "User not found" });
-// //     }
-
-// //     return res.status(200).json({
-// //       success: true,
-// //       data: {
-// //         name: user.name,
-// //         phone: user.phone,
-// //         email: user.email,
-// //         city: user.city,
-// //         profilePhoto: user.profilePhoto,
-// //       },
-// //     });
-// //   } catch (error) {
-// //     return res.status(500).json({
-// //       success: false,
-// //       message: "Failed to fetch personal profile",
-// //       error: error.message,
-// //     });
-// //   }
-// // };
-
-// // export const updatePersonalProfile = async (req, res) => {
-// //   try {
-// //     const userId = req.user.id;
-// //     const { name, city } = req.body;
-
-// //     const user = await User.findById(userId);
-
-// //     if (!user) {
-// //       if (req.file) deleteUploadedFile(req.file);
-// //       return res.status(404).json({ success: false, message: "User not found" });
-// //     }
-
-// //     const oldPhoto = user.profilePhoto;
-
-// //     if (name !== undefined) user.name = name;
-// //     if (city !== undefined) user.city = city;
-// //     if (req.file) user.profilePhoto = req.file.path;
-
-// //     await user.save();
-
-// //     // Only delete the old file once the new state is safely persisted
-// //     if (req.file && oldPhoto) deleteUploadedFile(oldPhoto);
-
-// //     return res.status(200).json({
-// //       success: true,
-// //       message: "Personal profile updated successfully",
-// //       data: {
-// //         name: user.name,
-// //         phone: user.phone,
-// //         email: user.email,
-// //         city: user.city,
-// //         profilePhoto: user.profilePhoto,
-// //       },
-// //     });
-// //   } catch (error) {
-// //     if (req.file) deleteUploadedFile(req.file);
-// //     return res.status(500).json({
-// //       success: false,
-// //       message: "Failed to update personal profile",
-// //       error: error.message,
-// //     });
-// //   }
-// // };
-
-// // /* =========================================================
-// //    BUSINESS PROFILE
-// //    GET  -> businessName, businessPhone, city, businessAddress,
-// //            pincode, businessHSTNumber, gst, businessEmail,
-// //            businessLogo, shopTypes
-// //    PUT  -> same fields (no duplicate phone/email vs OTHER
-// //            business profiles)
-
-// //    NOTE: `shopTypes` lives on the User document (autoshopowner),
-// //    NOT on BusinessProfile. Update UserSchema's `shopType` field
-// //    from a single enum string to an array:
-
-// //      shopType: {
-// //        type: [String],
-// //        enum: ["autoShop", "tyreShop", "carWash", "towTruck"],
-// //        default: []
-// //      }
-
-// //    (rename other usages of the old singular field in your
-// //    codebase accordingly)
-// //    ========================================================= */
-
-// // export const getBusinessProfile = async (req, res) => {
-// //   try {
-// //     const userId = req.user.id;
-
-// //     const user = await User.findById(userId).select("businessProfile shopType");
-// //     if (!user || !user.businessProfile) {
-// //       return res
-// //         .status(404)
-// //         .json({ success: false, message: "Business profile not found" });
-// //     }
-
-// //     const business = await BusinessProfileModel.findById(
-// //       user.businessProfile
-// //     ).select(
-// //       "businessName businessPhone city businessAddress pincode businessHSTNumber gst businessEmail businessLogo"
-// //     );
-
-// //     if (!business) {
-// //       return res
-// //         .status(404)
-// //         .json({ success: false, message: "Business profile not found" });
-// //     }
-
-// //     return res.status(200).json({
-// //       success: true,
-// //       data: {
-// //         businessName: business.businessName,
-// //         businessPhone: business.businessPhone,
-// //         city: business.city,
-// //         businessAddress: business.businessAddress,
-// //         pincode: business.pincode,
-// //         businessHSTNumber: business.businessHSTNumber,
-// //         gst: business.gst,
-// //         businessEmail: business.businessEmail,
-// //         businessLogo: business.businessLogo,
-// //         shopTypes: user.shopType || [],
-// //       },
-// //     });
-// //   } catch (error) {
-// //     return res.status(500).json({
-// //       success: false,
-// //       message: "Failed to fetch business profile",
-// //       error: error.message,
-// //     });
-// //   }
-// // };
-
-// // // export const updateBusinessProfile = async (req, res) => {
-// // //   try {
-// // //     const userId = req.user.id;
-// // //     const {
-// // //       businessName,
-// // //       businessPhone,
-// // //       city,
-// // //       businessAddress,
-// // //       pincode,
-// // //       businessHSTNumber,
-// // //       gst,
-// // //       businessEmail,
-// // //       shopTypes, // array, JSON string, or comma-separated string
-// // //     } = req.body;
-
-// // //     const user = await User.findById(userId).select("businessProfile shopType");
-// // //     if (!user || !user.businessProfile) {
-// // //       if (req.file) deleteUploadedFile(req.file);
-// // //       return res
-// // //         .status(404)
-// // //         .json({ success: false, message: "Business profile not found" });
-// // //     }
-
-// // //     const businessId = user.businessProfile;
-
-// // //     // Duplicate check on phone / email against OTHER business profiles only
-// // //     if (businessPhone || businessEmail) {
-// // //       const dupQuery = { _id: { $ne: businessId }, $or: [] };
-// // //       if (businessPhone) dupQuery.$or.push({ businessPhone });
-// // //       if (businessEmail) dupQuery.$or.push({ businessEmail });
-
-// // //       const duplicate = await BusinessProfileModel.findOne(dupQuery);
-// // //       if (duplicate) {
-// // //         if (req.file) deleteUploadedFile(req.file);
-// // //         const field =
-// // //           businessPhone && duplicate.businessPhone === businessPhone
-// // //             ? "Phone number"
-// // //             : "Email";
-// // //         return res.status(409).json({
-// // //           success: false,
-// // //           message: `${field} is already in use by another business profile`,
-// // //         });
-// // //       }
-// // //     }
-
-// // //     const business = await BusinessProfileModel.findById(businessId);
-// // //     if (!business) {
-// // //       if (req.file) deleteUploadedFile(req.file);
-// // //       return res
-// // //         .status(404)
-// // //         .json({ success: false, message: "Business profile not found" });
-// // //     }
-
-// // //     const oldLogo = business.businessLogo;
-
-// // //     if (businessName !== undefined) business.businessName = businessName;
-// // //     if (businessPhone !== undefined) business.businessPhone = businessPhone;
-// // //     if (city !== undefined) business.city = city;
-// // //     if (businessAddress !== undefined) business.businessAddress = businessAddress;
-// // //     if (pincode !== undefined) business.pincode = pincode;
-// // //     if (businessHSTNumber !== undefined) business.businessHSTNumber = businessHSTNumber;
-// // //     if (gst !== undefined) business.gst = gst;
-// // //     if (businessEmail !== undefined) business.businessEmail = businessEmail;
-
-// // //     let parsedShopTypes;
-// // //     if (shopTypes !== undefined) {
-// // //       parsedShopTypes = shopTypes;
-// // //       if (typeof shopTypes === "string") {
-// // //         try {
-// // //           parsedShopTypes = JSON.parse(shopTypes);
-// // //         } catch {
-// // //           parsedShopTypes = shopTypes.split(",").map((s) => s.trim()).filter(Boolean);
-// // //         }
-// // //       }
-// // //       user.shopType = parsedShopTypes;
-// // //     }
-
-// // //     if (req.file) business.businessLogo = req.file.path;
-
-// // //     await business.save();
-// // //     if (shopTypes !== undefined) await user.save();
-
-// // //     if (req.file && oldLogo) deleteUploadedFile(oldLogo);
-
-// // //     return res.status(200).json({
-// // //       success: true,
-// // //       message: "Business profile updated successfully",
-// // //       data: {
-// // //         businessName: business.businessName,
-// // //         businessPhone: business.businessPhone,
-// // //         city: business.city,
-// // //         businessAddress: business.businessAddress,
-// // //         pincode: business.pincode,
-// // //         businessHSTNumber: business.businessHSTNumber,
-// // //         gst: business.gst,
-// // //         businessEmail: business.businessEmail,
-// // //         businessLogo: business.businessLogo,
-// // //         shopTypes: user.shopType || [],
-// // //       },
-// // //     });
-// // //   } catch (error) {
-// // //     if (req.file) deleteUploadedFile(req.file);
-// // //     return res.status(500).json({
-// // //       success: false,
-// // //       message: "Failed to update business profile",
-// // //       error: error.message,
-// // //     });
-// // //   }
-// // // };
-
-
-// // export const updateBusinessProfile = async (req, res) => {
-// //   try {
-// //     const userId = req.user.id;
-// //     const {
-// //       businessName,
-// //       businessPhone,
-// //       city,
-// //       businessAddress,
-// //       pincode,
-// //       businessHSTNumber,
-// //       gst,
-// //       businessEmail,
-// //       shopTypes, // array, JSON string, or comma-separated string
-// //     } = req.body;
-
-// //     // Select isAutoShopBusinessProfileComplete so it can be set below
-// //     let user = await User.findById(userId).select("businessProfile shopType isAutoShopBusinessProfileComplete");
-// //     if (!user) {
-// //       if (req.file) deleteUploadedFile(req.file);
-// //       return res
-// //         .status(404)
-// //         .json({ success: false, message: "User not found" });
-// //     }
-
-// //     let business;
-// //     let isNewBusinessProfile = false;
-
-// //     // If user doesn't have a businessProfile, create one
-// //     if (!user.businessProfile) {
-// //       // Validate required fields for creating a new business profile
-// //       if (!businessName || !businessPhone || !city) {
-// //         if (req.file) deleteUploadedFile(req.file);
-// //         return res.status(400).json({
-// //           success: false,
-// //           message: "Missing required fields to create a new business profile (businessName, businessPhone, city).",
-// //         });
-// //       }
-// //       // Duplicate check on phone/email if present
-// //       const dupQuery = { $or: [] };
-// //       if (businessPhone) dupQuery.$or.push({ businessPhone });
-// //       if (businessEmail) dupQuery.$or.push({ businessEmail });
-
-// //       if (dupQuery.$or.length > 0) {
-// //         const duplicate = await BusinessProfileModel.findOne(dupQuery);
-// //         if (duplicate) {
-// //           if (req.file) deleteUploadedFile(req.file);
-// //           const field =
-// //             businessPhone && duplicate.businessPhone === businessPhone
-// //               ? "Phone number"
-// //               : "Email";
-// //           return res.status(409).json({
-// //             success: false,
-// //             message: `${field} is already in use by another business profile`,
-// //           });
-// //         }
-// //       }
-
-// //       business = new BusinessProfileModel({
-// //         businessName,
-// //         businessPhone,
-// //         city,
-// //         businessAddress,
-// //         pincode,
-// //         businessHSTNumber,
-// //         gst,
-// //         businessEmail,
-// //         myServices: [],
-// //         businessLogo: req.file ? req.file.path : undefined,
-// //       });
-
-// //       await business.save();
-// //       user.businessProfile = business._id;
-// //       isNewBusinessProfile = true;
-// //     } else {
-// //       // Existing business profile logic
-// //       const businessId = user.businessProfile;
-
-// //       // Duplicate check on phone / email against OTHER business profiles only
-// //       if (businessPhone || businessEmail) {
-// //         const dupQuery = { _id: { $ne: businessId }, $or: [] };
-// //         if (businessPhone) dupQuery.$or.push({ businessPhone });
-// //         if (businessEmail) dupQuery.$or.push({ businessEmail });
-
-// //         const duplicate = await BusinessProfileModel.findOne(dupQuery);
-// //         if (duplicate) {
-// //           if (req.file) deleteUploadedFile(req.file);
-// //           const field =
-// //             businessPhone && duplicate.businessPhone === businessPhone
-// //               ? "Phone number"
-// //               : "Email";
-// //           return res.status(409).json({
-// //             success: false,
-// //             message: `${field} is already in use by another business profile`,
-// //           });
-// //         }
-// //       }
-
-// //       business = await BusinessProfileModel.findById(businessId);
-// //       if (!business) {
-// //         if (req.file) deleteUploadedFile(req.file);
-// //         return res
-// //           .status(404)
-// //           .json({ success: false, message: "Business profile not found" });
-// //       }
-
-// //       // Only set fields if they're present (don't overwrite with undefined)
-// //       if (businessName !== undefined) business.businessName = businessName;
-// //       if (businessPhone !== undefined) business.businessPhone = businessPhone;
-// //       if (city !== undefined) business.city = city;
-// //       if (businessAddress !== undefined) business.businessAddress = businessAddress;
-// //       if (pincode !== undefined) business.pincode = pincode;
-// //       if (businessHSTNumber !== undefined) business.businessHSTNumber = businessHSTNumber;
-// //       if (gst !== undefined) business.gst = gst;
-// //       if (businessEmail !== undefined) business.businessEmail = businessEmail;
-// //     }
-
-// //     let parsedShopTypes;
-// //     let removedServicesCount = 0;
-// //     let removedServiceNames = [];
-// //     const oldLogo = business.businessLogo;
-
-// //     if (shopTypes !== undefined) {
-// //       parsedShopTypes = shopTypes;
-// //       if (typeof shopTypes === "string") {
-// //         try {
-// //           parsedShopTypes = JSON.parse(shopTypes);
-// //         } catch {
-// //           parsedShopTypes = shopTypes.split(",").map((s) => s.trim()).filter(Boolean);
-// //         }
-// //       }
-
-// //       if (!Array.isArray(parsedShopTypes)) {
-// //         if (req.file) deleteUploadedFile(req.file);
-// //         return res.status(400).json({
-// //           success: false,
-// //           message: "shopTypes must be an array (or JSON/comma-separated string of shopTypes)",
-// //         });
-// //       }
-
-// //       const validShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
-// //       const invalid = parsedShopTypes.filter((st) => !validShopTypes.includes(st));
-// //       if (invalid.length > 0) {
-// //         if (req.file) deleteUploadedFile(req.file);
-// //         return res.status(400).json({
-// //           success: false,
-// //           message: `Invalid shopType(s): ${invalid.join(", ")}. Valid values are: ${validShopTypes.join(", ")}`,
-// //         });
-// //       }
-
-// //       if (!isNewBusinessProfile) {
-// //         // ---- prune myServices whose service.shopType is no longer offered ----
-// //         if (business.myServices && business.myServices.length > 0) {
-// //           const serviceIds = business.myServices.map((ms) => ms.service);
-// //           const servicesDocs = await servicesSchema
-// //             .find({ _id: { $in: serviceIds } })
-// //             .select("name shopType");
-
-// //           const shopTypeByServiceId = new Map(
-// //             servicesDocs.map((s) => [s._id.toString(), s.shopType])
-// //           );
-
-// //           const keptServices = [];
-// //           const removedServices = [];
-
-// //           for (const ms of business.myServices) {
-// //             const svcShopType = shopTypeByServiceId.get(ms.service.toString());
-// //             // Keep only if the service's shopType is still in the new shopTypes list.
-// //             // If the service doc itself is missing/deleted, drop it too (defensive).
-// //             if (svcShopType && parsedShopTypes.includes(svcShopType)) {
-// //               keptServices.push(ms);
-// //             } else {
-// //               removedServices.push(ms);
-// //             }
-// //           }
-
-// //           if (removedServices.length > 0) {
-// //             business.myServices = keptServices;
-// //             removedServicesCount = removedServices.length;
-// //             removedServiceNames = removedServices.map((ms) => {
-// //               const doc = servicesDocs.find(
-// //                 (s) => s._id.toString() === ms.service.toString()
-// //               );
-// //               return doc ? doc.name : ms.service.toString();
-// //             });
-// //           }
-// //         }
-// //       }
-// //       // -----------------------------------------------------------------------
-// //       user.shopType = parsedShopTypes;
-// //     }
-
-// //     if (req.file) business.businessLogo = req.file.path;
-
-// //     // ---- Set isAutoShopBusinessProfileComplete to true ----
-// //     user.isAutoShopBusinessProfileComplete = true;
-// //     // -------------------------------------------------------
-
-// //     await business.save();
-// //     if (typeof user.save === "function") await user.save();
-
-// //     if (req.file && oldLogo && oldLogo !== business.businessLogo) deleteUploadedFile(oldLogo);
-
-// //     return res.status(200).json({
-// //       success: true,
-// //       message:
-// //         removedServicesCount > 0
-// //           ? `Business profile updated successfully. ${removedServicesCount} service(s) removed as their shopType is no longer offered: ${removedServiceNames.join(", ")}`
-// //           : isNewBusinessProfile
-// //             ? "Business profile created and saved successfully"
-// //             : "Business profile updated successfully",
-// //       data: {
-// //         businessName: business.businessName,
-// //         businessPhone: business.businessPhone,
-// //         city: business.city,
-// //         businessAddress: business.businessAddress,
-// //         pincode: business.pincode,
-// //         businessHSTNumber: business.businessHSTNumber,
-// //         gst: business.gst,
-// //         businessEmail: business.businessEmail,
-// //         businessLogo: business.businessLogo,
-// //         shopTypes: user.shopType || [],
-// //         removedServices: removedServiceNames,
-// //       },
-// //     });
-// //   } catch (error) {
-// //     if (req.file) deleteUploadedFile(req.file);
-// //     return res.status(500).json({
-// //       success: false,
-// //       message: "Failed to update business profile",
-// //       error: error.message,
-// //     });
-// //   }
-// // };
-
-// // /**
-// //  * Update the invoiceTemplateSlug and jobCardTemplateSlug for the current user's business profile.
-// //  * Expects { invoiceTemplateSlug, jobCardTemplateSlug } in req.body.
-// //  * Only allowed for an authenticated user with a business profile.
-// //  */
-// // export const updateBusinessTemplateSlugs = async (req, res) => {
-// //   try {
-// //     const userId = req.user?.id;
-
-// //     if (!userId) {
-// //       return res.status(401).json({
-// //         success: false,
-// //         message: "Unauthorized. User ID missing from auth context."
-// //       });
-// //     }
-
-// //     // Find user and get associated businessProfile
-// //     const user = await User.findById(userId).select("businessProfile role");
-// //     if (!user || !user.businessProfile) {
-// //       return res.status(404).json({
-// //         success: false,
-// //         message: "User or associated business profile not found"
-// //       });
-// //     }
-
-// //     // Find the business profile document by ID
-// //     const business = await BusinessProfileModel.findById(user.businessProfile);
-// //     if (!business) {
-// //       return res.status(404).json({
-// //         success: false,
-// //         message: "Business profile not found"
-// //       });
-// //     }
-
-// //     const { invoiceTemplateSlug, jobCardTemplateSlug } = req.body;
-
-// //     if (invoiceTemplateSlug !== undefined) business.invoiceTemplateSlug = invoiceTemplateSlug;
-// //     if (jobCardTemplateSlug !== undefined) business.jobCardTemplateSlug = jobCardTemplateSlug;
-
-// //     // At least one field should be present to update
-// //     if (invoiceTemplateSlug === undefined && jobCardTemplateSlug === undefined) {
-// //       return res.status(400).json({
-// //         success: false,
-// //         message: "No template slug fields provided to update"
-// //       });
-// //     }
-
-// //     await business.save();
-
-// //     return res.status(200).json({
-// //       success: true,
-// //       message: "Template slugs updated successfully",
-// //       data: {
-// //         invoiceTemplateSlug: business.invoiceTemplateSlug,
-// //         jobCardTemplateSlug: business.jobCardTemplateSlug
-// //       }
-// //     });
-// //   } catch (error) {
-// //     return res.status(500).json({
-// //       success: false,
-// //       message: "Failed to update template slugs",
-// //       error: error?.message || error
-// //     });
-// //   }
-// // };
-
-
-
-
-
-
-
-// import mongoose from "mongoose";
-
-
-// import { User } from "../../Schema/user.schema.js";
-// import BusinessProfileModel from "../../Schema/bussiness-profile.js";
-// import servicesSchema from "../../Schema/services.schema.js";
-// import { deleteUploadedFile } from "../../middlewares/ImageUploadMiddlewares/fileDelete.middleware.js";
-
-// /* =========================================================
-//    PERSONAL PROFILE
-//    GET  -> name, phone, email, city, profilePhoto
-//    PUT  -> name, city, profilePhoto (phone & email locked)
-//    ========================================================= */
-
-// export const getPersonalProfile = async (req, res) => {
-//   try {
-//     const userId = req.user.id;
-
-//     const user = await User.findById(userId).select(
-//       "name phone email city profilePhoto"
-//     );
-
-//     if (!user) {
-//       return res.status(404).json({ success: false, message: "User not found" });
-//     }
-
-//     return res.status(200).json({
-//       success: true,
-//       data: {
-//         name: user.name,
-//         phone: user.phone,
-//         email: user.email,
-//         city: user.city,
-//         profilePhoto: user.profilePhoto,
-//       },
-//     });
-//   } catch (error) {
-//     return res.status(500).json({
-//       success: false,
-//       message: "Failed to fetch personal profile",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// export const updatePersonalProfile = async (req, res) => {
-//   try {
-//     const userId = req.user.id;
-//     const { name, city } = req.body;
-
-//     const user = await User.findById(userId);
-
-//     if (!user) {
-//       if (req.file) deleteUploadedFile(req.file);
-//       return res.status(404).json({ success: false, message: "User not found" });
-//     }
-
-//     const oldPhoto = user.profilePhoto;
-
-//     if (name !== undefined) user.name = name;
-//     if (city !== undefined) user.city = city;
-//     if (req.file) user.profilePhoto = req.file.path;
-
-//     await user.save();
-
-//     // Only delete the old file once the new state is safely persisted
-//     if (req.file && oldPhoto) deleteUploadedFile(oldPhoto);
-
-//     return res.status(200).json({
-//       success: true,
-//       message: "Personal profile updated successfully",
-//       data: {
-//         name: user.name,
-//         phone: user.phone,
-//         email: user.email,
-//         city: user.city,
-//         profilePhoto: user.profilePhoto,
-//       },
-//     });
-//   } catch (error) {
-//     if (req.file) deleteUploadedFile(req.file);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Failed to update personal profile",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// /* =========================================================
-//    BUSINESS PROFILE
-//    GET  -> businessName, businessPhone, city, businessAddress,
-//            pincode, businessHSTNumber, gst, businessEmail,
-//            businessLogo, shopTypes
-//    PUT  -> same fields (no duplicate phone/email vs OTHER
-//            business profiles)
-
-//    NOTE: `shopTypes` lives on the User document (autoshopowner),
-//    NOT on BusinessProfile. Update UserSchema's `shopType` field
-//    from a single enum string to an array:
-
-//      shopType: {
-//        type: [String],
-//        enum: ["autoShop", "tyreShop", "carWash", "towTruck"],
-//        default: []
-//      }
-
-//    (rename other usages of the old singular field in your
-//    codebase accordingly)
-//    ========================================================= */
-
-// // export const getBusinessProfile = async (req, res) => {
-// //   try {
-// //     const userId = req.user.id;
-
-// //     const user = await User.findById(userId).select("businessProfile shopType");
-// //     if (!user || !user.businessProfile) {
-// //       return res
-// //         .status(404)
-// //         .json({ success: false, message: "Business profile not found" });
-// //     }
-
-// //     const business = await BusinessProfileModel.findById(
-// //       user.businessProfile
-// //     ).select(
-// //       "businessName businessPhone city businessAddress pincode businessHSTNumber gst businessEmail businessLogo businessMapLocation"
-// //     );
-
-// //     if (!business) {
-// //       return res
-// //         .status(404)
-// //         .json({ success: false, message: "Business profile not found" });
-// //     }
-
-// //     return res.status(200).json({
-// //       success: true,
-// //       data: {
-// //         businessName: business.businessName,
-// //         businessPhone: business.businessPhone,
-// //         city: business.city,
-// //         businessAddress: business.businessAddress,
-// //         pincode: business.pincode,
-// //         businessHSTNumber: business.businessHSTNumber,
-// //         gst: business.gst,
-// //         businessEmail: business.businessEmail,
-// //         businessLogo: business.businessLogo,
-// //         businessMapLocation: business.businessMapLocation || null,
-// //         shopTypes: user.shopType || [],
-// //       },
-// //     });
-// //   } catch (error) {
-// //     return res.status(500).json({
-// //       success: false,
-// //       message: "Failed to fetch business profile",
-// //       error: error.message,
-// //     });
-// //   }
-// // };
-
-// // export const updateBusinessProfile = async (req, res) => {
-// //   try {
-// //     const userId = req.user.id;
-// //     const {
-// //       businessName,
-// //       businessPhone,
-// //       city,
-// //       businessAddress,
-// //       pincode,
-// //       businessHSTNumber,
-// //       gst,
-// //       businessEmail,
-// //       shopTypes, // array, JSON string, or comma-separated string
-// //     } = req.body;
-
-// //     const user = await User.findById(userId).select("businessProfile shopType");
-// //     if (!user || !user.businessProfile) {
-// //       if (req.file) deleteUploadedFile(req.file);
-// //       return res
-// //         .status(404)
-// //         .json({ success: false, message: "Business profile not found" });
-// //     }
-
-// //     const businessId = user.businessProfile;
-
-// //     // Duplicate check on phone / email against OTHER business profiles only
-// //     if (businessPhone || businessEmail) {
-// //       const dupQuery = { _id: { $ne: businessId }, $or: [] };
-// //       if (businessPhone) dupQuery.$or.push({ businessPhone });
-// //       if (businessEmail) dupQuery.$or.push({ businessEmail });
-
-// //       const duplicate = await BusinessProfileModel.findOne(dupQuery);
-// //       if (duplicate) {
-// //         if (req.file) deleteUploadedFile(req.file);
-// //         const field =
-// //           businessPhone && duplicate.businessPhone === businessPhone
-// //             ? "Phone number"
-// //             : "Email";
-// //         return res.status(409).json({
-// //           success: false,
-// //           message: `${field} is already in use by another business profile`,
-// //         });
-// //       }
-// //     }
-
-// //     const business = await BusinessProfileModel.findById(businessId);
-// //     if (!business) {
-// //       if (req.file) deleteUploadedFile(req.file);
-// //       return res
-// //         .status(404)
-// //         .json({ success: false, message: "Business profile not found" });
-// //     }
-
-// //     const oldLogo = business.businessLogo;
-
-// //     if (businessName !== undefined) business.businessName = businessName;
-// //     if (businessPhone !== undefined) business.businessPhone = businessPhone;
-// //     if (city !== undefined) business.city = city;
-// //     if (businessAddress !== undefined) business.businessAddress = businessAddress;
-// //     if (pincode !== undefined) business.pincode = pincode;
-// //     if (businessHSTNumber !== undefined) business.businessHSTNumber = businessHSTNumber;
-// //     if (gst !== undefined) business.gst = gst;
-// //     if (businessEmail !== undefined) business.businessEmail = businessEmail;
-
-// //     let parsedShopTypes;
-// //     if (shopTypes !== undefined) {
-// //       parsedShopTypes = shopTypes;
-// //       if (typeof shopTypes === "string") {
-// //         try {
-// //           parsedShopTypes = JSON.parse(shopTypes);
-// //         } catch {
-// //           parsedShopTypes = shopTypes.split(",").map((s) => s.trim()).filter(Boolean);
-// //         }
-// //       }
-// //       user.shopType = parsedShopTypes;
-// //     }
-
-// //     if (req.file) business.businessLogo = req.file.path;
-
-// //     await business.save();
-// //     if (shopTypes !== undefined) await user.save();
-
-// //     if (req.file && oldLogo) deleteUploadedFile(oldLogo);
-
-// //     return res.status(200).json({
-// //       success: true,
-// //       message: "Business profile updated successfully",
-// //       data: {
-// //         businessName: business.businessName,
-// //         businessPhone: business.businessPhone,
-// //         city: business.city,
-// //         businessAddress: business.businessAddress,
-// //         pincode: business.pincode,
-// //         businessHSTNumber: business.businessHSTNumber,
-// //         gst: business.gst,
-// //         businessEmail: business.businessEmail,
-// //         businessLogo: business.businessLogo,
-// //         shopTypes: user.shopType || [],
-// //       },
-// //     });
-// //   } catch (error) {
-// //     if (req.file) deleteUploadedFile(req.file);
-// //     return res.status(500).json({
-// //       success: false,
-// //       message: "Failed to update business profile",
-// //       error: error.message,
-// //     });
-// //   }
-// // };
-
-
-// export const getBusinessProfile = async (req, res) => {
-//   try {
-//     const userId = req.user.id;
-
-//     const user = await User.findById(userId).select("businessProfile shopType");
-//     if (!user || !user.businessProfile) {
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Business profile not found" });
-//     }
-
-//     const business = await BusinessProfileModel.findById(
-//       user.businessProfile
-//     ).select(
-//       "businessName businessPhone city businessAddress pincode businessHSTNumber gst businessEmail businessLogo businessMapLocation slug"
-//     );
-
-//     if (!business) {
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Business profile not found" });
-//     }
-
-//     // Backfill slug for shops created before this field existed — saving
-//     // triggers the pre-save slug generator on the schema.
-//     if (!business.slug) {
-//       await business.save();
-//     }
-
-//     return res.status(200).json({
-//       success: true,
-//       data: {
-//         _id: business._id,
-//         slug: business.slug,
-//         businessName: business.businessName,
-//         businessPhone: business.businessPhone,
-//         city: business.city,
-//         businessAddress: business.businessAddress,
-//         pincode: business.pincode,
-//         businessHSTNumber: business.businessHSTNumber,
-//         gst: business.gst,
-//         businessEmail: business.businessEmail,
-//         businessLogo: business.businessLogo,
-//         businessMapLocation: business.businessMapLocation || null,
-//         shopTypes: user.shopType || [],
-//       },
-//     });
-//   } catch (error) {
-//     return res.status(500).json({
-//       success: false,
-//       message: "Failed to fetch business profile",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// export const updateBusinessProfile = async (req, res) => {
-//   try {
-//     const userId = req.user.id;
-//     const {
-//       businessName,
-//       businessPhone,
-//       city,
-//       businessAddress,
-//       pincode,
-//       businessHSTNumber,
-//       gst,
-//       businessEmail,
-//       shopTypes, // array, JSON string, or comma-separated string
-//       lat, // shop's map pin — matches the flat lat/lng convention already
-//       lng, // used by complete-business-profile / edit-business-profile
-//     } = req.body;
-
-//     // FormData always sends these as strings; accept either that or a
-//     // real number (JSON body).
-//     let parsedMapLocation;
-//     if ((lat !== undefined && lat !== null && lat !== "") || (lng !== undefined && lng !== null && lng !== "")) {
-//       const latNum = Number(lat);
-//       const lngNum = Number(lng);
-//       if (!Number.isFinite(latNum) || !Number.isFinite(lngNum) || latNum < -90 || latNum > 90 || lngNum < -180 || lngNum > 180) {
-//         return res.status(400).json({
-//           success: false,
-//           message: "lat/lng must be valid coordinates.",
-//         });
-//       }
-//       parsedMapLocation = { lat: latNum, lng: lngNum };
-//     }
-
-//     // Select isAutoShopBusinessProfileComplete so it can be set below
-//     let user = await User.findById(userId).select("businessProfile shopType isAutoShopBusinessProfileComplete");
-//     if (!user) {
-//       if (req.file) deleteUploadedFile(req.file);
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "User not found" });
-//     }
-
-//     let business;
-//     let isNewBusinessProfile = false;
-
-//     // If user doesn't have a businessProfile, create one
-//     if (!user.businessProfile) {
-//       // Validate required fields for creating a new business profile
-//       if (!businessName || !businessPhone || !city) {
-//         if (req.file) deleteUploadedFile(req.file);
-//         return res.status(400).json({
-//           success: false,
-//           message: "Missing required fields to create a new business profile (businessName, businessPhone, city).",
-//         });
-//       }
-//       // Duplicate check on phone/email if present
-//       const dupQuery = { $or: [] };
-//       if (businessPhone) dupQuery.$or.push({ businessPhone });
-//       if (businessEmail) dupQuery.$or.push({ businessEmail });
-
-//       if (dupQuery.$or.length > 0) {
-//         const duplicate = await BusinessProfileModel.findOne(dupQuery);
-//         if (duplicate) {
-//           if (req.file) deleteUploadedFile(req.file);
-//           const field =
-//             businessPhone && duplicate.businessPhone === businessPhone
-//               ? "Phone number"
-//               : "Email";
-//           return res.status(409).json({
-//             success: false,
-//             message: `${field} is already in use by another business profile`,
-//           });
-//         }
-//       }
-
-//       business = new BusinessProfileModel({
-//         businessName,
-//         businessPhone,
-//         city,
-//         businessAddress,
-//         pincode,
-//         businessHSTNumber,
-//         gst,
-//         businessEmail,
-//         myServices: [],
-//         businessLogo: req.file ? req.file.path : undefined,
-//         ...(parsedMapLocation ? { businessMapLocation: parsedMapLocation } : {}),
-//       });
-
-//       await business.save();
-//       user.businessProfile = business._id;
-//       isNewBusinessProfile = true;
-//     } else {
-//       // Existing business profile logic
-//       const businessId = user.businessProfile;
-
-//       // Duplicate check on phone / email against OTHER business profiles only
-//       if (businessPhone || businessEmail) {
-//         const dupQuery = { _id: { $ne: businessId }, $or: [] };
-//         if (businessPhone) dupQuery.$or.push({ businessPhone });
-//         if (businessEmail) dupQuery.$or.push({ businessEmail });
-
-//         const duplicate = await BusinessProfileModel.findOne(dupQuery);
-//         if (duplicate) {
-//           if (req.file) deleteUploadedFile(req.file);
-//           const field =
-//             businessPhone && duplicate.businessPhone === businessPhone
-//               ? "Phone number"
-//               : "Email";
-//           return res.status(409).json({
-//             success: false,
-//             message: `${field} is already in use by another business profile`,
-//           });
-//         }
-//       }
-
-//       business = await BusinessProfileModel.findById(businessId);
-//       if (!business) {
-//         if (req.file) deleteUploadedFile(req.file);
-//         return res
-//           .status(404)
-//           .json({ success: false, message: "Business profile not found" });
-//       }
-
-//       // Only set fields if they're present (don't overwrite with undefined)
-//       if (businessName !== undefined) business.businessName = businessName;
-//       if (businessPhone !== undefined) business.businessPhone = businessPhone;
-//       if (city !== undefined) business.city = city;
-//       if (businessAddress !== undefined) business.businessAddress = businessAddress;
-//       if (pincode !== undefined) business.pincode = pincode;
-//       if (businessHSTNumber !== undefined) business.businessHSTNumber = businessHSTNumber;
-//       if (gst !== undefined) business.gst = gst;
-//       if (businessEmail !== undefined) business.businessEmail = businessEmail;
-//       if (parsedMapLocation) business.businessMapLocation = parsedMapLocation;
-//     }
-
-//     let parsedShopTypes;
-//     let removedServicesCount = 0;
-//     let removedServiceNames = [];
-//     const oldLogo = business.businessLogo;
-
-//     if (shopTypes !== undefined) {
-//       parsedShopTypes = shopTypes;
-//       if (typeof shopTypes === "string") {
-//         try {
-//           parsedShopTypes = JSON.parse(shopTypes);
-//         } catch {
-//           parsedShopTypes = shopTypes.split(",").map((s) => s.trim()).filter(Boolean);
-//         }
-//       }
-
-//       if (!Array.isArray(parsedShopTypes)) {
-//         if (req.file) deleteUploadedFile(req.file);
-//         return res.status(400).json({
-//           success: false,
-//           message: "shopTypes must be an array (or JSON/comma-separated string of shopTypes)",
-//         });
-//       }
-
-//       const validShopTypes = ["autoShop", "tyreShop", "carWash", "towTruck"];
-//       const invalid = parsedShopTypes.filter((st) => !validShopTypes.includes(st));
-//       if (invalid.length > 0) {
-//         if (req.file) deleteUploadedFile(req.file);
-//         return res.status(400).json({
-//           success: false,
-//           message: `Invalid shopType(s): ${invalid.join(", ")}. Valid values are: ${validShopTypes.join(", ")}`,
-//         });
-//       }
-
-//       if (!isNewBusinessProfile) {
-//         // ---- prune myServices whose service.shopType is no longer offered ----
-//         if (business.myServices && business.myServices.length > 0) {
-//           const serviceIds = business.myServices.map((ms) => ms.service);
-//           const servicesDocs = await servicesSchema
-//             .find({ _id: { $in: serviceIds } })
-//             .select("name shopType");
-
-//           const shopTypeByServiceId = new Map(
-//             servicesDocs.map((s) => [s._id.toString(), s.shopType])
-//           );
-
-//           const keptServices = [];
-//           const removedServices = [];
-
-//           for (const ms of business.myServices) {
-//             const svcShopType = shopTypeByServiceId.get(ms.service.toString());
-//             // Keep only if the service's shopType is still in the new shopTypes list.
-//             // If the service doc itself is missing/deleted, drop it too (defensive).
-//             if (svcShopType && parsedShopTypes.includes(svcShopType)) {
-//               keptServices.push(ms);
-//             } else {
-//               removedServices.push(ms);
-//             }
-//           }
-
-//           if (removedServices.length > 0) {
-//             business.myServices = keptServices;
-//             removedServicesCount = removedServices.length;
-//             removedServiceNames = removedServices.map((ms) => {
-//               const doc = servicesDocs.find(
-//                 (s) => s._id.toString() === ms.service.toString()
-//               );
-//               return doc ? doc.name : ms.service.toString();
-//             });
-//           }
-//         }
-//       }
-//       // -----------------------------------------------------------------------
-//       user.shopType = parsedShopTypes;
-//     }
-
-//     if (req.file) business.businessLogo = req.file.path;
-
-//     // ---- Set isAutoShopBusinessProfileComplete to true ----
-//     user.isAutoShopBusinessProfileComplete = true;
-//     // -------------------------------------------------------
-
-//     await business.save();
-//     if (typeof user.save === "function") await user.save();
-
-//     if (req.file && oldLogo && oldLogo !== business.businessLogo) deleteUploadedFile(oldLogo);
-
-//     return res.status(200).json({
-//       success: true,
-//       message:
-//         removedServicesCount > 0
-//           ? `Business profile updated successfully. ${removedServicesCount} service(s) removed as their shopType is no longer offered: ${removedServiceNames.join(", ")}`
-//           : isNewBusinessProfile
-//             ? "Business profile created and saved successfully"
-//             : "Business profile updated successfully",
-//       data: {
-//         businessName: business.businessName,
-//         businessPhone: business.businessPhone,
-//         city: business.city,
-//         businessAddress: business.businessAddress,
-//         pincode: business.pincode,
-//         businessHSTNumber: business.businessHSTNumber,
-//         gst: business.gst,
-//         businessEmail: business.businessEmail,
-//         businessLogo: business.businessLogo,
-//         businessMapLocation: business.businessMapLocation || null,
-//         shopTypes: user.shopType || [],
-//         removedServices: removedServiceNames,
-//       },
-//     });
-//   } catch (error) {
-//     if (req.file) deleteUploadedFile(req.file);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Failed to update business profile",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// /**
-//  * Update the invoiceTemplateSlug and jobCardTemplateSlug for the current user's business profile.
-//  * Expects { invoiceTemplateSlug, jobCardTemplateSlug } in req.body.
-//  * Only allowed for an authenticated user with a business profile.
-//  */
-// export const updateBusinessTemplateSlugs = async (req, res) => {
-//   try {
-//     const userId = req.user?.id;
-
-//     if (!userId) {
-//       return res.status(401).json({
-//         success: false,
-//         message: "Unauthorized. User ID missing from auth context."
-//       });
-//     }
-
-//     // Find user and get associated businessProfile
-//     const user = await User.findById(userId).select("businessProfile role");
-//     if (!user || !user.businessProfile) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "User or associated business profile not found"
-//       });
-//     }
-
-//     // Find the business profile document by ID
-//     const business = await BusinessProfileModel.findById(user.businessProfile);
-//     if (!business) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Business profile not found"
-//       });
-//     }
-
-//     const { invoiceTemplateSlug, jobCardTemplateSlug } = req.body;
-
-//     if (invoiceTemplateSlug !== undefined) business.invoiceTemplateSlug = invoiceTemplateSlug;
-//     if (jobCardTemplateSlug !== undefined) business.jobCardTemplateSlug = jobCardTemplateSlug;
-
-//     // At least one field should be present to update
-//     if (invoiceTemplateSlug === undefined && jobCardTemplateSlug === undefined) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "No template slug fields provided to update"
-//       });
-//     }
-
-//     await business.save();
-
-//     return res.status(200).json({
-//       success: true,
-//       message: "Template slugs updated successfully",
-//       data: {
-//         invoiceTemplateSlug: business.invoiceTemplateSlug,
-//         jobCardTemplateSlug: business.jobCardTemplateSlug
-//       }
-//     });
-//   } catch (error) {
-//     return res.status(500).json({
-//       success: false,
-//       message: "Failed to update template slugs",
-//       error: error?.message || error
-//     });
-//   }
-// };
-
 import mongoose from "mongoose";
  
  
@@ -1492,6 +268,131 @@ export const updatePersonalProfile = async (req, res) => {
 // };
  
  
+/**
+ * Complete the manual (self-service) Auto Shop Owner signup started via
+ * POST /api/auth/autoshopowner/signup + POST /api/auth/verify-otp.
+ *
+ * PUT /api/autoshopowner/profile/complete-signup   (jwtAuth required)
+ * multipart/form-data:
+ *   name         (owner's personal name, required)
+ *   businessName (required)
+ *   city         (required)
+ *   businessLogo (file, optional)
+ *
+ * If this account already has a BusinessProfile (e.g. it was created by
+ * Admin onboarding, or a previous call to this same endpoint), that
+ * profile is updated in place instead of creating a duplicate.
+ */
+export const completeAutoShopOwnerSignup = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      if (req.file) deleteUploadedFile(req.file);
+      return res.status(401).json({ success: false, message: "Unauthorized." });
+    }
+
+    const { name, businessName, city } = req.body;
+
+    if (!name || !String(name).trim()) {
+      if (req.file) deleteUploadedFile(req.file);
+      return res.status(400).json({ success: false, message: "name is required." });
+    }
+    if (!businessName || !String(businessName).trim()) {
+      if (req.file) deleteUploadedFile(req.file);
+      return res.status(400).json({ success: false, message: "businessName is required." });
+    }
+    if (!city || !String(city).trim()) {
+      if (req.file) deleteUploadedFile(req.file);
+      return res.status(400).json({ success: false, message: "city is required." });
+    }
+
+    const user = await User.findById(userId);
+    if (!user) {
+      if (req.file) deleteUploadedFile(req.file);
+      return res.status(404).json({ success: false, message: "User not found." });
+    }
+    if (user.role !== "autoshopowner") {
+      if (req.file) deleteUploadedFile(req.file);
+      return res.status(403).json({
+        success: false,
+        message: "Only auto shop owner accounts can complete a business profile here.",
+      });
+    }
+
+    // ── Check if a BusinessProfile already exists for this owner (e.g.
+    //    created earlier by Admin onboarding) — update it instead of
+    //    creating a duplicate. ─────────────────────────────────────────────
+    let business = user.businessProfile
+      ? await BusinessProfileModel.findById(user.businessProfile)
+      : null;
+
+    const isNewBusinessProfile = !business;
+    const oldLogo = business ? business.businessLogo : null;
+
+    if (!business) {
+      business = new BusinessProfileModel({
+        businessName: String(businessName).trim(),
+        city: String(city).trim(),
+        // Business phone is required on the schema — default to the
+        // owner's own signup phone; they can change it later from
+        // PUT /api/autoshopowner/profile/business.
+        businessPhone: user.phone,
+        businessEmail: user.email || undefined,
+      });
+    } else {
+      business.businessName = String(businessName).trim();
+      business.city = String(city).trim();
+      if (!business.businessPhone) business.businessPhone = user.phone;
+    }
+
+    if (req.file) business.businessLogo = req.file.path;
+
+    await business.save();
+
+    user.name = String(name).trim();
+    user.isProfileComplete = true;
+    user.isAutoShopBusinessProfileComplete = true;
+    if (!user.businessProfile) user.businessProfile = business._id;
+
+    await user.save();
+
+    if (req.file && oldLogo && oldLogo !== business.businessLogo) {
+      deleteUploadedFile(oldLogo);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: isNewBusinessProfile
+        ? "Signup completed and business profile created."
+        : "Signup completed and existing business profile updated.",
+      data: {
+        _id: user._id,
+        name: user.name,
+        phone: user.phone,
+        countryCode: user.countryCode,
+        role: user.role,
+        isProfileComplete: user.isProfileComplete,
+        isAutoShopBusinessProfileComplete: user.isAutoShopBusinessProfileComplete,
+        businessProfile: {
+          _id: business._id,
+          businessName: business.businessName,
+          city: business.city,
+          businessLogo: business.businessLogo,
+          businessPhone: business.businessPhone,
+        },
+      },
+    });
+  } catch (error) {
+    if (req.file) deleteUploadedFile(req.file);
+    console.error("[completeAutoShopOwnerSignup] Error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to complete signup.",
+      error: error.message,
+    });
+  }
+};
+
 export const getBusinessProfile = async (req, res) => {
   try {
     const userId = req.user.id;

@@ -15,6 +15,11 @@ authRouter.post("/sign-up-log-in", authController.signupAndLogin);
 // authRouter.post("/signin", authController.signin);
 authRouter.post("/verify-otp", authController.verifyAccount);
 
+// Manual Auto Shop Owner self-signup (creates the user + sends OTP).
+// Login reuses the same "/sign-up-log-in" + "/verify-otp" pair above,
+// since the shop owner already exists as a User after this succeeds.
+authRouter.post("/autoshopowner/signup", authController.autoShopOwnerSignup);
+
 authRouter.post("/", jwtAuth, authController.checkAuth);
 
 authRouter.put("/complete-profile", jwtAuth, authController.completeProfile);

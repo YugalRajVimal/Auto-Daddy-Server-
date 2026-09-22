@@ -999,7 +999,6 @@ class AutoShopController {
             // Validate user authentication
             if (!userId) {
                 if (req.files) deleteUploadedFiles(req.files);
-                console.log("[editBusinessProfile] Unauthorized: userId missing from auth context.");
                 return res.status(401).json({ message: "Unauthorized. User ID missing from auth context." });
             }
 
@@ -1007,20 +1006,17 @@ class AutoShopController {
             const user = await User.findById(userId);
             if (!user) {
                 if (req.files) deleteUploadedFiles(req.files);
-                console.log(`[editBusinessProfile] User not found for userId: ${userId}`);
                 return res.status(404).json({ message: "User not found." });
             }
 
             if (user.role !== "autoshopowner") {
                 if (req.files) deleteUploadedFiles(req.files);
-                console.log(`[editBusinessProfile] Forbidden: User role is not 'autoshopowner', got: ${user.role}`);
                 return res.status(403).json({ message: "Only users with role 'autoshopowner' can edit a business profile." });
             }
 
             // Must have an existing business profile
             if (!user.businessProfile) {
                 if (req.files) deleteUploadedFiles(req.files);
-                console.log(`[editBusinessProfile] Business profile not found for userId: ${userId}`);
                 return res.status(404).json({ message: "Business profile not found." });
             }
 
@@ -1028,7 +1024,6 @@ class AutoShopController {
             let businessProfile = await BusinessProfileModel.findById(user.businessProfile);
             if (!businessProfile) {
                 if (req.files) deleteUploadedFiles(req.files);
-                console.log(`[editBusinessProfile] Business profile document not found for id: ${user.businessProfile}`);
                 return res.status(404).json({ message: "Business profile not found." });
             }
 
@@ -1061,7 +1056,6 @@ class AutoShopController {
             }
             if (gst !== undefined && typeof gst !== "number") {
                 if (req.files) deleteUploadedFiles(req.files);
-                console.log("[editBusinessProfile] Invalid GST: Not a number.", gst);
                 return res.status(400).json({ message: "gst must be a number." });
             }
 
@@ -1084,13 +1078,11 @@ class AutoShopController {
                                 openHours = JSON.parse(openHours);
                             } catch (e2) {
                                 if (req.files) deleteUploadedFiles(req.files);
-                                console.log("[editBusinessProfile] Invalid openHours JSON format. Error:", e2);
                                 return res.status(400).json({ message: "Invalid openHours JSON format." });
                             }
                         } else {
                             // Not parsable
                             if (req.files) deleteUploadedFiles(req.files);
-                            console.log("[editBusinessProfile] Invalid openHours format: Not JSON and not parsable.");
                             return res.status(400).json({ message: "Invalid openHours format." });
                         }
                     }
@@ -1098,7 +1090,6 @@ class AutoShopController {
                 // Now it should be an array
                 if (!Array.isArray(openHours)) {
                     if (req.files) deleteUploadedFiles(req.files);
-                    console.log("[editBusinessProfile] openHours is not an array after parse.", openHours);
                     return res.status(400).json({ message: "openHours must be an array of objects with keys: day, open, close" });
                 }
                 perDayOpenHoursClean = [];
@@ -1108,7 +1099,6 @@ class AutoShopController {
                     // Validate day
                     if (!WEEK_DAYS.includes(day)) {
                         if (req.files) deleteUploadedFiles(req.files);
-                        console.log(`[editBusinessProfile] Invalid day in openHours: "${day}"`);
                         return res.status(400).json({ message: `Invalid day in openHours: "${day}". Allowed: ${WEEK_DAYS.join(", ")}` });
                     }
                     // Validate open/close: must be "HH:MM" string
@@ -1119,43 +1109,48 @@ class AutoShopController {
                         !close.match(/^\d{2}:\d{2}$/)
                     ) {
                         if (req.files) deleteUploadedFiles(req.files);
-                        console.log(`[editBusinessProfile] Invalid open/close time for day "${day}". open:`, open, "close:", close);
                         return res.status(400).json({
                             message: `Invalid open or close time for ${day}. Required "HH:MM" string format.`
                         });
                     }
                     perDayOpenHoursClean.push({ day, open, close });
                 }
-
-                // Print perDayOpenHours after cleaning/validation
-                console.log("[editBusinessProfile] perDayOpenHours (parsed/validated):", JSON.stringify(perDayOpenHoursClean, null, 2));
             }
 
             // Parse and validate serviceWeWorkWith field if present
             if (serviceWeWorkWith !== undefined) {
                 if (typeof serviceWeWorkWith === "string") {
+                    console.log("[serviceWeWorkWith check] Raw string value:", serviceWeWorkWith);
                     try {
                         const parsed = JSON.parse(serviceWeWorkWith);
-                        if (Array.isArray(parsed)) serviceWeWorkWith = parsed;
-                        else serviceWeWorkWith = [parsed];
-                    } catch {
+                        if (Array.isArray(parsed)) {
+                            console.log("[serviceWeWorkWith check] Parsed as array:", parsed);
+                            serviceWeWorkWith = parsed;
+                        } else {
+                            console.log("[serviceWeWorkWith check] Parsed as single value:", parsed);
+                            serviceWeWorkWith = [parsed];
+                        }
+                    } catch (err) {
+                        console.log("[serviceWeWorkWith check] Failed JSON.parse, splitting by comma");
                         serviceWeWorkWith = serviceWeWorkWith
                             .split(",")
                             .map(s => s.trim())
                             .filter(Boolean);
+                        console.log("[serviceWeWorkWith check] Split result:", serviceWeWorkWith);
                     }
                 }
                 if (!Array.isArray(serviceWeWorkWith)) {
+                    console.log("[serviceWeWorkWith check] Not an array after parsing. Value:", serviceWeWorkWith);
                     if (req.files) deleteUploadedFiles(req.files);
-                    console.log("[editBusinessProfile] serviceWeWorkWith is not array after parse:", serviceWeWorkWith);
                     return res.status(400).json({ message: "serviceWeWorkWith must be an array of service IDs." });
                 }
                 if (serviceWeWorkWith.some(id => typeof id !== "string" || !id.match(/^[a-f\d]{24}$/i))) {
+                    console.log("[serviceWeWorkWith check] Invalid ObjectId(s) found in:", serviceWeWorkWith);
                     if (req.files) deleteUploadedFiles(req.files);
-                    console.log("[editBusinessProfile] Invalid ObjectId in serviceWeWorkWith:", serviceWeWorkWith);
                     return res.status(400).json({ message: "Each entry in serviceWeWorkWith must be a valid ObjectId string." });
                 }
             }
+       
 
             // Handle businessLogo (multer upload)
             let businessLogo = businessProfile.businessLogo;
@@ -1167,7 +1162,6 @@ class AutoShopController {
             ) {
                 businessLogo = req.files.businessLogo[0].path;
                 filesToDelete.push(req.files.businessLogo[0]);
-                console.log("[editBusinessProfile] Uploaded/updated businessLogo:", businessLogo);
             }
 
             // Handle bannerImage (multer upload, allow replacement)
@@ -1180,10 +1174,8 @@ class AutoShopController {
             ) {
                 bannerImage = req.files.bannerImage[0].path;
                 filesToDelete.push(req.files.bannerImage[0]);
-                console.log("[editBusinessProfile] Uploaded/updated bannerImage:", bannerImage);
             } else if (typeof req.body.bannerImage === "string") {
                 bannerImage = req.body.bannerImage;
-                console.log("[editBusinessProfile] bannerImage string in body:", bannerImage);
             }
 
             // Prepare map location (overwrites prev if either lat/lng given)
@@ -1196,7 +1188,6 @@ class AutoShopController {
                 if (latDefined) businessMapLocation.lat = lat;
                 if (lngDefined) businessMapLocation.lng = lng;
                 if (Object.keys(businessMapLocation).length === 0) businessMapLocation = undefined;
-                console.log("[editBusinessProfile] Updated businessMapLocation:", businessMapLocation);
             }
 
             // Prepare update object (only allowed fields)
@@ -1228,8 +1219,6 @@ class AutoShopController {
             await session.commitTransaction();
             session.endSession();
 
-            console.log("[editBusinessProfile] Business profile updated for userId:", userId, "Updated fields:", Object.keys(updateData));
-
             return res.status(200).json({
                 success: true,
                 message: "Business profile updated successfully.",
@@ -1245,7 +1234,6 @@ class AutoShopController {
             }
             if (req.files) deleteUploadedFiles(req.files);
 
-            console.error("[editBusinessProfile] Error:", error);
             return res.status(500).json({ message: "Internal Server Error" });
         }
     }
