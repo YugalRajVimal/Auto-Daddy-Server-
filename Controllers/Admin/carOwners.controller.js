@@ -247,13 +247,14 @@ onboardCarOwner = async (req, res) => {
     }
 
     // ── Validation ──────────────────────────────────────────────────────────
-    // Optionally require city (uncomment line if city is required)
-    if (!name || !phone   || !role || !address /*|| !city*/) {
+    // Only phone + role are mandatory now. name/email/pincode/address/city
+    // are all optional — the car owner can fill these in later themselves.
+    if (!phone || !role) {
       await cleanupUploads();
       await session.abortTransaction();
       session.endSession();
       return res.status(400).json({
-        message: "All owner fields (name, phone,  role, address) are required.",
+        message: "phone and role are required.",
       });
     }
 
